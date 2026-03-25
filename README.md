@@ -78,8 +78,15 @@ pytest tests/test_compose_integration.py -v
 
 ## Git и CI
 
-- Это **отдельный** git-репозиторий: `git clone`, ветки и PR — здесь, в корне проекта.
-- GitHub Actions: **`.github/workflows/ci.yml`** — **pytest**, **ruff** и **сборка `web`** на каждый push/PR в ветки `main`, `master`, `develop`.
+- Это **отдельный** git-репозиторий: ветки и PR — в корне проекта (не внутри `Scripts` и т.п.).
+- Публикация на GitHub: создайте **пустой** репозиторий (без README), затем из корня каталога:
+
+```bash
+git remote add origin https://github.com/<user>/<repo>.git
+git push -u origin main
+```
+
+- GitHub Actions: **`.github/workflows/ci.yml`** — **pytest**, **ruff** и **сборка `web`** на push/PR в ветки `main`, `master`, `develop`.
 
 ## Правило «без лапши»
 
