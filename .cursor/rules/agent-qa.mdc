@@ -1,0 +1,11 @@
+---
+description: QA агенты — тесты и отчёты
+globs: tests/**,docs/reports/**
+alwaysApply: false
+---
+
+# Агенты 8–9 — QA
+
+- Интеграционные тесты в `tests/`; отчёты по шаблону из `AGENTS.md` в `docs/reports/`.
+- Регресс контрактов `api` ↔ `engine` при изменении `/internal/v1` или `/api/v1`.
+- Живой compose: маркер `@pytest.mark.integration`, файл `test_compose_integration.py`, вкл. `SEEDING_RUN_COMPOSE_TESTS=1`.

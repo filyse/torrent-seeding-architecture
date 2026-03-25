@@ -1,0 +1,10 @@
+---
+description: Агент десктоп Windows
+globs: desktop/**
+alwaysApply: false
+---
+
+# Агент 2 — десктоп
+
+- Конфиг API в `%APPDATA%` (или согласованный путь). Тот же контракт REST, что у веба.
+- Не встраивать URL внутренних сервисов Docker; только base URL пользовательского API.

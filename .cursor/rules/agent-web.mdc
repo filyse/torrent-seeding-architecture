@@ -1,0 +1,10 @@
+---
+description: Агент веб-клиента
+globs: web/**
+alwaysApply: false
+---
+
+# Агент 3 — веб
+
+- Только публичный API: относительный `/api/v1` (Docker: nginx прокси на `api`; dev: прокси в `vite.config.ts`). Нет прямого Redis/Postgres/engine.
+- Состояние UI синхронизировать с `/api/v1/` (poll / SSE / WS — по возможностям API).

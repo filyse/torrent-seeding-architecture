@@ -1,0 +1,118 @@
+# Черновик: сервисы и порты согласуются в docs/INTEGRATION.md
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: seeding
+      POSTGRES_PASSWORD: seeding
+      POSTGRES_DB: seeding
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seeding -d seeding"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Движок: в образе часто нет libtorrent → SEEDING_ENGINE_BACKEND=auto даст mock.
+  engine:
+    build:
+      context: ./engine
+      dockerfile: Dockerfile
+    environment:
+      ENGINE_HTTP_PORT: "8081"
+      SEEDING_DATA_ROOT: /data
+      SEEDING_ENGINE_BACKEND: auto
+      # При реальном libtorrent см. engine/README: LT_*, SEEDING_LT_STATE_FILE (состояние сессии на томе /data)
+    volumes:
+      - seeding_data:/data
+    ports:
+      - "6881:6881"
+      - "6881:6881/udp"
+      - "8081:8081"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=5).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://seeding:seeding@db:5432/seeding
+      ENGINE_URL: http://engine:8081
+      REDIS_URL: redis://redis:6379/0
+      # Опционально: SEEDING_API_KEYS=key1,key2 — тогда web нужен localStorage.seedingApiKey или клиент с X-API-Key
+      # Опционально: SEEDING_REQUIRE_ENGINE_FOR_DELETE=1 — DELETE /torrents без успешного ответа движка даёт 502 и не удаляет строку в БД (по умолчанию строка удаляется даже при недоступном движке)
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      engine:
+        condition: service_healthy
+
+  queue_worker:
+    build:
+      context: .
+      dockerfile: queue/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://seeding:seeding@db:5432/seeding
+      REDIS_URL: redis://redis:6379/0
+      ENGINE_URL: http://engine:8081
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      engine:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  seeding_data:

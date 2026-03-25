@@ -1,0 +1,11 @@
+---
+description: Агент API — FastAPI, публичное /api/v1
+globs: api/**
+alwaysApply: false
+---
+
+# Агент 4 — API
+
+- Публичные пути с префиксом `/api/v1/`. Ошибки — единый JSON (см. `api/README.md`).
+- Доступ к БД только через `seeding_db` (репозитории/сессии). К движку — через `httpx` и `ENGINE_URL`.
+- Не класть libtorrent и бизнес раздачи в HTTP-слой.

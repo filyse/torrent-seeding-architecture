@@ -1,0 +1,11 @@
+---
+description: Агент БД — seeding_db, Alembic, репозитории
+globs: db/**
+alwaysApply: false
+---
+
+# Агент 6 — БД
+
+- Схема только здесь; миграции через Alembic, без ручного `CREATE` в API/движке.
+- Не импортировать `api`, `engine`, `web`, `desktop`, `queue` из пакета `seeding_db`.
+- Репозитории принимают `AsyncSession`, не создают движок внутри методов.

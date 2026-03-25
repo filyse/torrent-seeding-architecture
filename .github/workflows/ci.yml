@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install packages
+        run: |
+          pip install -e "./db[dev]" -e "./api[test]" -e "./engine"
+      - name: Ruff
+        run: ruff check api db engine queue tests
+      - name: Pytest
+        run: pytest tests -q
+
+  web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: npm install and build
+        working-directory: web
+        run: |
+          npm install
+          npm run build

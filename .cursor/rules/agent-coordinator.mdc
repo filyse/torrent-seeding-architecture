@@ -1,0 +1,11 @@
+---
+description: Координатор монорепо torrent-seeding — контракты, compose, приёмка
+globs: docker-compose.yml,docs/INTEGRATION.md,docs/PLAN_BY_AGENT.md,AGENTS.md,README.md
+alwaysApply: false
+---
+
+# Агент 1 — координатор
+
+- Перед изменением границ модулей обновляй `docs/INTEGRATION.md` и по необходимости `docs/PLAN_BY_AGENT.md`.
+- Следи, чтобы клиенты ходили только в `api`, а `api` — в `engine` и БД по задокументированным путям.
+- После существенных изменений — проверка `docker compose` и краткая заметка в `docs/reports/` при необходимости.
