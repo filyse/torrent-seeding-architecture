@@ -73,6 +73,58 @@ class EngineClient:
         data = r.json()
         return data if isinstance(data, list) else []
 
+    async def list_files(self, db_id: int) -> list[dict]:
+        r = await self._client.get(f"/internal/v1/torrents/{db_id}/files")
+        if r.status_code == 404:
+            return []
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else []
+
+    async def set_file_priorities(self, db_id: int, priorities: dict[int, int]) -> bool:
+        r = await self._client.post(
+            f"/internal/v1/torrents/{db_id}/files/priorities",
+            json={"priorities": {str(k): v for k, v in priorities.items()}},
+        )
+        if r.status_code == 404:
+            return False
+        r.raise_for_status()
+        return True
+
+    async def list_trackers(self, db_id: int) -> list[dict]:
+        r = await self._client.get(f"/internal/v1/torrents/{db_id}/trackers")
+        if r.status_code == 404:
+            return []
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else []
+
+    async def recheck(self, db_id: int) -> bool:
+        r = await self._client.post(f"/internal/v1/torrents/{db_id}/recheck")
+        if r.status_code == 404:
+            return False
+        r.raise_for_status()
+        return True
+
+    async def reannounce(self, db_id: int) -> bool:
+        r = await self._client.post(f"/internal/v1/torrents/{db_id}/reannounce")
+        if r.status_code == 404:
+            return False
+        r.raise_for_status()
+        return True
+
+    async def set_limits(
+        self, db_id: int, download_limit: int | None, upload_limit: int | None
+    ) -> dict | None:
+        r = await self._client.post(
+            f"/internal/v1/torrents/{db_id}/limits",
+            json={"download_limit": download_limit, "upload_limit": upload_limit},
+        )
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
     async def remove_from_runtime(
         self,
         db_id: int,

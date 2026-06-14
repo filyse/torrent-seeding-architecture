@@ -8,7 +8,15 @@ from seeding_db.repository import TorrentRepository
 
 from seeding_api.deps import DbSession, EnginePoolDep
 from seeding_api.runtime_sync import merge_runtime_into_row
-from seeding_api.schemas import TorrentCreate, TorrentDetailOut, TorrentOut
+from seeding_api.schemas import (
+    FilePrioritiesIn,
+    LimitsIn,
+    TorrentCreate,
+    TorrentDetailOut,
+    TorrentFileOut,
+    TorrentOut,
+    TorrentTrackerOut,
+)
 
 log = logging.getLogger(__name__)
 
@@ -129,6 +137,102 @@ async def get_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDep):
     data["status"] = status
     data["runtime"] = runtime
     data["peer_list"] = peer_list
+    return TorrentDetailOut.model_validate(data)
+
+
+@router.get("/{torrent_id}/files", response_model=list[TorrentFileOut])
+async def list_torrent_files(torrent_id: int, session: DbSession, pool: EnginePoolDep):
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    try:
+        files = await pool.client_for_row(row).list_files(torrent_id)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    return [TorrentFileOut.model_validate(f) for f in files]
+
+
+@router.post("/{torrent_id}/files/priorities")
+async def set_torrent_file_priorities(
+    torrent_id: int, body: FilePrioritiesIn, session: DbSession, pool: EnginePoolDep
+):
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    try:
+        ok = await pool.client_for_row(row).set_file_priorities(torrent_id, body.priorities)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    if not ok:
+        raise HTTPException(status_code=409, detail="metadata not ready or torrent not in runtime")
+    return {"ok": True}
+
+
+@router.get("/{torrent_id}/trackers", response_model=list[TorrentTrackerOut])
+async def list_torrent_trackers(torrent_id: int, session: DbSession, pool: EnginePoolDep):
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    try:
+        trackers = await pool.client_for_row(row).list_trackers(torrent_id)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    return [TorrentTrackerOut.model_validate(t) for t in trackers]
+
+
+@router.post("/{torrent_id}/recheck")
+async def recheck_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDep):
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    try:
+        ok = await pool.client_for_row(row).recheck(torrent_id)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    if not ok:
+        raise HTTPException(status_code=409, detail="torrent not in runtime")
+    return {"ok": True}
+
+
+@router.post("/{torrent_id}/reannounce")
+async def reannounce_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDep):
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    try:
+        ok = await pool.client_for_row(row).reannounce(torrent_id)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    if not ok:
+        raise HTTPException(status_code=409, detail="torrent not in runtime")
+    return {"ok": True}
+
+
+@router.post("/{torrent_id}/limits", response_model=TorrentDetailOut)
+async def set_torrent_limits(
+    torrent_id: int, body: LimitsIn, session: DbSession, pool: EnginePoolDep
+):
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    try:
+        runtime = await pool.client_for_row(row).set_limits(
+            torrent_id, body.download_limit, body.upload_limit
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    if runtime is None:
+        raise HTTPException(status_code=409, detail="torrent not in runtime")
+    status = await merge_runtime_into_row(repo, row, runtime)
+    data = TorrentOut.model_validate(row).model_dump()
+    data["status"] = status
+    data["runtime"] = runtime
     return TorrentDetailOut.model_validate(data)
 
 

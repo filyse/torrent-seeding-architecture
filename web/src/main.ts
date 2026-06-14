@@ -28,6 +28,32 @@ type RuntimeOut = {
   upload_rate: number | null;
   total_uploaded: number | null;
   peers: number | null;
+  name?: string | null;
+  size?: number | null;
+  downloaded?: number | null;
+  num_seeds?: number | null;
+  ratio?: number | null;
+  eta?: number | null;
+  added_time?: number | null;
+  download_limit?: number | null;
+  upload_limit?: number | null;
+};
+
+type TorrentFileOut = {
+  index: number;
+  path: string;
+  size: number;
+  downloaded: number;
+  progress: number;
+  priority: number;
+};
+
+type TorrentTrackerOut = {
+  url: string;
+  tier: number;
+  message: string;
+  verified: boolean;
+  num_peers: number;
 };
 
 type TorrentPeerOut = {
@@ -52,20 +78,25 @@ let listLoadGeneration = 0;
 let lastListItems: TorrentOut[] = [];
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
-type DetailSpoilerKey = "peers" | "meta";
+type DetailSpoilerKey = "files" | "trackers" | "peers" | "meta";
 const detailSpoilerOpenById = new Map<number, Record<DetailSpoilerKey, boolean>>();
 
 function getDetailSpoilerState(torrentId: number): Record<DetailSpoilerKey, boolean> {
-  return detailSpoilerOpenById.get(torrentId) ?? { peers: false, meta: false };
+  return (
+    detailSpoilerOpenById.get(torrentId) ?? { files: false, trackers: false, peers: false, meta: false }
+  );
 }
 
 function saveDetailSpoilerStateFromDom(container: HTMLElement, torrentId: number): void {
   const cur = getDetailSpoilerState(torrentId);
-  const peers = container.querySelector('details[data-spoiler="peers"]') as HTMLDetailsElement | null;
-  const meta = container.querySelector('details[data-spoiler="meta"]') as HTMLDetailsElement | null;
+  const read = (key: DetailSpoilerKey) =>
+    (container.querySelector(`details[data-spoiler="${key}"]`) as HTMLDetailsElement | null)?.open ??
+    cur[key];
   detailSpoilerOpenById.set(torrentId, {
-    peers: peers?.open ?? cur.peers,
-    meta: meta?.open ?? cur.meta,
+    files: read("files"),
+    trackers: read("trackers"),
+    peers: read("peers"),
+    meta: read("meta"),
   });
 }
 
@@ -239,6 +270,40 @@ function fmtBytes(v: number | null | undefined): string {
   return `${n.toFixed(digits)} ${units[i]}`;
 }
 
+function fmtRatio(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v) || v < 0) return "—";
+  if (v >= 1000) return "∞";
+  return v.toFixed(2);
+}
+
+function fmtEta(seconds: number | null | undefined): string {
+  if (seconds == null || seconds <= 0 || !Number.isFinite(seconds)) return "—";
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (d > 0) return `${d}д ${h}ч`;
+  if (h > 0) return `${h}ч ${m}м`;
+  if (m > 0) return `${m}м ${s}с`;
+  return `${s}с`;
+}
+
+function fmtLimit(v: number | null | undefined): string {
+  if (v == null || v <= 0) return "∞";
+  return fmtRate(v);
+}
+
+const FILE_PRIORITY_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: "Не качать" },
+  { value: 1, label: "Низкий" },
+  { value: 4, label: "Обычный" },
+  { value: 7, label: "Высокий" },
+];
+
+async function postAction(path: string): Promise<void> {
+  await fetchJson(path, { method: "POST" });
+}
+
 function effectiveStatus(t: TorrentOut | TorrentDetailOut): string {
   const rs = (t.runtime?.runtime_status || "").toLowerCase();
   const lt = (t.runtime?.lt_state || "").toLowerCase();
@@ -346,6 +411,148 @@ function buildPeersSpoiler(peers: TorrentPeerOut[], torrentId: number): HTMLDeta
   return d;
 }
 
+function buildFilesSpoiler(files: TorrentFileOut[], torrentId: number, onChange: () => void): HTMLDetailsElement {
+  const inner = el("div", { className: "details-block__content" });
+  if (files.length === 0) {
+    inner.append(el("p", { className: "details-block__empty" }, ["Список файлов недоступен (нет метаданных)"]));
+    const empty = buildDetailsSpoiler("Файлы (0)", inner);
+    applyDetailSpoilerState(empty, torrentId, "files");
+    return empty;
+  }
+  const table = el("table", { className: "peer-table file-table" });
+  const headRow = el("tr");
+  for (const label of ["Файл", "Размер", "%", "Приоритет"]) headRow.append(el("th", {}, [label]));
+  const body = el("tbody");
+  for (const f of files) {
+    const row = el("tr");
+    const pct = `${Math.round((f.progress ?? 0) * 1000) / 10}%`;
+    const select = el("select", { className: "file-prio" }) as HTMLSelectElement;
+    for (const opt of FILE_PRIORITY_OPTIONS) {
+      const o = el("option", { value: String(opt.value) }, [opt.label]) as HTMLOptionElement;
+      if (opt.value === f.priority || (opt.value === 4 && f.priority > 0 && f.priority !== 1 && f.priority !== 7))
+        o.selected = true;
+      select.append(o);
+    }
+    select.addEventListener("change", async () => {
+      select.disabled = true;
+      try {
+        await fetchJson(`/torrents/${torrentId}/files/priorities`, {
+          method: "POST",
+          body: JSON.stringify({ priorities: { [f.index]: Number(select.value) } }),
+        });
+        showToast("Приоритет обновлён");
+        onChange();
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : String(e), true);
+        select.disabled = false;
+      }
+    });
+    row.append(
+      el("td", { className: "file-table__name" }, [f.path]),
+      el("td", { className: "peer-table__num" }, [fmtBytes(f.size)]),
+      el("td", { className: "peer-table__num" }, [pct]),
+      el("td", {}, [select]),
+    );
+    body.append(row);
+  }
+  table.append(el("thead", {}, [headRow]), body);
+  inner.append(table);
+  const d = buildDetailsSpoiler(`Файлы (${files.length})`, inner);
+  applyDetailSpoilerState(d, torrentId, "files");
+  return d;
+}
+
+function buildTrackersSpoiler(
+  trackers: TorrentTrackerOut[],
+  torrentId: number,
+  onReannounce: () => void,
+): HTMLDetailsElement {
+  const inner = el("div", { className: "details-block__content" });
+  const announceRow = el("div", { className: "btn-row" });
+  const annBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Переанонсировать"]);
+  annBtn.addEventListener("click", async () => {
+    annBtn.disabled = true;
+    try {
+      await postAction(`/torrents/${torrentId}/reannounce`);
+      showToast("Переанонс отправлен");
+      onReannounce();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      annBtn.disabled = false;
+    }
+  });
+  announceRow.append(annBtn);
+  inner.append(announceRow);
+
+  if (trackers.length === 0) {
+    inner.append(el("p", { className: "details-block__empty" }, ["Нет трекеров"]));
+  } else {
+    const table = el("table", { className: "peer-table" });
+    const headRow = el("tr");
+    for (const label of ["Трекер", "Сообщение", "Пиры", "✓"]) headRow.append(el("th", {}, [label]));
+    const body = el("tbody");
+    for (const t of trackers) {
+      const row = el("tr");
+      row.append(
+        el("td", { className: "peer-table__mono" }, [t.url]),
+        el("td", {}, [t.message || "—"]),
+        el("td", { className: "peer-table__num" }, [String(t.num_peers)]),
+        el("td", { className: "peer-table__num" }, [t.verified ? "✓" : "—"]),
+      );
+      body.append(row);
+    }
+    table.append(el("thead", {}, [headRow]), body);
+    inner.append(table);
+  }
+  const d = buildDetailsSpoiler(`Трекеры (${trackers.length})`, inner);
+  applyDetailSpoilerState(d, torrentId, "trackers");
+  return d;
+}
+
+function buildLimitsForm(data: TorrentDetailOut, onApplied: () => void): HTMLElement {
+  const wrap = el("div", { className: "limits-form" });
+  const toKb = (v: number | null | undefined) => (v && v > 0 ? String(Math.round(v / 1024)) : "");
+  const dlInput = el("input", {
+    type: "number",
+    min: "0",
+    placeholder: "∞",
+    value: toKb(data.runtime?.download_limit),
+  }) as HTMLInputElement;
+  const ulInput = el("input", {
+    type: "number",
+    min: "0",
+    placeholder: "∞",
+    value: toKb(data.runtime?.upload_limit),
+  }) as HTMLInputElement;
+  const applyBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Применить лимиты"]);
+  applyBtn.addEventListener("click", async () => {
+    applyBtn.disabled = true;
+    const parse = (s: string): number => {
+      const n = Number(s.trim());
+      return Number.isFinite(n) && n > 0 ? Math.round(n * 1024) : 0;
+    };
+    try {
+      await fetchJson(`/torrents/${data.id}/limits`, {
+        method: "POST",
+        body: JSON.stringify({ download_limit: parse(dlInput.value), upload_limit: parse(ulInput.value) }),
+      });
+      showToast("Лимиты применены");
+      onApplied();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      applyBtn.disabled = false;
+    }
+  });
+  wrap.append(
+    el("label", { className: "limits-form__field" }, ["↓ КБ/с", dlInput]),
+    el("label", { className: "limits-form__field" }, ["↑ КБ/с", ulInput]),
+    applyBtn,
+  );
+  return wrap;
+}
+
 function showDeleteTorrentDialog(torrent: { id: number; display_name?: string }): Promise<DeleteTorrentChoice> {
   return new Promise((resolve) => {
     const overlay = el("div", { className: "modal-overlay" });
@@ -438,12 +645,15 @@ function renderTorrentCard(t: TorrentOut, onChange: () => void): HTMLElement {
   });
   bar.append(barInner);
   const stats = el("div", { className: "torrent-card__stats" });
+  const sizeStr = t.runtime?.size ? fmtBytes(t.runtime.size) : null;
   stats.append(
-    document.createTextNode(`${fmtPercent(t.runtime?.progress)} · `),
+    document.createTextNode(`${fmtPercent(t.runtime?.progress)}${sizeStr ? ` из ${sizeStr}` : ""} · `),
     el("strong", {}, [`↓ ${fmtRate(t.runtime?.download_rate)}`]),
     document.createTextNode(" · "),
     el("strong", {}, [`↑ ${fmtRate(t.runtime?.upload_rate)}`]),
-    document.createTextNode(` · ${t.runtime?.peers ?? 0} пир.`),
+    document.createTextNode(
+      ` · R ${fmtRatio(t.runtime?.ratio)} · ${t.runtime?.num_seeds ?? 0}↑/${t.runtime?.peers ?? 0} пир.`,
+    ),
   );
   const actions = el("div", { className: "btn-row" });
   const pauseBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Пауза"]);
@@ -748,6 +958,14 @@ async function loadDetail(
     const data = await fetchJson<TorrentDetailOut>(`/torrents/${id}`, { signal });
     if (signal.aborted) return;
 
+    const [filesRes, trackersRes] = await Promise.allSettled([
+      fetchJson<TorrentFileOut[]>(`/torrents/${id}/files`, { signal }),
+      fetchJson<TorrentTrackerOut[]>(`/torrents/${id}/trackers`, { signal }),
+    ]);
+    if (signal.aborted) return;
+    const files = filesRes.status === "fulfilled" ? filesRes.value : [];
+    const trackers = trackersRes.status === "fulfilled" ? trackersRes.value : [];
+
     const active = isActivelyDownloading(data);
     metaEl.replaceChildren(
       el("span", { className: active ? "live-dot" : "live-dot live-dot--paused" }),
@@ -778,18 +996,48 @@ async function loadDetail(
       grid.append(box);
     };
     addStat("Прогресс", fmtPercent(data.runtime?.progress));
+    addStat("Размер", fmtBytes(data.runtime?.size));
     addStat("Скачивание", fmtRate(data.runtime?.download_rate));
     addStat("Отдача", fmtRate(data.runtime?.upload_rate));
     addStat("Отдано всего", fmtBytes(data.runtime?.total_uploaded));
-    addStat("Пиры", String(data.runtime?.peers ?? "—"));
+    addStat("Скачано всего", fmtBytes(data.runtime?.downloaded));
+    addStat("Рейтинг", fmtRatio(data.runtime?.ratio));
+    addStat("Сиды / пиры", `${data.runtime?.num_seeds ?? 0} / ${data.runtime?.peers ?? 0}`);
+    addStat("ETA", fmtEta(data.runtime?.eta));
+    addStat("Лимиты ↓/↑", `${fmtLimit(data.runtime?.download_limit)} / ${fmtLimit(data.runtime?.upload_limit)}`);
     addStat("Папка", data.save_path);
     addStat("Статус", displayStatusLabel(data));
 
     const actions = el("div", { className: "btn-row" });
     const pauseBtn = el("button", { type: "button", className: "btn" }, ["Пауза"]);
     const resumeBtn = el("button", { type: "button", className: "btn btn--primary" }, ["Старт"]);
+    const recheckBtn = el("button", { type: "button", className: "btn" }, ["Проверить"]);
+    const reannounceBtn = el("button", { type: "button", className: "btn" }, ["Переанонс"]);
     const delBtn = el("button", { type: "button", className: "btn btn--danger" }, ["Удалить"]);
     const backRefresh = () => loadDetail(id, container, metaEl, scheduleNext);
+
+    recheckBtn.addEventListener("click", async () => {
+      recheckBtn.disabled = true;
+      try {
+        await postAction(`/torrents/${id}/recheck`);
+        showToast("Запущена проверка хеша");
+        await backRefresh();
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : String(e), true);
+        recheckBtn.disabled = false;
+      }
+    });
+    reannounceBtn.addEventListener("click", async () => {
+      reannounceBtn.disabled = true;
+      try {
+        await postAction(`/torrents/${id}/reannounce`);
+        showToast("Переанонс отправлен");
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : String(e), true);
+      } finally {
+        reannounceBtn.disabled = false;
+      }
+    });
 
     pauseBtn.addEventListener("click", async () => {
       try {
@@ -815,7 +1063,7 @@ async function loadDetail(
     });
     if (data.status === "paused") pauseBtn.disabled = true;
     else resumeBtn.disabled = true;
-    actions.append(pauseBtn, resumeBtn, delBtn);
+    actions.append(pauseBtn, resumeBtn, recheckBtn, reannounceBtn, delBtn);
 
     body.append(
       el("span", { className: badgeClass(effectiveStatus(data)) }, [displayStatusLabel(data)]),
@@ -823,6 +1071,9 @@ async function loadDetail(
       bar,
       grid,
       actions,
+      buildLimitsForm(data, () => void backRefresh()),
+      buildFilesSpoiler(files, id, () => void backRefresh()),
+      buildTrackersSpoiler(trackers, id, () => void backRefresh()),
       buildPeersSpoiler(data.peer_list ?? [], id),
       (() => {
         const pre = el("pre", {});

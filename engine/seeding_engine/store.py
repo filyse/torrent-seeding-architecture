@@ -15,6 +15,16 @@ class RuntimeHandle:
     upload_rate: int | None = None  # bytes/sec
     total_uploaded: int | None = None  # bytes, за всё время раздачи
     peers: int | None = None
+    # Расширенные метрики (паритет с ruTorrent)
+    name: str | None = None
+    size: int | None = None  # total_wanted, bytes
+    downloaded: int | None = None  # all_time_download, bytes
+    num_seeds: int | None = None
+    ratio: float | None = None  # uploaded / downloaded
+    eta: int | None = None  # секунды до завершения (None если раздача/неизвестно)
+    added_time: int | None = None  # epoch seconds
+    download_limit: int | None = None  # bytes/sec, 0 = без лимита
+    upload_limit: int | None = None  # bytes/sec, 0 = без лимита
 
 
 class RuntimeStore:

@@ -37,6 +37,41 @@ class RuntimeHandleOut(BaseModel):
     upload_rate: int | None = None
     total_uploaded: int | None = None
     peers: int | None = None
+    name: str | None = None
+    size: int | None = None
+    downloaded: int | None = None
+    num_seeds: int | None = None
+    ratio: float | None = None
+    eta: int | None = None
+    added_time: int | None = None
+    download_limit: int | None = None
+    upload_limit: int | None = None
+
+
+class TorrentFileOut(BaseModel):
+    index: int
+    path: str
+    size: int
+    downloaded: int
+    progress: float
+    priority: int
+
+
+class TorrentTrackerOut(BaseModel):
+    url: str
+    tier: int = 0
+    message: str = ""
+    verified: bool = False
+    num_peers: int = 0
+
+
+class FilePrioritiesIn(BaseModel):
+    priorities: dict[int, int]
+
+
+class LimitsIn(BaseModel):
+    download_limit: int | None = None
+    upload_limit: int | None = None
 
 
 def get_runtime(request: Request):
@@ -101,6 +136,56 @@ async def list_runtime_peers(request: Request, db_id: int):
     rt = get_runtime(request)
     rows = await rt.list_peers(db_id)
     return [TorrentPeerOut.model_validate(r) for r in rows]
+
+
+@router.get("/torrents/{db_id}/files", response_model=list[TorrentFileOut])
+async def list_runtime_files(request: Request, db_id: int):
+    rt = get_runtime(request)
+    rows = await rt.list_files(db_id)
+    return [TorrentFileOut.model_validate(r) for r in rows]
+
+
+@router.post("/torrents/{db_id}/files/priorities")
+async def set_runtime_file_priorities(request: Request, db_id: int, body: FilePrioritiesIn):
+    rt = get_runtime(request)
+    ok = await rt.set_file_priorities(db_id, body.priorities)
+    if not ok:
+        raise HTTPException(status_code=404, detail="torrent not in runtime or metadata not ready")
+    return {"ok": True}
+
+
+@router.get("/torrents/{db_id}/trackers", response_model=list[TorrentTrackerOut])
+async def list_runtime_trackers(request: Request, db_id: int):
+    rt = get_runtime(request)
+    rows = await rt.list_trackers(db_id)
+    return [TorrentTrackerOut.model_validate(r) for r in rows]
+
+
+@router.post("/torrents/{db_id}/recheck")
+async def recheck_runtime_torrent(request: Request, db_id: int):
+    rt = get_runtime(request)
+    ok = await rt.recheck(db_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="torrent not in engine runtime")
+    return {"ok": True}
+
+
+@router.post("/torrents/{db_id}/reannounce")
+async def reannounce_runtime_torrent(request: Request, db_id: int):
+    rt = get_runtime(request)
+    ok = await rt.reannounce(db_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="torrent not in engine runtime")
+    return {"ok": True}
+
+
+@router.post("/torrents/{db_id}/limits", response_model=RuntimeHandleOut)
+async def set_runtime_limits(request: Request, db_id: int, body: LimitsIn):
+    rt = get_runtime(request)
+    h = await rt.set_limits(db_id, body.download_limit, body.upload_limit)
+    if h is None:
+        raise HTTPException(status_code=404, detail="torrent not in engine runtime")
+    return RuntimeHandleOut.model_validate(h)
 
 
 @router.get("/torrents/{db_id}/debug")

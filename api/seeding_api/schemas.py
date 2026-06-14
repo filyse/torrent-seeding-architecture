@@ -51,6 +51,41 @@ class TorrentRuntimeOut(BaseModel):
     upload_rate: int | None = None
     total_uploaded: int | None = None
     peers: int | None = None
+    name: str | None = None
+    size: int | None = None
+    downloaded: int | None = None
+    num_seeds: int | None = None
+    ratio: float | None = None
+    eta: int | None = None
+    added_time: int | None = None
+    download_limit: int | None = None
+    upload_limit: int | None = None
+
+
+class TorrentFileOut(BaseModel):
+    index: int
+    path: str
+    size: int
+    downloaded: int
+    progress: float
+    priority: int
+
+
+class TorrentTrackerOut(BaseModel):
+    url: str
+    tier: int = 0
+    message: str = ""
+    verified: bool = False
+    num_peers: int = 0
+
+
+class FilePrioritiesIn(BaseModel):
+    priorities: dict[int, int]
+
+
+class LimitsIn(BaseModel):
+    download_limit: int | None = Field(default=None, ge=0)
+    upload_limit: int | None = Field(default=None, ge=0)
 
 
 class TorrentDetailOut(TorrentOut):

@@ -125,6 +125,26 @@ class TorrentRuntime(ABC):
     async def list_peers(self, db_id: int) -> list[dict[str, object]]:
         return []
 
+    async def list_files(self, db_id: int) -> list[dict[str, object]]:
+        return []
+
+    async def set_file_priorities(self, db_id: int, priorities: dict[int, int]) -> bool:
+        return False
+
+    async def list_trackers(self, db_id: int) -> list[dict[str, object]]:
+        return []
+
+    async def recheck(self, db_id: int) -> bool:
+        return False
+
+    async def reannounce(self, db_id: int) -> bool:
+        return False
+
+    async def set_limits(
+        self, db_id: int, download_limit: int | None, upload_limit: int | None
+    ) -> RuntimeHandle | None:
+        return None
+
 
 class MockTorrentRuntime(TorrentRuntime):
     backend_name = "mock"
@@ -638,12 +658,49 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     paused = bool(h.flags() & lt.torrent_flags.paused)
                 except Exception:  # noqa: BLE001
                     pass
-            return st, str(ih), paused
+            dl_limit = None
+            up_limit = None
+            try:
+                dl_limit = int(h.download_limit())
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                up_limit = int(h.upload_limit())
+            except Exception:  # noqa: BLE001
+                pass
+            return st, str(ih), paused, dl_limit, up_limit
 
-        st, ih_hex, paused = await asyncio.to_thread(_read)
+        st, ih_hex, paused, dl_limit, up_limit = await asyncio.to_thread(_read)
         zero = "0" * 40
         if not ih_hex or ih_hex == zero:
             ih_hex = None
+
+        uploaded = _total_bytes_from_status(st, "total_upload", "all_time_upload")
+        downloaded = _total_bytes_from_status(st, "all_time_download", "total_download")
+        size = _total_bytes_from_status(st, "total_wanted", "total")
+        done = _total_bytes_from_status(st, "total_wanted_done", "total_done")
+        dl_rate = int(getattr(st, "download_payload_rate", 0) or 0)
+        lt_state = _state_label(lt, st)
+
+        ratio: float | None = None
+        if uploaded is not None and downloaded:
+            ratio = round(uploaded / downloaded, 4)
+        # downloaded == 0 (импорт с сидбокса): рейтинг не определён → None (в UI «—»)
+
+        eta: int | None = None
+        if lt_state not in ("seeding", "finished") and dl_rate > 0 and size is not None and done is not None:
+            remaining = size - done
+            if remaining > 0:
+                eta = int(remaining / dl_rate)
+
+        added_time = None
+        raw_added = getattr(st, "added_time", None)
+        if raw_added is not None:
+            try:
+                added_time = int(raw_added)
+            except (TypeError, ValueError):
+                added_time = None
+
         return RuntimeHandle(
             db_id=db_id,
             magnet_uri=magnet_uri,
@@ -651,11 +708,20 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             runtime_status="paused" if paused else "active",
             info_hash=ih_hex,
             progress=float(st.progress),
-            lt_state=_state_label(lt, st),
-            download_rate=int(getattr(st, "download_payload_rate", 0) or 0),
+            lt_state=lt_state,
+            download_rate=dl_rate,
             upload_rate=int(getattr(st, "upload_payload_rate", 0) or 0),
-            total_uploaded=_total_bytes_from_status(st, "total_upload", "all_time_upload"),
+            total_uploaded=uploaded,
             peers=int(getattr(st, "num_peers", 0) or 0),
+            name=str(getattr(st, "name", "") or "") or None,
+            size=size,
+            downloaded=downloaded,
+            num_seeds=int(getattr(st, "num_seeds", 0) or 0),
+            ratio=ratio,
+            eta=eta,
+            added_time=added_time,
+            download_limit=dl_limit,
+            upload_limit=up_limit,
         )
 
     async def pause(self, db_id: int) -> RuntimeHandle | None:
@@ -752,6 +818,159 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             return [_peer_to_dict(p) for p in raw]
 
         return await asyncio.to_thread(_read)
+
+    async def list_files(self, db_id: int) -> list[dict[str, object]]:
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None:
+            return []
+
+        def _read() -> list[dict[str, object]]:
+            ti = h.torrent_file() if callable(getattr(h, "torrent_file", None)) else None
+            if ti is None:
+                return []  # метаданные ещё не получены (magnet)
+            files = ti.files()
+            n = files.num_files()
+            try:
+                progress = list(h.file_progress())
+            except Exception:  # noqa: BLE001
+                progress = [0] * n
+            try:
+                prios = list(h.get_file_priorities())
+            except Exception:  # noqa: BLE001
+                try:
+                    prios = list(h.file_priorities())
+                except Exception:  # noqa: BLE001
+                    prios = [4] * n
+            out: list[dict[str, object]] = []
+            for i in range(n):
+                size = int(files.file_size(i))
+                done = int(progress[i]) if i < len(progress) else 0
+                out.append(
+                    {
+                        "index": i,
+                        "path": str(files.file_path(i)),
+                        "size": size,
+                        "downloaded": done,
+                        "progress": (done / size) if size > 0 else 1.0,
+                        "priority": int(prios[i]) if i < len(prios) else 4,
+                    }
+                )
+            return out
+
+        return await asyncio.to_thread(_read)
+
+    async def set_file_priorities(self, db_id: int, priorities: dict[int, int]) -> bool:
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None:
+            return False
+        lt = self._lt
+
+        def _apply() -> bool:
+            ti = h.torrent_file() if callable(getattr(h, "torrent_file", None)) else None
+            if ti is None:
+                return False
+            n = ti.files().num_files()
+            try:
+                cur = list(h.get_file_priorities())
+            except Exception:  # noqa: BLE001
+                cur = [4] * n
+            for idx, prio in priorities.items():
+                if 0 <= idx < n:
+                    cur[idx] = max(0, min(7, int(prio)))
+            try:
+                h.prioritize_files(cur)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                log.warning("prioritize_files db_id=%s: %s", db_id, exc)
+                return False
+
+        ok = await asyncio.to_thread(_apply)
+        if ok:
+            await asyncio.to_thread(save_fastresume, lt, h, db_id)
+        return ok
+
+    async def list_trackers(self, db_id: int) -> list[dict[str, object]]:
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None or not hasattr(h, "trackers"):
+            return []
+
+        def _read() -> list[dict[str, object]]:
+            out: list[dict[str, object]] = []
+            try:
+                for tr in h.trackers():
+                    out.append(
+                        {
+                            "url": str(tr.get("url") if isinstance(tr, dict) else getattr(tr, "url", tr)),
+                            "tier": int(
+                                tr.get("tier", 0) if isinstance(tr, dict) else getattr(tr, "tier", 0) or 0
+                            ),
+                            "message": str(
+                                tr.get("message", "")
+                                if isinstance(tr, dict)
+                                else getattr(tr, "message", "") or ""
+                            ),
+                            "verified": bool(
+                                tr.get("verified", False)
+                                if isinstance(tr, dict)
+                                else getattr(tr, "verified", False)
+                            ),
+                            "num_peers": int(
+                                tr.get("num_peers", 0)
+                                if isinstance(tr, dict)
+                                else getattr(tr, "num_peers", 0) or 0
+                            ),
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001
+                log.debug("trackers db_id=%s: %s", db_id, exc)
+            return out
+
+        return await asyncio.to_thread(_read)
+
+    async def recheck(self, db_id: int) -> bool:
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None or not hasattr(h, "force_recheck"):
+            return False
+        await asyncio.to_thread(h.force_recheck)
+        return True
+
+    async def reannounce(self, db_id: int) -> bool:
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None or not hasattr(h, "force_reannounce"):
+            return False
+
+        def _ann():
+            try:
+                h.force_reannounce(0)
+            except TypeError:
+                h.force_reannounce()
+
+        await asyncio.to_thread(_ann)
+        return True
+
+    async def set_limits(
+        self, db_id: int, download_limit: int | None, upload_limit: int | None
+    ) -> RuntimeHandle | None:
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None:
+            return None
+        lt = self._lt
+
+        def _apply():
+            if download_limit is not None and hasattr(h, "set_download_limit"):
+                h.set_download_limit(max(0, int(download_limit)))
+            if upload_limit is not None and hasattr(h, "set_upload_limit"):
+                h.set_upload_limit(max(0, int(upload_limit)))
+
+        await asyncio.to_thread(_apply)
+        await asyncio.to_thread(save_fastresume, lt, h, db_id)
+        return await self._snapshot(db_id)
 
     async def list_all(self) -> list[RuntimeHandle]:
         async with self._lock:

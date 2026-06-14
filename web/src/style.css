@@ -603,3 +603,43 @@ body {
   clip: rect(0, 0, 0, 0);
   border: 0;
 }
+
+/* Файлы / лимиты / трекеры (паритет с ruTorrent) */
+.limits-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+  margin: 0.75rem 0;
+}
+
+.limits-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.limits-form__field input {
+  width: 7rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+}
+
+.file-table__name {
+  word-break: break-all;
+  max-width: 28rem;
+}
+
+.file-prio {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  font-size: 0.8rem;
+}
