@@ -5,9 +5,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from seeding_engine.fastresume_io import (
+    delete_fastresume,
+    ensure_engine_dirs,
+    fastresume_path,
+    save_fastresume,
+    session_state_path,
+    try_read_resume_params,
+)
 from seeding_engine.store import RuntimeHandle, RuntimeStore
 
 log = logging.getLogger(__name__)
@@ -22,12 +31,15 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def _apply_libtorrent_session_settings(lt, ses) -> None:
     """DHT/LSD/UPnP/NAT-PMP и лимиты из env (разные версии биндингов — best effort)."""
+    listen_ifs = os.getenv("LT_LISTEN_INTERFACES", "0.0.0.0:51413,[::]:51413").strip()
     settings: dict[str, object] = {
         "enable_dht": _env_bool("LT_ENABLE_DHT", True),
         "enable_lsd": _env_bool("LT_ENABLE_LSD", True),
         "enable_upnp": _env_bool("LT_ENABLE_UPNP", True),
         "enable_natpmp": _env_bool("LT_ENABLE_NATPMP", True),
     }
+    if listen_ifs:
+        settings["listen_interfaces"] = listen_ifs
     dl = os.getenv("LT_DOWNLOAD_RATE_LIMIT_BPS", "").strip()
     if dl != "":
         try:
@@ -80,7 +92,13 @@ class TorrentRuntime(ABC):
     async def stop(self) -> None: ...
 
     @abstractmethod
-    async def add_torrent(self, db_id: int, magnet_uri: str | None, save_path: str) -> RuntimeHandle: ...
+    async def add_torrent(
+        self,
+        db_id: int,
+        magnet_uri: str | None,
+        save_path: str,
+        torrent_data: bytes | None = None,
+    ) -> RuntimeHandle: ...
 
     @abstractmethod
     async def pause(self, db_id: int) -> RuntimeHandle | None: ...
@@ -95,7 +113,17 @@ class TorrentRuntime(ABC):
     async def list_all(self) -> list[RuntimeHandle]: ...
 
     @abstractmethod
-    async def remove(self, db_id: int) -> bool: ...
+    async def remove(
+        self,
+        db_id: int,
+        *,
+        delete_files: bool = False,
+        save_path: str | None = None,
+        display_name: str | None = None,
+    ) -> bool: ...
+
+    async def list_peers(self, db_id: int) -> list[dict[str, object]]:
+        return []
 
 
 class MockTorrentRuntime(TorrentRuntime):
@@ -110,7 +138,13 @@ class MockTorrentRuntime(TorrentRuntime):
     async def stop(self) -> None:
         pass
 
-    async def add_torrent(self, db_id: int, magnet_uri: str | None, save_path: str) -> RuntimeHandle:
+    async def add_torrent(
+        self,
+        db_id: int,
+        magnet_uri: str | None,
+        save_path: str,
+        torrent_data: bytes | None = None,
+    ) -> RuntimeHandle:
         return self._store.upsert(db_id, magnet_uri, save_path)
 
     async def pause(self, db_id: int) -> RuntimeHandle | None:
@@ -125,8 +159,127 @@ class MockTorrentRuntime(TorrentRuntime):
     async def list_all(self) -> list[RuntimeHandle]:
         return self._store.list_all()
 
-    async def remove(self, db_id: int) -> bool:
+    async def remove(
+        self,
+        db_id: int,
+        *,
+        delete_files: bool = False,
+        save_path: str | None = None,
+        display_name: str | None = None,
+    ) -> bool:
         return self._store.remove(db_id)
+
+
+def _peer_bool(peer, name: str) -> bool:
+    val = getattr(peer, name, None)
+    if val is None or callable(val):
+        return False
+    return bool(val)
+
+
+def _format_peer_endpoint(peer) -> str:
+    ip = getattr(peer, "ip", None)
+    if ip is None:
+        return ""
+    if hasattr(ip, "address") and hasattr(ip, "port"):
+        try:
+            addr = ip.address()
+            port = ip.port()
+            return f"{addr}:{port}"
+        except Exception:  # noqa: BLE001
+            pass
+    s = str(ip).strip()
+    if s.startswith("(") and "," in s:
+        import ast
+
+        try:
+            parts = ast.literal_eval(s)
+            if isinstance(parts, (tuple, list)) and len(parts) >= 2:
+                return f"{parts[0]}:{parts[1]}"
+        except (SyntaxError, ValueError):
+            pass
+    return s
+
+
+def _format_peer_flags(peer) -> str | None:
+    labels: list[str] = []
+    for name in (
+        "seed",
+        "upload_only",
+        "interesting",
+        "choked",
+        "remote_interested",
+        "remote_choked",
+        "outgoing_connection",
+        "local_connection",
+        "utp_socket",
+        "ssl_socket",
+        "holepunched",
+        "connecting",
+    ):
+        if _peer_bool(peer, name):
+            labels.append(name)
+    if labels:
+        return ", ".join(labels)
+    flags = getattr(peer, "flags", None)
+    if flags is not None:
+        try:
+            return hex(int(flags))
+        except (TypeError, ValueError):
+            return str(flags)
+    return None
+
+
+def _peer_to_dict(peer) -> dict[str, object]:
+    progress: float | None = None
+    if hasattr(peer, "progress"):
+        try:
+            progress = float(peer.progress)
+        except (TypeError, ValueError):
+            progress = None
+    elif hasattr(peer, "progress_ppm"):
+        try:
+            progress = float(peer.progress_ppm) / 1_000_000.0
+        except (TypeError, ValueError):
+            progress = None
+
+    down = int(
+        getattr(peer, "down_speed", 0)
+        or getattr(peer, "payload_down_speed", 0)
+        or getattr(peer, "download_rate", 0)
+        or 0
+    )
+    up = int(
+        getattr(peer, "up_speed", 0)
+        or getattr(peer, "payload_up_speed", 0)
+        or getattr(peer, "upload_rate", 0)
+        or 0
+    )
+    client = str(getattr(peer, "client", "") or "").strip() or None
+    source = str(getattr(peer, "source", "") or "").strip() or None
+    return {
+        "endpoint": _format_peer_endpoint(peer),
+        "client": client,
+        "progress": progress,
+        "download_rate": down,
+        "upload_rate": up,
+        "flags": _format_peer_flags(peer),
+        "source": source,
+    }
+
+
+def _total_bytes_from_status(st, *names: str) -> int | None:
+    for name in names:
+        val = getattr(st, name, None)
+        if val is None:
+            continue
+        try:
+            n = int(val)
+        except (TypeError, ValueError):
+            continue
+        if n >= 0:
+            return n
+    return None
 
 
 def _state_label(lt, st) -> str:
@@ -155,14 +308,15 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self._lock = asyncio.Lock()
         self._handles: dict[int, object] = {}
         self._meta: dict[int, tuple[str | None, str]] = {}
-        self._listen_low = int(os.getenv("LT_LISTEN_PORT_LOW", "6881"))
-        self._listen_high = int(os.getenv("LT_LISTEN_PORT_HIGH", "6889"))
-        raw_state = os.getenv("SEEDING_LT_STATE_FILE", "").strip()
-        self._state_path: str | None = raw_state or None
+        self._listen_low = int(os.getenv("LT_LISTEN_PORT_LOW", "51413"))
+        self._listen_high = int(os.getenv("LT_LISTEN_PORT_HIGH", "51413"))
+        sp = session_state_path()
+        self._state_path: str | None = str(sp) if sp else None
 
     async def start(self) -> None:
         lt = self._lt
         state_path = self._state_path
+        ensure_engine_dirs()
 
         def _mk():
             s = lt.session()
@@ -172,8 +326,9 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     s.load_state(lt.bdecode(blob))
                 except Exception as exc:  # noqa: BLE001
                     log.warning("libtorrent load_state: %s", exc)
-            s.listen_on(self._listen_low, self._listen_high)
             _apply_libtorrent_session_settings(lt, s)
+            if not os.getenv("LT_LISTEN_INTERFACES", "").strip():
+                s.listen_on(self._listen_low, self._listen_high)
             return s
 
         async with self._lock:
@@ -188,11 +343,15 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         state_path = self._state_path
         async with self._lock:
             ses = self._ses
+            handles = dict(self._handles)
             self._ses = None
             self._handles.clear()
             self._meta.clear()
             if ses is None:
                 return
+
+        for db_id, h in handles.items():
+            await asyncio.to_thread(save_fastresume, lt, h, db_id)
 
         def _shutdown(ses_inner=ses):
             if state_path:
@@ -216,9 +375,17 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         await asyncio.to_thread(_shutdown)
         log.info("libtorrent session stopped")
 
-    async def add_torrent(self, db_id: int, magnet_uri: str | None, save_path: str) -> RuntimeHandle:
-        if not magnet_uri or not magnet_uri.startswith("magnet:"):
-            raise ValueError("magnet_uri required and must start with magnet:")
+    async def add_torrent(
+        self,
+        db_id: int,
+        magnet_uri: str | None,
+        save_path: str,
+        torrent_data: bytes | None = None,
+    ) -> RuntimeHandle:
+        has_magnet = bool(magnet_uri and magnet_uri.startswith("magnet:"))
+        has_file = bool(torrent_data)
+        if not has_magnet and not has_file:
+            raise ValueError("either magnet_uri or torrent_data is required")
         lt = self._lt
         async with self._lock:
             if self._ses is None:
@@ -227,9 +394,31 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
 
         Path(save_path).mkdir(parents=True, exist_ok=True)
 
+        fr = fastresume_path(db_id)
+        if fr.is_file():
+            try:
+                h = await self._add_from_fastresume(db_id, save_path, magnet_uri, fr)
+                async with self._lock:
+                    self._handles[db_id] = h
+                    self._meta[db_id] = (magnet_uri, save_path)
+                return await self._snapshot(db_id)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("fastresume add db_id=%s failed, fallback: %s", db_id, exc)
+
         def _add():
-            p = lt.add_torrent_params()
-            lt.parse_magnet_uri(magnet_uri, p)
+            if has_magnet and magnet_uri:
+                # libtorrent 2.x: parse_magnet_uri(str) -> add_torrent_params
+                try:
+                    p = lt.parse_magnet_uri(magnet_uri)
+                except TypeError:
+                    p = lt.add_torrent_params()
+                    lt.parse_magnet_uri(magnet_uri, p)
+            else:
+                p = lt.add_torrent_params()
+                try:
+                    p.ti = lt.torrent_info(lt.bdecode(torrent_data))
+                except Exception as exc:  # noqa: BLE001
+                    raise ValueError(f"invalid .torrent data: {exc}") from exc
             p.save_path = save_path
             return ses.add_torrent(p)
 
@@ -238,10 +427,197 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"add_torrent failed: {exc}") from exc
 
+        def _kickstart(handle):
+            if hasattr(handle, "resume"):
+                handle.resume()
+            if hasattr(handle, "force_reannounce"):
+                try:
+                    handle.force_reannounce(0)
+                except TypeError:
+                    handle.force_reannounce()
+
+        await asyncio.to_thread(_kickstart, h)
+
+        if has_file and torrent_data:
+            await asyncio.to_thread(self._persist_torrent_file, db_id, torrent_data)
+
         async with self._lock:
             self._handles[db_id] = h
             self._meta[db_id] = (magnet_uri, save_path)
+        await asyncio.to_thread(save_fastresume, lt, h, db_id)
         return await self._snapshot(db_id)
+
+    async def _add_from_fastresume(
+        self,
+        db_id: int,
+        save_path: str,
+        magnet_uri: str | None,
+        fr_path: Path,
+    ):
+        lt = self._lt
+        async with self._lock:
+            if self._ses is None:
+                raise RuntimeError("session not started")
+            ses = self._ses
+
+        blob = fr_path.read_bytes()
+
+        def _add():
+            params = try_read_resume_params(lt, blob, save_path)
+            if params is None:
+                raise ValueError("invalid fastresume data")
+            return ses.add_torrent(params)
+
+        h = await asyncio.to_thread(_add)
+
+        def _kickstart(handle):
+            if hasattr(handle, "resume"):
+                handle.resume()
+
+        await asyncio.to_thread(_kickstart, h)
+        log.info("restored db_id=%s from fastresume %s", db_id, fr_path)
+        return h
+
+    def _torrent_files_dir(self) -> Path:
+        root = Path(os.getenv("SEEDING_DATA_ROOT", "/data"))
+        return root / ".torrents"
+
+    def _persist_torrent_file(self, db_id: int, torrent_data: bytes) -> None:
+        d = self._torrent_files_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / f"{db_id}.torrent"
+        path.write_bytes(torrent_data)
+        log.info("saved .torrent for db_id=%s at %s", db_id, path)
+
+    def _delete_persisted_torrent_file(self, db_id: int) -> None:
+        path = self._torrent_files_dir() / f"{db_id}.torrent"
+        if path.is_file():
+            try:
+                path.unlink()
+            except OSError as exc:
+                log.warning("remove .torrent db_id=%s: %s", db_id, exc)
+
+    @staticmethod
+    def _libtorrent_delete_flags(lt, delete_files: bool) -> int:
+        if not delete_files:
+            return 0
+        flags = 0
+        for parent in (
+            getattr(lt, "session", None),
+            getattr(lt, "remove_flags_t", None),
+            getattr(lt, "options_t", None),
+        ):
+            if parent is None:
+                continue
+            for name in ("delete_files", "delete_partfile"):
+                if hasattr(parent, name):
+                    flags |= int(getattr(parent, name))
+        return flags
+
+    @staticmethod
+    def _guess_content_paths(save_path: str | None, display_name: str | None) -> list[Path]:
+        if not save_path:
+            return []
+        root = Path(save_path)
+        paths: list[Path] = []
+        name = (display_name or "").strip()
+        if name.lower().endswith(".torrent"):
+            name = name[: -len(".torrent")]
+        if name:
+            paths.append(root / name)
+        return paths
+
+    async def _collect_paths_from_handle_async(self, h, save_path_fallback: str | None) -> list[Path]:
+        def _read():
+            out: list[Path] = []
+            st = h.status() if callable(getattr(h, "status", None)) else h.status
+            sp = str(getattr(st, "save_path", "") or save_path_fallback or "").strip()
+            if not sp:
+                return out
+            root = Path(sp)
+            tname = str(getattr(st, "name", "") or "").strip()
+            if tname:
+                out.append(root / tname)
+            try:
+                ti = h.torrent_file() if callable(getattr(h, "torrent_file", None)) else None
+                if ti is not None:
+                    files = ti.files()
+                    for i in range(files.num_files()):
+                        out.append(root / files.file_path(i))
+            except Exception as exc:  # noqa: BLE001
+                log.debug("torrent_file paths db_id: %s", exc)
+            return out
+
+        return await asyncio.to_thread(_read)
+
+    @staticmethod
+    def _delete_paths_on_disk(paths: list[Path], save_path: str | None) -> None:
+        data_root = Path(os.getenv("SEEDING_DATA_ROOT", "/data"))
+        try:
+            data_root_resolved = data_root.resolve()
+        except OSError:
+            data_root_resolved = data_root
+        save_root: Path | None = None
+        if save_path:
+            sp = Path(save_path)
+            try:
+                save_root = sp.resolve()
+            except OSError:
+                save_root = sp
+
+        seen: set[Path] = set()
+        candidates: list[Path] = []
+        for p in paths:
+            try:
+                resolved = p.resolve()
+            except OSError:
+                resolved = p
+            if resolved in seen:
+                continue
+            # Никогда не удалять корень тома (/data) или голый save_path — только файлы раздачи.
+            if resolved == data_root_resolved or (save_root is not None and resolved == save_root):
+                log.warning("skip unsafe delete path %s", resolved)
+                continue
+            seen.add(resolved)
+            candidates.append(resolved)
+
+        for path in sorted(candidates, key=lambda p: len(p.parts), reverse=True):
+            if not path.exists():
+                continue
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                    log.info("removed directory %s", path)
+                else:
+                    path.unlink()
+                    log.info("removed file %s", path)
+            except OSError as exc:
+                log.warning("failed to remove %s: %s", path, exc)
+
+    async def restore_from_disk(self, db_id: int, save_path: str) -> RuntimeHandle | None:
+        """Перезагрузить из fastresume или /data/.torrents/{id}.torrent (после рестарта движка)."""
+        fr = fastresume_path(db_id)
+        if fr.is_file():
+            async with self._lock:
+                if db_id in self._handles:
+                    return await self._snapshot(db_id)
+            try:
+                h = await self._add_from_fastresume(db_id, save_path, None, fr)
+                async with self._lock:
+                    self._handles[db_id] = h
+                    self._meta[db_id] = (None, save_path)
+                return await self._snapshot(db_id)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("restore fastresume db_id=%s failed: %s", db_id, exc)
+
+        path = self._torrent_files_dir() / f"{db_id}.torrent"
+        if not path.is_file():
+            return None
+        data = path.read_bytes()
+        async with self._lock:
+            if db_id in self._handles:
+                return await self._snapshot(db_id)
+        return await self.add_torrent(db_id, None, save_path, torrent_data=data)
 
     async def _snapshot(self, db_id: int) -> RuntimeHandle:
         lt = self._lt
@@ -276,14 +652,20 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             info_hash=ih_hex,
             progress=float(st.progress),
             lt_state=_state_label(lt, st),
+            download_rate=int(getattr(st, "download_payload_rate", 0) or 0),
+            upload_rate=int(getattr(st, "upload_payload_rate", 0) or 0),
+            total_uploaded=_total_bytes_from_status(st, "total_upload", "all_time_upload"),
+            peers=int(getattr(st, "num_peers", 0) or 0),
         )
 
     async def pause(self, db_id: int) -> RuntimeHandle | None:
+        lt = self._lt
         async with self._lock:
             h = self._handles.get(db_id)
         if h is None:
             return None
         await asyncio.to_thread(h.pause)
+        await asyncio.to_thread(save_fastresume, lt, h, db_id)
         return await self._snapshot(db_id)
 
     async def resume(self, db_id: int) -> RuntimeHandle | None:
@@ -304,6 +686,73 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         except KeyError:
             return None
 
+    async def debug_torrent(self, db_id: int) -> dict | None:
+        """Подробный статус libtorrent для диагностики (трекеры, ошибки, DHT)."""
+        lt = self._lt
+        async with self._lock:
+            h = self._handles.get(db_id)
+            ses = self._ses
+        if h is None:
+            return None
+
+        def _collect():
+            st = h.status() if callable(getattr(h, "status", None)) else h.status
+            out: dict[str, object] = {
+                "state": _state_label(lt, st),
+                "progress": float(st.progress),
+                "peers": int(getattr(st, "num_peers", 0) or 0),
+                "seeds": int(getattr(st, "num_seeds", 0) or 0),
+                "connections": int(getattr(st, "num_connections", 0) or 0),
+                "download_rate": int(getattr(st, "download_payload_rate", 0) or 0),
+                "upload_rate": int(getattr(st, "upload_payload_rate", 0) or 0),
+                "current_tracker": str(getattr(st, "current_tracker", "") or ""),
+                "message": str(getattr(st, "message", "") or ""),
+            }
+            errc = getattr(st, "errc", None)
+            if errc is not None:
+                out["errc"] = str(errc)
+            if ses is not None and hasattr(ses, "status"):
+                ss = ses.status() if callable(ses.status) else ses.status
+                out["session"] = {
+                    "listening_port": getattr(ss, "listening_port", None),
+                    "dht_nodes": getattr(ss, "dht_nodes", None),
+                    "has_incoming": getattr(ss, "has_incoming_connections", None),
+                }
+            trackers: list[dict[str, object]] = []
+            if hasattr(h, "trackers"):
+                try:
+                    for tr in h.trackers():
+                        trackers.append(
+                            {
+                                "url": str(getattr(tr, "url", tr)),
+                                "state": str(getattr(tr, "state", "")),
+                                "msg": str(getattr(tr, "message", "") or ""),
+                                "peers": int(getattr(tr, "num_peers", 0) or 0),
+                            }
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    trackers.append({"error": str(exc)})
+            out["trackers"] = trackers
+            return out
+
+        return await asyncio.to_thread(_collect)
+
+    async def list_peers(self, db_id: int) -> list[dict[str, object]]:
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None or not hasattr(h, "get_peer_info"):
+            return []
+
+        def _read() -> list[dict[str, object]]:
+            try:
+                raw = h.get_peer_info()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("get_peer_info db_id=%s: %s", db_id, exc)
+                return []
+            return [_peer_to_dict(p) for p in raw]
+
+        return await asyncio.to_thread(_read)
+
     async def list_all(self) -> list[RuntimeHandle]:
         async with self._lock:
             ids = sorted(self._handles.keys())
@@ -315,24 +764,54 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 continue
         return out
 
-    async def remove(self, db_id: int) -> bool:
+    async def remove(
+        self,
+        db_id: int,
+        *,
+        delete_files: bool = False,
+        save_path: str | None = None,
+        display_name: str | None = None,
+    ) -> bool:
         async with self._lock:
-            if self._ses is None:
-                return False
-            h = self._handles.pop(db_id, None)
-            self._meta.pop(db_id, None)
             ses = self._ses
-        if h is None:
-            return False
+            h = self._handles.pop(db_id, None) if ses is not None else None
+            self._meta.pop(db_id, None)
+        if ses is None:
+            paths = self._guess_content_paths(save_path, display_name) if delete_files else []
+            if delete_files and paths:
+                await asyncio.to_thread(self._delete_paths_on_disk, paths, save_path)
+            self._delete_persisted_torrent_file(db_id)
+            delete_fastresume(db_id)
+            return delete_files and bool(paths)
+        paths: list[Path] = []
+        had_handle = h is not None
+        if h is not None:
+            if delete_files:
+                paths = await self._collect_paths_from_handle_async(h, save_path)
+            lt = self._lt
+            flags = self._libtorrent_delete_flags(lt, delete_files)
 
-        def _rm():
-            try:
-                ses.remove_torrent(h)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("remove_torrent db_id=%s: %s", db_id, exc)
+            def _rm():
+                try:
+                    if flags:
+                        ses.remove_torrent(h, flags)
+                    else:
+                        ses.remove_torrent(h)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("remove_torrent db_id=%s: %s", db_id, exc)
 
-        await asyncio.to_thread(_rm)
-        return True
+            await asyncio.to_thread(_rm)
+        elif delete_files:
+            paths = self._guess_content_paths(save_path, display_name)
+
+        if delete_files:
+            if not paths:
+                paths = self._guess_content_paths(save_path, display_name)
+            await asyncio.to_thread(self._delete_paths_on_disk, paths, save_path)
+
+        self._delete_persisted_torrent_file(db_id)
+        delete_fastresume(db_id)
+        return had_handle or (delete_files and bool(paths))
 
 
 def build_torrent_runtime() -> TorrentRuntime:

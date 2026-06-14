@@ -1,0 +1,33 @@
+# CT 400: данные движков на /mnt/media (Proxmox mp0: /home/mediaserver).
+# Запуск: docker compose -f docker-compose.multi-engine.yml -f docker-compose.multi-engine.media.yml up -d
+
+services:
+  engine-b1:
+    volumes:
+      - /mnt/media/seeding-test/b1:/data
+      - /mnt/media:/media:ro
+
+  engine-b2:
+    volumes:
+      - /mnt/media/seeding-test/b2:/data
+      - /mnt/media:/media:ro
+
+  engine-b3:
+    volumes:
+      - /mnt/media/seeding-test/b3:/data
+      - /mnt/media:/media:ro
+
+  engine-b4:
+    volumes:
+      - /mnt/media/seeding-test/b4:/data
+      - /mnt/media:/media:ro
+
+  engine-b5:
+    volumes:
+      - /mnt/media/seeding-test/b5:/data
+      - /mnt/media:/media:ro
+
+  engine-b6:
+    volumes:
+      - /mnt/media/seeding-test/b6:/data
+      - /mnt/media:/media:ro

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "b1",
+    "url": "http://engine-b1:8081",
+    "storage_prefix": "/data/b1",
+    "listen_port": 50001
+  },
+  {
+    "id": "b2",
+    "url": "http://engine-b2:8081",
+    "storage_prefix": "/data/b2",
+    "listen_port": 50002
+  },
+  {
+    "id": "b3",
+    "url": "http://engine-b3:8081",
+    "storage_prefix": "/data/b3",
+    "listen_port": 50003
+  },
+  {
+    "id": "b4",
+    "url": "http://engine-b4:8081",
+    "storage_prefix": "/data/b4",
+    "listen_port": 50004
+  },
+  {
+    "id": "b5",
+    "url": "http://engine-b5:8081",
+    "storage_prefix": "/data/b5",
+    "listen_port": 50005
+  },
+  {
+    "id": "b6",
+    "url": "http://engine-b6:8081",
+    "storage_prefix": "/data/b6",
+    "listen_port": 50006
+  }
+]

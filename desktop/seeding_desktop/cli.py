@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import httpx
 
 from seeding_desktop.config import load_api_base_url
-from seeding_desktop.http_util import request_json
+from seeding_desktop.http_util import print_json_body, print_response_error, request_json
 
 
 def cmd_list(client: httpx.Client) -> int:
@@ -15,6 +16,34 @@ def cmd_list(client: httpx.Client) -> int:
 def cmd_add(client: httpx.Client, magnet: str, save_path: str, display_name: str) -> int:
     body = {"magnet_uri": magnet.strip(), "save_path": save_path.strip(), "display_name": display_name.strip()}
     return request_json(client, "POST", "/api/v1/torrents", json_body=body)
+
+
+def cmd_add_file(client: httpx.Client, torrent_file: str, save_path: str, display_name: str) -> int:
+    p = Path(torrent_file).expanduser()
+    if not p.is_file():
+        print(f"error: file not found: {p}")
+        return 1
+    try:
+        payload = p.read_bytes()
+    except OSError as exc:
+        print(f"error: cannot read file: {exc}")
+        return 1
+    data = {"save_path": save_path.strip(), "display_name": display_name.strip()}
+    files = {"torrent_file": (p.name, payload, "application/x-bittorrent")}
+    try:
+        r = client.post("/api/v1/torrents/upload", data=data, files=files)
+    except httpx.HTTPError as exc:
+        print(f"error: {exc}")
+        return 1
+    if not r.is_success:
+        print_response_error(r)
+        return 1
+    if r.content:
+        try:
+            print_json_body(r.json())
+        except ValueError:
+            print(r.text)
+    return 0
 
 
 def cmd_get(client: httpx.Client, torrent_id: int) -> int:
@@ -53,6 +82,10 @@ def main() -> None:
     p_add.add_argument("--magnet", required=True, help="magnet:?xt=urn:btih:…")
     p_add.add_argument("--save-path", required=True, help="каталог на стороне движка, напр. /data")
     p_add.add_argument("--display-name", default="", help="необязательно")
+    p_add_file = sub.add_parser("add-file", help="POST /api/v1/torrents/upload (.torrent + save_path)")
+    p_add_file.add_argument("--torrent-file", required=True, help="путь до .torrent на локальном ПК")
+    p_add_file.add_argument("--save-path", required=True, help="каталог на стороне движка, напр. /data")
+    p_add_file.add_argument("--display-name", default="", help="необязательно")
 
     p_get = sub.add_parser("get", help="GET /api/v1/torrents/{id} (+ runtime)")
     p_get.add_argument("id", type=int, help="id торрента в БД")
@@ -78,6 +111,8 @@ def main() -> None:
             code = cmd_list(client)
         elif args.cmd == "add":
             code = cmd_add(client, args.magnet, args.save_path, args.display_name)
+        elif args.cmd == "add-file":
+            code = cmd_add_file(client, args.torrent_file, args.save_path, args.display_name)
         elif args.cmd == "get":
             code = cmd_get(client, args.id)
         elif args.cmd == "pause":

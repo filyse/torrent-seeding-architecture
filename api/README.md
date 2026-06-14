@@ -2,6 +2,11 @@
 
 Публичный HTTP для `web/` и `desktop/`.
 
+Поддерживаются оба сценария добавления на сидирование:
+
+- `POST /api/v1/torrents` — по `magnet_uri`
+- `POST /api/v1/torrents/upload` — multipart upload `.torrent` файла (`torrent_file`, `save_path`, `display_name?`)
+
 ## Разработка
 
 Из корня этого репозитория (после `pip install -e ./db`):
@@ -16,6 +21,7 @@ uvicorn seeding_api.main:app --reload --port 8000
 - `DATABASE_URL` — async SQLAlchemy URL
 - `ENGINE_URL` — базовый URL внутреннего HTTP движка
 - `REDIS_URL` — для постановки задач в очередь (ARQ); без него `POST /api/v1/jobs/noop` и `POST /api/v1/jobs/engine-health-check` вернут 503
+- `REDIS_URL` — для постановки задач в очередь (ARQ); без него `POST /api/v1/jobs/noop`, `POST /api/v1/jobs/engine-health-check`, `POST /api/v1/jobs/sync-runtime` вернут 503
 - `CORS_ORIGINS` — список через запятую для продакшена
 - `SEEDING_AUTO_SCHEMA` — если `1`/`true`/`yes`, при старте вызывается `init_models` (только для **локальных тестов** и быстрого dev на SQLite; в Docker прод используйте Alembic из `api` Dockerfile)
 - `SEEDING_ENGINE_RESTORE` — если `0`/`false`/`no`, отключить восстановление торрентов в движке при старте API (по умолчанию включено: читает БД и вызывает `ENGINE_URL` для строк со статусами `downloading` / `seeding` / `paused`)

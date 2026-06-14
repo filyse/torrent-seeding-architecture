@@ -8,7 +8,9 @@ import httpx
 import pytest
 import respx
 from fastapi.testclient import TestClient
+from seeding_api.engine_pool import EnginePool
 from seeding_api.restore import maybe_restore_torrents_to_engine
+from seeding_db.engine_registry import EngineSpec
 from seeding_db.models import Base, TorrentStatus
 from seeding_db.repository import TorrentRepository
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -68,7 +70,9 @@ async def test_restore_registers_and_pauses_paused_row(restore_factory):
     )
     ec.resume = AsyncMock()
 
-    await maybe_restore_torrents_to_engine(restore_factory, ec)
+    pool = EnginePool([EngineSpec(id="default", url=ENGINE, storage_prefix="/data")])
+    pool._by_id["default"] = ec  # type: ignore[method-assign]
+    await maybe_restore_torrents_to_engine(restore_factory, pool)
 
     assert ec.register_torrent.await_count == 2
     ec.pause.assert_awaited_once()
@@ -80,7 +84,9 @@ async def test_restore_skipped_when_disabled(restore_factory, monkeypatch):
     monkeypatch.setenv("SEEDING_ENGINE_RESTORE", "0")
     ec = AsyncMock()
     ec.health = AsyncMock()
-    await maybe_restore_torrents_to_engine(restore_factory, ec)
+    pool = EnginePool([EngineSpec(id="default", url=ENGINE, storage_prefix="/data")])
+    pool._by_id["default"] = ec  # type: ignore[method-assign]
+    await maybe_restore_torrents_to_engine(restore_factory, pool)
     ec.health.assert_not_awaited()
 
 
@@ -89,7 +95,9 @@ async def test_restore_skipped_when_engine_down(restore_factory):
     ec = AsyncMock()
     ec.health = AsyncMock(side_effect=httpx.ConnectError("nop", request=None))
 
-    await maybe_restore_torrents_to_engine(restore_factory, ec)
+    pool = EnginePool([EngineSpec(id="default", url=ENGINE, storage_prefix="/data")])
+    pool._by_id["default"] = ec  # type: ignore[method-assign]
+    await maybe_restore_torrents_to_engine(restore_factory, pool)
     ec.runtime_snapshot.assert_not_awaited()
 
 
@@ -115,7 +123,9 @@ async def test_restore_sync_pause_when_already_in_engine(restore_factory):
     ec.pause = AsyncMock(return_value=_handle(rid, m, "/data", "paused"))
     ec.resume = AsyncMock()
 
-    await maybe_restore_torrents_to_engine(restore_factory, ec)
+    pool = EnginePool([EngineSpec(id="default", url=ENGINE, storage_prefix="/data")])
+    pool._by_id["default"] = ec  # type: ignore[method-assign]
+    await maybe_restore_torrents_to_engine(restore_factory, pool)
 
     ec.register_torrent.assert_not_awaited()
     ec.pause.assert_awaited_once_with(rid)

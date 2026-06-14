@@ -36,6 +36,24 @@
 - [x] 5.4 При старте API: восстановление торрентов в движке по БД (`seeding_api/restore.py`, откл. `SEEDING_ENGINE_RESTORE=0`)
 - [x] 5.5 Graceful shutdown: uvicorn lifespan → `TorrentRuntime.stop()` (libtorrent: `pause`, при наличии — `abort`)
 
+## Multi-engine (CT 400)
+
+- [x] Реестр движков `ENGINES_CONFIG` / `ENGINES_CONFIG_FILE`
+- [x] `engine_id` в БД + миграция `0002`
+- [x] `EnginePool` — маршрутизация по `save_path`
+- [x] Параллельный restore по движкам
+- [x] Bulk jobs: `restore_engine`, `bulk_register`, `restore_all`
+- [x] `docker-compose.multi-engine.yml` (b1–b6)
+- [x] Документация `docs/MULTI_ENGINE.md`
+
+## Multi-engine фаза 2 — реальная раздача
+
+- [x] libtorrent в Docker-образе (`python3-libtorrent`, `SEEDING_ENGINE_BACKEND=libtorrent`)
+- [x] Per-torrent fastresume (`SEEDING_FASTRESUME_DIR`, `fastresume_io.py`)
+- [x] `SEEDING_LT_STATE_FILE` per engine в compose
+- [x] Отдельные тома `seeding_b1` … `seeding_b6` + `ENGINE_STORAGE_SUBDIR`
+- [x] Healthcheck: backend должен быть `libtorrent`
+
 ## Агент 4 — API (`api/`)
 
 - [x] 4.1 Каркас FastAPI, `/api/v1/health`, CORS

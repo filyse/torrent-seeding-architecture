@@ -58,9 +58,14 @@ flowchart TB
   ENG --> Files
 ```
 
+## Multi-engine
+
+Несколько libtorrent-процессов (по HDD b1–b6): реестр движков, `engine_id` в БД, `EnginePool` в API. CT 400: `docker-compose.multi-engine.yml`. Подробно — [`docs/MULTI_ENGINE.md`](docs/MULTI_ENGINE.md).
+
 ## Деплой
 
 - **По умолчанию:** [Docker Compose](https://docs.docker.com/compose/) на одном хосте — это не Kubernetes, а удобная сборка нескольких контейнеров, сеть и тома.
+- **CT 400 / 6 движков:** `docker compose -f docker-compose.multi-engine.yml up -d`
 - **Тома:** каталог данных торрентов и файлы БД (или том Postgres) должны жить **вне** слоя контейнера, чтобы не терять при пересборке.
 - **BitTorrent:** UDP и много соединений; порты прописываются явно в `docker-compose.yml`.
 - **Альтернатива:** Ubuntu + systemd без Docker — кратко допустима для отладки диска/сети на «голом» железе.

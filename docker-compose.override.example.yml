@@ -1,0 +1,12 @@
+# Скопируйте в docker-compose.override.yml на сервере.
+# Порт 6881 часто в blacklist у частных трекеров (RuDub и др.).
+services:
+  engine:
+    environment:
+      SEEDING_ENGINE_BACKEND: libtorrent
+      LT_LISTEN_INTERFACES: "0.0.0.0:51413,[::]:51413"
+      LT_LISTEN_PORT_LOW: "51413"
+      LT_LISTEN_PORT_HIGH: "51413"
+    ports:
+      - "51413:51413"
+      - "51413:51413/udp"

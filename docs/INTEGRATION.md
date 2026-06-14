@@ -5,7 +5,7 @@
 ## Публичная граница
 
 - **Браузер / десктоп** ↔ только **`api`** (HTTPS или HTTP в dev), пути вида `/api/v1/...`. Торренты: CRUD-образно список/создать/детали/пауза/возобновить/**удалить** (`DELETE /api/v1/torrents/{id}` — БД + снятие с движка). Опционально **`X-API-Key`**, если задано `SEEDING_API_KEYS` на API.
-- **`api`** ↔ **`engine`**: внутренняя сеть Docker (базовый URL `ENGINE_URL`, порт по умолчанию `8081`). Префикс внутреннего REST: **`/internal/v1`**. При старте API (lifespan) выполняется **восстановление рантайма**: строки БД со статусами `downloading` / `seeding` / `paused` и валидным `magnet_uri` снова регистрируются в движке; отключение: `SEEDING_ENGINE_RESTORE=0`.
+- **`api`** ↔ **`engine`(s)**: один или несколько движков. Реестр: `ENGINES_CONFIG` / `ENGINES_CONFIG_FILE` (см. `docs/MULTI_ENGINE.md`); fallback — `ENGINE_URL`. Маршрутизация по `save_path` → `engine_id`. Префикс внутреннего REST: **`/internal/v1`**. При старте API — **параллельное восстановление** по каждому движку (`SEEDING_ENGINE_RESTORE=0` отключает).
 
   | Метод | Путь | Назначение |
   |-------|------|------------|
@@ -26,6 +26,7 @@
   |-------|------|------------|
   | POST | `/api/v1/jobs/noop` | Задача-заглушка `noop_report` |
   | POST | `/api/v1/jobs/engine-health-check` | Задача `check_engine_health` → `GET ENGINE_URL/health` |
+  | POST | `/api/v1/jobs/sync-runtime` | Задача `sync_runtime_to_db` → сверка `engine /internal/v1/torrents` с БД |
 
 - **`queue` workers** ↔ **`db`**: по текущему коду воркер может вызывать **`engine`** по HTTP (`check_engine_health`); запись в БД из воркера — по мере появления задач, через те же модели `seeding_db`.
 

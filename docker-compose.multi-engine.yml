@@ -1,0 +1,205 @@
+# CT 400: control plane + 6 libtorrent-движков (b1–b6), отдельный том на движок.
+# Запуск: docker compose -f docker-compose.multi-engine.yml up -d --build
+
+x-engine-common: &engine-common
+  build:
+    context: ./engine
+    dockerfile: Dockerfile
+  environment: &engine-env
+    ENGINE_HTTP_PORT: "8081"
+    SEEDING_ENGINE_BACKEND: libtorrent
+    SEEDING_DATA_ROOT: /data
+    SEEDING_LT_STATE_FILE: /data/.state/session.state
+    SEEDING_FASTRESUME_DIR: /data/.fastresume
+    LT_CONNECTIONS_LIMIT: "500"
+    LT_ENABLE_UPNP: "0"
+    LT_ENABLE_NATPMP: "0"
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "python",
+        "-c",
+        "import urllib.request,json; r=urllib.request.urlopen('http://127.0.0.1:8081/health',timeout=5); b=json.loads(r.read()); assert b.get('backend')=='libtorrent', b",
+      ]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 30s
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: seeding
+      POSTGRES_PASSWORD: seeding
+      POSTGRES_DB: seeding
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seeding -d seeding"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  engine-b1:
+    <<: *engine-common
+    environment:
+      <<: *engine-env
+      ENGINE_STORAGE_SUBDIR: b1
+      LT_LISTEN_INTERFACES: "0.0.0.0:50001,[::]:50001"
+    volumes:
+      - seeding_b1:/data
+    ports:
+      - "50001:50001"
+      - "50001:50001/udp"
+
+  engine-b2:
+    <<: *engine-common
+    environment:
+      <<: *engine-env
+      ENGINE_STORAGE_SUBDIR: b2
+      LT_LISTEN_INTERFACES: "0.0.0.0:50002,[::]:50002"
+    volumes:
+      - seeding_b2:/data
+    ports:
+      - "50002:50002"
+      - "50002:50002/udp"
+
+  engine-b3:
+    <<: *engine-common
+    environment:
+      <<: *engine-env
+      ENGINE_STORAGE_SUBDIR: b3
+      LT_LISTEN_INTERFACES: "0.0.0.0:50003,[::]:50003"
+    volumes:
+      - seeding_b3:/data
+    ports:
+      - "50003:50003"
+      - "50003:50003/udp"
+
+  engine-b4:
+    <<: *engine-common
+    environment:
+      <<: *engine-env
+      ENGINE_STORAGE_SUBDIR: b4
+      LT_LISTEN_INTERFACES: "0.0.0.0:50004,[::]:50004"
+    volumes:
+      - seeding_b4:/data
+    ports:
+      - "50004:50004"
+      - "50004:50004/udp"
+
+  engine-b5:
+    <<: *engine-common
+    environment:
+      <<: *engine-env
+      ENGINE_STORAGE_SUBDIR: b5
+      LT_LISTEN_INTERFACES: "0.0.0.0:50005,[::]:50005"
+    volumes:
+      - seeding_b5:/data
+    ports:
+      - "50005:50005"
+      - "50005:50005/udp"
+
+  engine-b6:
+    <<: *engine-common
+    environment:
+      <<: *engine-env
+      ENGINE_STORAGE_SUBDIR: b6
+      LT_LISTEN_INTERFACES: "0.0.0.0:50006,[::]:50006"
+    volumes:
+      - seeding_b6:/data
+    ports:
+      - "50006:50006"
+      - "50006:50006/udp"
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://seeding:seeding@db:5432/seeding
+      REDIS_URL: redis://redis:6379/0
+      ENGINES_CONFIG_FILE: /config/engines.json
+      SEEDING_RESTORE_CONCURRENCY: "32"
+    volumes:
+      - ./config/engines.ct400.json:/config/engines.json:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      engine-b1:
+        condition: service_healthy
+      engine-b2:
+        condition: service_healthy
+      engine-b3:
+        condition: service_healthy
+      engine-b4:
+        condition: service_healthy
+      engine-b5:
+        condition: service_healthy
+      engine-b6:
+        condition: service_healthy
+
+  queue_worker:
+    build:
+      context: .
+      dockerfile: queue/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://seeding:seeding@db:5432/seeding
+      REDIS_URL: redis://redis:6379/0
+      ENGINES_CONFIG_FILE: /config/engines.json
+      SEEDING_BULK_CONCURRENCY: "16"
+    volumes:
+      - ./config/engines.ct400.json:/config/engines.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      engine-b1:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  seeding_b1:
+  seeding_b2:
+  seeding_b3:
+  seeding_b4:
+  seeding_b5:
+  seeding_b6:
+

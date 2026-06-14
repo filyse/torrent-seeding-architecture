@@ -16,12 +16,14 @@ class TorrentRepository:
         magnet_uri: str | None = None,
         info_hash: str | None = None,
         status: str | None = None,
+        engine_id: str = "default",
     ) -> TorrentRecord:
         row = TorrentRecord(
             display_name=display_name,
             save_path=save_path,
             magnet_uri=magnet_uri,
             info_hash=info_hash,
+            engine_id=engine_id,
         )
         if status is not None:
             row.status = status
@@ -35,6 +37,27 @@ class TorrentRepository:
 
     async def list_all(self) -> list[TorrentRecord]:
         result = await self._session.execute(select(TorrentRecord).order_by(TorrentRecord.id))
+        return list(result.scalars())
+
+    async def list_by_engine(self, engine_id: str) -> list[TorrentRecord]:
+        stmt = (
+            select(TorrentRecord)
+            .where(TorrentRecord.engine_id == engine_id)
+            .order_by(TorrentRecord.id)
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars())
+
+    async def list_queued_for_engine(self, engine_id: str) -> list[TorrentRecord]:
+        stmt = (
+            select(TorrentRecord)
+            .where(
+                TorrentRecord.engine_id == engine_id,
+                TorrentRecord.status == TorrentStatus.queued.value,
+            )
+            .order_by(TorrentRecord.id)
+        )
+        result = await self._session.execute(stmt)
         return list(result.scalars())
 
     async def list_for_engine_restore(self) -> list[TorrentRecord]:
@@ -51,6 +74,25 @@ class TorrentRepository:
                 TorrentRecord.magnet_uri.isnot(None),
                 TorrentRecord.magnet_uri != "",
                 TorrentRecord.save_path != "",
+            )
+            .order_by(TorrentRecord.id)
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars())
+
+    async def list_for_torrent_file_restore(self) -> list[TorrentRecord]:
+        """Активные торренты, добавленные через .torrent (без magnet в БД)."""
+        active = (
+            TorrentStatus.downloading.value,
+            TorrentStatus.seeding.value,
+            TorrentStatus.paused.value,
+        )
+        stmt = (
+            select(TorrentRecord)
+            .where(
+                TorrentRecord.status.in_(active),
+                TorrentRecord.save_path != "",
+                (TorrentRecord.magnet_uri.is_(None)) | (TorrentRecord.magnet_uri == ""),
             )
             .order_by(TorrentRecord.id)
         )

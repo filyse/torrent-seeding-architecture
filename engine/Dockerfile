@@ -1,8 +1,19 @@
-FROM python:3.12-slim
+FROM debian:trixie-slim
 WORKDIR /app
-RUN pip install --no-cache-dir --upgrade pip
-COPY engine /app/engine
-RUN pip install --no-cache-dir /app/engine
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python-is-python3 \
+    python3-libtorrent \
+    python3-fastapi \
+    python3-uvicorn \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY . /app/engine
+RUN sed -i 's/\r$//' /app/engine/docker-entrypoint.sh \
+    && chmod +x /app/engine/docker-entrypoint.sh
+ENV PYTHONPATH=/app/engine
 ENV SEEDING_DATA_ROOT=/data
-EXPOSE 8081 6881
-CMD ["uvicorn", "seeding_engine.main:app", "--host", "0.0.0.0", "--port", "8081"]
+ENV SEEDING_ENGINE_BACKEND=libtorrent
+EXPOSE 8081
+ENTRYPOINT ["/app/engine/docker-entrypoint.sh"]
+CMD ["python3", "-m", "uvicorn", "seeding_engine.main:app", "--host", "0.0.0.0", "--port", "8081"]

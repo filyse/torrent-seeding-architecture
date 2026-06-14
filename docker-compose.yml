@@ -39,8 +39,8 @@ services:
     volumes:
       - seeding_data:/data
     ports:
-      - "6881:6881"
-      - "6881:6881/udp"
+      - "51413:51413"
+      - "51413:51413/udp"
       - "8081:8081"
     healthcheck:
       test:

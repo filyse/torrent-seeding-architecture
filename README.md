@@ -32,6 +32,27 @@ docker compose up --build
 
 Сервисы: Postgres, Redis, `api` (:8000), `engine` (:8081, BitTorrent :6881), `queue_worker`, `web` (:3000). На машине без Docker в PATH используйте установленный Docker Desktop.
 
+### Быстрый старт (максимально просто)
+
+- Windows (PowerShell), из корня репозитория:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 up
+```
+
+- Linux/macOS:
+
+```bash
+bash ./scripts/dev.sh up
+```
+
+Полезные команды:
+
+- `...\dev.ps1 status` / `./scripts/dev.sh status` — health API/engine
+- `...\dev.ps1 sync` / `./scripts/dev.sh sync` — enqueue `sync_runtime_to_db`
+- `...\dev.ps1 test` / `./scripts/dev.sh test` — прогон `pytest`
+- `...\dev.ps1 down` / `./scripts/dev.sh down` — остановка compose
+
 ### Тест на сервере (VPS)
 
 Нужны **Docker** и **Docker Compose v2**. Из **корня этого репозитория** (после `git clone`):

@@ -6,6 +6,10 @@ ARQ + Redis: фоновые задачи.
 
 - `noop_report` — заглушка (`POST /api/v1/jobs/noop`)
 - `check_engine_health` — `GET ENGINE_URL/health` (`POST /api/v1/jobs/engine-health-check`)
+- `sync_runtime_to_db` — сверка runtime движка с БД (`POST /api/v1/jobs/sync-runtime`):
+  - читает `GET ENGINE_URL/internal/v1/torrents`
+  - обновляет в БД `status` и `info_hash` по `db_id`
+  - возвращает счетчики обновлений и расхождений
 
 ## Запуск воркера локально
 

@@ -9,7 +9,7 @@ def get_database_url() -> str:
 def alembic_sync_url() -> str:
     """Sync URL for offline/online Alembic migrations."""
     u = get_database_url()
-    u = u.replace("postgresql+asyncpg://", "postgresql://")
+    u = u.replace("postgresql+asyncpg://", "postgresql+psycopg://")
     if u.startswith("sqlite+aiosqlite:///"):
         return "sqlite:///" + u.removeprefix("sqlite+aiosqlite:///")
     if u.startswith("sqlite+aiosqlite://"):

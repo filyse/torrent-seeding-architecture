@@ -11,6 +11,10 @@ class RuntimeHandle:
     info_hash: str | None = None
     progress: float | None = None
     lt_state: str | None = None  # состояние libtorrent, если backend=libtorrent
+    download_rate: int | None = None  # bytes/sec
+    upload_rate: int | None = None  # bytes/sec
+    total_uploaded: int | None = None  # bytes, за всё время раздачи
+    peers: int | None = None
 
 
 class RuntimeStore:

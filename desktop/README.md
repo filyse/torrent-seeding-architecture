@@ -2,18 +2,35 @@
 
 ## Текущая заготовка
 
-Минимальный **CLI** на Python (тот же REST, что у веба):
+Минимальный **CLI** и базовый **GUI** на Python (тот же REST, что у веба):
 
 ```bash
 pip install -e ./desktop
 python -m seeding_desktop list
 python -m seeding_desktop add --magnet "magnet:?xt=…" --save-path /data
+python -m seeding_desktop add-file --torrent-file "C:\path\to\file.torrent" --save-path /data
 python -m seeding_desktop get 1
 python -m seeding_desktop pause 1
 python -m seeding_desktop resume 1
 python -m seeding_desktop remove 1
 # или: seeding-desktop list
 ```
+
+GUI запуск (Windows/Linux/macOS):
+
+```bash
+pip install -e ".[gui]"
+python -m seeding_desktop.gui
+# или: seeding-desktop-gui
+```
+
+В GUI есть:
+
+- подключение к API URL
+- добавление по magnet
+- загрузка `.torrent` через кнопку «Обзор...»
+- таблица задач (`id`, статус, прогресс, DL/UL, пиры, info_hash)
+- действия `Пауза` / `Старт` / `Удалить`
 
 `--api-base` переопределяет URL (указывается **до** подкоманды: `python -m seeding_desktop --api-base http://host:8000 list`); иначе читается конфиг (см. ниже) или `http://127.0.0.1:8000`.
 

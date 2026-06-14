@@ -1,4 +1,5 @@
 import httpx
+import base64
 
 
 class EngineClient:
@@ -24,6 +25,19 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def register_torrent_file(self, db_id: int, torrent_bytes: bytes, save_path: str) -> dict:
+        r = await self._client.post(
+            "/internal/v1/torrents",
+            json={
+                "db_id": db_id,
+                "magnet_uri": None,
+                "torrent_b64": base64.b64encode(torrent_bytes).decode("ascii"),
+                "save_path": save_path,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
     async def pause(self, db_id: int) -> dict:
         r = await self._client.post(f"/internal/v1/torrents/{db_id}/pause")
         r.raise_for_status()
@@ -34,6 +48,16 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def restore_from_disk(self, db_id: int, save_path: str) -> dict | None:
+        r = await self._client.post(
+            f"/internal/v1/torrents/{db_id}/restore-from-disk",
+            params={"save_path": save_path},
+        )
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
     async def runtime_snapshot(self, db_id: int) -> dict | None:
         r = await self._client.get(f"/internal/v1/torrents/{db_id}")
         if r.status_code == 404:
@@ -41,8 +65,33 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
-    async def remove_from_runtime(self, db_id: int) -> bool:
-        r = await self._client.delete(f"/internal/v1/torrents/{db_id}")
+    async def list_peers(self, db_id: int) -> list[dict]:
+        r = await self._client.get(f"/internal/v1/torrents/{db_id}/peers")
+        if r.status_code == 404:
+            return []
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else []
+
+    async def remove_from_runtime(
+        self,
+        db_id: int,
+        *,
+        delete_files: bool = False,
+        save_path: str | None = None,
+        display_name: str | None = None,
+    ) -> bool:
+        params: dict[str, str | bool] = {}
+        if delete_files:
+            params["delete_files"] = True
+        if save_path:
+            params["save_path"] = save_path
+        if display_name:
+            params["display_name"] = display_name
+        r = await self._client.delete(
+            f"/internal/v1/torrents/{db_id}",
+            params=params or None,
+        )
         if r.status_code == 404:
             return False
         r.raise_for_status()

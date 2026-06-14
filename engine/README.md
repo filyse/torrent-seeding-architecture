@@ -19,7 +19,9 @@ HTTP-сервис с **внутренним API** (`/internal/v1/*`) и плugga
 
 - **`ENGINE_HTTP_PORT`** — порт HTTP (по умолчанию `8081`).
 - **`SEEDING_DATA_ROOT`** — корень данных на диске (логи/состояние; торренты привязываются к `save_path` из API).
-- **`SEEDING_LT_STATE_FILE`** — путь к файлу состояния сессии libtorrent (bencode): при старте загружается, при остановке перезаписывается. Пусто — не использовать. Не заменяет полноценный per-torrent fastresume, но сохраняет сессию между рестартами процесса.
+- **`SEEDING_LT_STATE_FILE`** — путь к файлу состояния сессии libtorrent (bencode): при старте загружается, при остановке перезаписывается.
+- **`SEEDING_FASTRESUME_DIR`** — каталог per-torrent fastresume (по умолчанию `{SEEDING_DATA_ROOT}/.fastresume`). Сохранение при pause/stop/add; загрузка при restore/add если файл `{db_id}.fastresume` есть.
+- **`ENGINE_STORAGE_SUBDIR`** — подкаталог на томе движка (`b1`…`b6`), создаётся entrypoint'ом.
 - **`LT_LISTEN_PORT_LOW` / `LT_LISTEN_PORT_HIGH`** — диапазон портов BitTorrent для libtorrent (по умолчанию `6881`–`6889`).
 - **`LT_ENABLE_DHT`**, **`LT_ENABLE_LSD`**, **`LT_ENABLE_UPNP`**, **`LT_ENABLE_NATPMP`** — `0`/`false`/`no` отключает (по умолчанию включено, кроме явного `0`).
 - **`LT_DOWNLOAD_RATE_LIMIT_BPS`** / **`LT_UPLOAD_RATE_LIMIT_BPS`** — лимиты в байтах/с (пусто = не трогать дефолт libtorrent).
@@ -38,7 +40,7 @@ uvicorn seeding_engine.main:app --host 0.0.0.0 --port 8081
 
 ## Docker
 
-В образе `engine` пакет **`python-libtorrent`** часто недоступен через `pip` под ту же платформу, что и базовый образ. Для реальной раздачи в контейнере нужен образ с предустановленными биндингами или сборка из исходников. Пока в Compose движок обычно работает в режиме **`auto`** → **mock**, если libtorrent не установлен.
+Образ ставит **`python3-libtorrent`** через apt; по умолчанию **`SEEDING_ENGINE_BACKEND=libtorrent`**. Entrypoint создаёт `/data/.state`, `/data/.fastresume`, `/data/.torrents` и `ENGINE_STORAGE_SUBDIR`.
 
 ## Внутренний API
 
@@ -46,4 +48,4 @@ uvicorn seeding_engine.main:app --host 0.0.0.0 --port 8081
 
 ## Следующие шаги
 
-См. «Агент 5» в [`docs/PLAN_BY_AGENT.md`](../docs/PLAN_BY_AGENT.md): per-torrent fastresume, тонкая настройка DHT-роутеров, **libtorrent в Docker**-образе.
+См. «Агент 5» в [`docs/PLAN_BY_AGENT.md`](../docs/PLAN_BY_AGENT.md): тонкая настройка DHT-роутеров.
