@@ -7,6 +7,19 @@ class TorrentCreate(BaseModel):
     display_name: str = Field(default="", max_length=512)
     save_path: str = Field(..., min_length=1)
     magnet_uri: str = Field(..., min_length=12)
+    label: str = Field(default="", max_length=128)
+
+
+class TorrentUrlCreate(BaseModel):
+    url: str = Field(..., min_length=8)
+    save_path: str = Field(..., min_length=1)
+    display_name: str = Field(default="", max_length=512)
+    label: str = Field(default="", max_length=128)
+
+
+class TorrentPatch(BaseModel):
+    label: str | None = Field(default=None, max_length=128)
+    display_name: str | None = Field(default=None, max_length=512)
 
 
 class EngineOut(BaseModel):
@@ -14,6 +27,20 @@ class EngineOut(BaseModel):
     url: str
     storage_prefix: str
     listen_port: int | None = None
+
+
+class BulkIdsIn(BaseModel):
+    ids: list[int] = Field(..., min_length=1)
+
+
+class TrackerAddIn(BaseModel):
+    url: str = Field(..., min_length=8)
+
+
+class SessionLimitsIn(BaseModel):
+    download_limit: int | None = Field(default=None, ge=0)
+    upload_limit: int | None = Field(default=None, ge=0)
+    engine_id: str | None = None
 
 
 class TorrentOut(BaseModel):
@@ -25,6 +52,7 @@ class TorrentOut(BaseModel):
     display_name: str
     save_path: str
     engine_id: str
+    label: str
     status: str
     created_at: datetime
 

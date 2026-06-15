@@ -17,6 +17,7 @@ class TorrentRepository:
         info_hash: str | None = None,
         status: str | None = None,
         engine_id: str = "default",
+        label: str = "",
     ) -> TorrentRecord:
         row = TorrentRecord(
             display_name=display_name,
@@ -24,6 +25,7 @@ class TorrentRepository:
             magnet_uri=magnet_uri,
             info_hash=info_hash,
             engine_id=engine_id,
+            label=label,
         )
         if status is not None:
             row.status = status
@@ -114,6 +116,28 @@ class TorrentRepository:
         row.info_hash = info_hash
         await self._session.flush()
         return row
+
+    async def update_label(self, torrent_id: int, label: str) -> TorrentRecord | None:
+        row = await self.get_by_id(torrent_id)
+        if row is None:
+            return None
+        row.label = label
+        await self._session.flush()
+        return row
+
+    async def list_labels(self) -> list[str]:
+        result = await self._session.execute(
+            select(TorrentRecord.label).where(TorrentRecord.label != "").distinct()
+        )
+        return sorted({r for r in result.scalars() if r})
+
+    async def get_by_ids(self, torrent_ids: list[int]) -> list[TorrentRecord]:
+        if not torrent_ids:
+            return []
+        result = await self._session.execute(
+            select(TorrentRecord).where(TorrentRecord.id.in_(torrent_ids))
+        )
+        return list(result.scalars())
 
     async def delete(self, torrent_id: int) -> bool:
         row = await self.get_by_id(torrent_id)

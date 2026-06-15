@@ -9,13 +9,17 @@ from seeding_db.repository import TorrentRepository
 from seeding_api.deps import DbSession, EnginePoolDep
 from seeding_api.runtime_sync import merge_runtime_into_row
 from seeding_api.schemas import (
+    BulkIdsIn,
     FilePrioritiesIn,
     LimitsIn,
     TorrentCreate,
     TorrentDetailOut,
     TorrentFileOut,
     TorrentOut,
+    TorrentPatch,
     TorrentTrackerOut,
+    TorrentUrlCreate,
+    TrackerAddIn,
 )
 
 log = logging.getLogger(__name__)
@@ -59,6 +63,7 @@ async def create_torrent(body: TorrentCreate, session: DbSession, pool: EnginePo
         save_path=body.save_path,
         magnet_uri=body.magnet_uri,
         engine_id=engine_id,
+        label=body.label.strip(),
     )
     await session.flush()
     await session.refresh(row)
@@ -78,6 +83,7 @@ async def upload_torrent_file(
     torrent_file: UploadFile = File(...),
     save_path: str = Form(...),
     display_name: str = Form(""),
+    label: str = Form(""),
 ):
     filename = (torrent_file.filename or "").strip()
     if not filename.lower().endswith(".torrent"):
@@ -96,6 +102,7 @@ async def upload_torrent_file(
         save_path=sp,
         magnet_uri=None,
         engine_id=engine_id,
+        label=label.strip(),
     )
     await session.flush()
     await session.refresh(row)
@@ -108,6 +115,112 @@ async def upload_torrent_file(
     await repo.update_status(row.id, TorrentStatus.downloading.value)
     await session.refresh(row)
     return row
+
+
+@router.post("/url", response_model=TorrentOut, status_code=201)
+async def create_torrent_from_url(body: TorrentUrlCreate, session: DbSession, pool: EnginePoolDep):
+    url = body.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status_code=422, detail="url must be http or https")
+    sp = body.save_path.strip()
+    engine_id = pool.resolve_engine_id(sp)
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0), follow_redirects=True) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            payload = resp.content
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"failed to fetch torrent: {exc}") from exc
+    if not payload or len(payload) < 20:
+        raise HTTPException(status_code=422, detail="downloaded file is empty or too small")
+    if not payload.lstrip().startswith(b"d"):
+        raise HTTPException(status_code=422, detail="url did not return a valid .torrent file")
+
+    name = body.display_name.strip()
+    if not name:
+        from urllib.parse import unquote, urlparse
+
+        path = urlparse(url).path
+        name = unquote(path.rsplit("/", 1)[-1]) if path else "torrent"
+        if name.lower().endswith(".torrent"):
+            name = name[: -len(".torrent")]
+
+    repo = TorrentRepository(session)
+    row = await repo.create(
+        display_name=name,
+        save_path=sp,
+        magnet_uri=None,
+        engine_id=engine_id,
+        label=body.label.strip(),
+    )
+    await session.flush()
+    await session.refresh(row)
+    try:
+        await pool.client_for(engine_id).register_torrent_file(row.id, payload, row.save_path)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await repo.update_status(row.id, TorrentStatus.downloading.value)
+    await session.refresh(row)
+    return row
+
+
+@router.post("/bulk/pause")
+async def bulk_pause(body: BulkIdsIn, session: DbSession, pool: EnginePoolDep):
+    repo = TorrentRepository(session)
+    rows = await repo.get_by_ids(body.ids)
+    ok, fail = 0, 0
+    for row in rows:
+        try:
+            await pool.client_for_row(row).pause(row.id)
+            await repo.update_status(row.id, TorrentStatus.paused.value)
+            ok += 1
+        except httpx.HTTPError:
+            fail += 1
+    return {"ok": ok, "fail": fail}
+
+
+@router.post("/bulk/resume")
+async def bulk_resume(body: BulkIdsIn, session: DbSession, pool: EnginePoolDep):
+    repo = TorrentRepository(session)
+    rows = await repo.get_by_ids(body.ids)
+    ok, fail = 0, 0
+    for row in rows:
+        try:
+            await pool.client_for_row(row).resume(row.id)
+            await repo.update_status(row.id, TorrentStatus.downloading.value)
+            ok += 1
+        except httpx.HTTPError:
+            fail += 1
+    return {"ok": ok, "fail": fail}
+
+
+@router.post("/bulk/delete")
+async def bulk_delete(
+    body: BulkIdsIn,
+    session: DbSession,
+    pool: EnginePoolDep,
+    delete_files: bool = Query(False),
+):
+    repo = TorrentRepository(session)
+    rows = await repo.get_by_ids(body.ids)
+    ok, fail = 0, 0
+    for row in rows:
+        try:
+            await pool.client_for_row(row).remove_from_runtime(
+                row.id,
+                delete_files=delete_files,
+                save_path=row.save_path,
+                display_name=row.display_name,
+            )
+        except httpx.HTTPError:
+            if _require_engine_for_delete():
+                fail += 1
+                continue
+        await repo.delete(row.id)
+        ok += 1
+    return {"ok": ok, "fail": fail}
 
 
 @router.get("/{torrent_id}", response_model=TorrentDetailOut)
@@ -138,6 +251,22 @@ async def get_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDep):
     data["runtime"] = runtime
     data["peer_list"] = peer_list
     return TorrentDetailOut.model_validate(data)
+
+
+@router.patch("/{torrent_id}", response_model=TorrentOut)
+async def patch_torrent(torrent_id: int, body: TorrentPatch, session: DbSession):
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    if body.label is not None:
+        await repo.update_label(torrent_id, body.label.strip())
+    if body.display_name is not None:
+        row.display_name = body.display_name.strip()
+        await session.flush()
+    out = await repo.get_by_id(torrent_id)
+    assert out is not None
+    return out
 
 
 @router.get("/{torrent_id}/files", response_model=list[TorrentFileOut])
@@ -178,6 +307,43 @@ async def list_torrent_trackers(torrent_id: int, session: DbSession, pool: Engin
         raise HTTPException(status_code=404, detail="torrent not found")
     try:
         trackers = await pool.client_for_row(row).list_trackers(torrent_id)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    return [TorrentTrackerOut.model_validate(t) for t in trackers]
+
+
+@router.post("/{torrent_id}/trackers", response_model=list[TorrentTrackerOut])
+async def add_torrent_tracker(
+    torrent_id: int, body: TrackerAddIn, session: DbSession, pool: EnginePoolDep
+):
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    try:
+        trackers = await pool.client_for_row(row).add_tracker(torrent_id, body.url)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    return [TorrentTrackerOut.model_validate(t) for t in trackers]
+
+
+@router.delete("/{torrent_id}/trackers", response_model=list[TorrentTrackerOut])
+async def remove_torrent_tracker(
+    torrent_id: int,
+    session: DbSession,
+    pool: EnginePoolDep,
+    url: str = Query(..., min_length=8),
+):
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    try:
+        trackers = await pool.client_for_row(row).remove_tracker(torrent_id, url)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="torrent or tracker not found") from exc
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="engine unavailable") from exc
     return [TorrentTrackerOut.model_validate(t) for t in trackers]

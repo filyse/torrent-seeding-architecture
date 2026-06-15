@@ -20,7 +20,25 @@ log = logging.getLogger(__name__)
 _RESTORE_CONCURRENCY = int(os.getenv("SEEDING_RESTORE_CONCURRENCY", "32"))
 
 
+def _is_complete_seed_snap(snap: dict) -> bool:
+    progress = snap.get("progress")
+    lt_state = (snap.get("lt_state") or "").strip().lower()
+    if lt_state in {"seeding", "finished"}:
+        return True
+    if progress is not None and float(progress) >= 0.999:
+        return lt_state not in {"downloading", "downloading_metadata"}
+    return False
+
+
 async def _sync_pause_from_db(db_id: int, db_status: str, ec: EngineClient, snap: dict) -> None:
+    # Готовые сиды после restore всегда активны (не оставляем в паузе из stale БД)
+    if _is_complete_seed_snap(snap):
+        if snap.get("runtime_status") == "paused":
+            try:
+                await ec.resume(db_id)
+            except httpx.HTTPError as exc:
+                log.warning("restore auto-resume seed id=%s failed: %s", db_id, exc)
+        return
     want_pause = db_status == TorrentStatus.paused.value
     is_paused = snap.get("runtime_status") == "paused"
     if want_pause == is_paused:

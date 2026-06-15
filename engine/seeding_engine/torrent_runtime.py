@@ -145,6 +145,20 @@ class TorrentRuntime(ABC):
     ) -> RuntimeHandle | None:
         return None
 
+    async def add_tracker(self, db_id: int, url: str) -> bool:
+        return False
+
+    async def remove_tracker(self, db_id: int, url: str) -> bool:
+        return False
+
+    async def session_stats(self) -> dict[str, object]:
+        return {}
+
+    async def set_session_limits(
+        self, download_limit: int | None, upload_limit: int | None
+    ) -> dict[str, object]:
+        return {}
+
 
 class MockTorrentRuntime(TorrentRuntime):
     backend_name = "mock"
@@ -971,6 +985,105 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         await asyncio.to_thread(_apply)
         await asyncio.to_thread(save_fastresume, lt, h, db_id)
         return await self._snapshot(db_id)
+
+    async def add_tracker(self, db_id: int, url: str) -> bool:
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None or not hasattr(h, "add_tracker"):
+            return False
+        url = url.strip()
+        if not url:
+            return False
+
+        def _add():
+            h.add_tracker({"url": url})
+
+        await asyncio.to_thread(_add)
+        return True
+
+    async def remove_tracker(self, db_id: int, url: str) -> bool:
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None or not hasattr(h, "trackers"):
+            return False
+        url = url.strip()
+        if not url:
+            return False
+
+        def _remove() -> bool:
+            kept: list[dict[str, object]] = []
+            for tr in h.trackers():
+                tr_url = str(tr.get("url") if isinstance(tr, dict) else getattr(tr, "url", tr))
+                if tr_url == url:
+                    continue
+                tier = tr.get("tier", 0) if isinstance(tr, dict) else getattr(tr, "tier", 0) or 0
+                kept.append({"url": tr_url, "tier": int(tier)})
+            if hasattr(h, "replace_trackers"):
+                h.replace_trackers(kept)
+                return True
+            if hasattr(h, "remove_tracker"):
+                h.remove_tracker(url)
+                return True
+            return False
+
+        return await asyncio.to_thread(_remove)
+
+    async def session_stats(self) -> dict[str, object]:
+        async with self._lock:
+            ses = self._ses
+            handles = dict(self._handles)
+        if ses is None:
+            return {"torrents": 0}
+
+        def _collect(handles_inner=handles, ses_inner=ses) -> dict[str, object]:
+            ss = ses_inner.status() if callable(getattr(ses_inner, "status", None)) else ses_inner.status
+            dl_rate = int(getattr(ss, "download_rate", 0) or getattr(ss, "payload_download_rate", 0) or 0)
+            up_rate = int(getattr(ss, "upload_rate", 0) or getattr(ss, "payload_upload_rate", 0) or 0)
+            total_up = 0
+            total_dl = 0
+            active = 0
+            for h in handles_inner.values():
+                try:
+                    st = h.status() if callable(getattr(h, "status", None)) else h.status
+                    total_up += int(getattr(st, "total_upload", 0) or getattr(st, "all_time_upload", 0) or 0)
+                    total_dl += int(getattr(st, "all_time_download", 0) or getattr(st, "total_download", 0) or 0)
+                    if not getattr(st, "paused", False):
+                        active += 1
+                except Exception:  # noqa: BLE001
+                    continue
+            dl_lim = int(ses_inner.download_rate_limit()) if hasattr(ses_inner, "download_rate_limit") else 0
+            up_lim = int(ses_inner.upload_rate_limit()) if hasattr(ses_inner, "upload_rate_limit") else 0
+            return {
+                "torrents": len(handles_inner),
+                "torrents_active": active,
+                "download_rate": dl_rate,
+                "upload_rate": up_rate,
+                "total_uploaded": total_up,
+                "total_downloaded": total_dl,
+                "download_limit": dl_lim,
+                "upload_limit": up_lim,
+                "dht_nodes": getattr(ss, "dht_nodes", None),
+                "listening_port": getattr(ss, "listening_port", None),
+            }
+
+        return await asyncio.to_thread(_collect)
+
+    async def set_session_limits(
+        self, download_limit: int | None, upload_limit: int | None
+    ) -> dict[str, object]:
+        async with self._lock:
+            ses = self._ses
+        if ses is None:
+            return {}
+
+        def _apply():
+            if download_limit is not None and hasattr(ses, "set_download_rate_limit"):
+                ses.set_download_rate_limit(max(0, int(download_limit)))
+            if upload_limit is not None and hasattr(ses, "set_upload_rate_limit"):
+                ses.set_upload_rate_limit(max(0, int(upload_limit)))
+
+        await asyncio.to_thread(_apply)
+        return await self.session_stats()
 
     async def list_all(self) -> list[RuntimeHandle]:
         async with self._lock:

@@ -74,6 +74,15 @@ class LimitsIn(BaseModel):
     upload_limit: int | None = None
 
 
+class TrackerAddIn(BaseModel):
+    url: str = Field(..., min_length=8)
+
+
+class SessionLimitsIn(BaseModel):
+    download_limit: int | None = None
+    upload_limit: int | None = None
+
+
 def get_runtime(request: Request):
     return request.app.state.torrent_runtime
 
@@ -186,6 +195,38 @@ async def set_runtime_limits(request: Request, db_id: int, body: LimitsIn):
     if h is None:
         raise HTTPException(status_code=404, detail="torrent not in engine runtime")
     return RuntimeHandleOut.model_validate(h)
+
+
+@router.get("/session/stats")
+async def session_stats(request: Request):
+    rt = get_runtime(request)
+    return await rt.session_stats()
+
+
+@router.post("/session/limits")
+async def set_session_limits(request: Request, body: SessionLimitsIn):
+    rt = get_runtime(request)
+    return await rt.set_session_limits(body.download_limit, body.upload_limit)
+
+
+@router.post("/torrents/{db_id}/trackers", response_model=list[TorrentTrackerOut])
+async def add_runtime_tracker(request: Request, db_id: int, body: TrackerAddIn):
+    rt = get_runtime(request)
+    ok = await rt.add_tracker(db_id, body.url)
+    if not ok:
+        raise HTTPException(status_code=404, detail="torrent not in engine runtime")
+    rows = await rt.list_trackers(db_id)
+    return [TorrentTrackerOut.model_validate(r) for r in rows]
+
+
+@router.delete("/torrents/{db_id}/trackers", response_model=list[TorrentTrackerOut])
+async def remove_runtime_tracker(request: Request, db_id: int, url: str = Query(..., min_length=8)):
+    rt = get_runtime(request)
+    ok = await rt.remove_tracker(db_id, url)
+    if not ok:
+        raise HTTPException(status_code=404, detail="torrent or tracker not found")
+    rows = await rt.list_trackers(db_id)
+    return [TorrentTrackerOut.model_validate(r) for r in rows]
 
 
 @router.get("/torrents/{db_id}/debug")

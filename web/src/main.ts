@@ -11,9 +11,22 @@ type TorrentOut = {
   magnet_uri: string | null;
   display_name: string;
   save_path: string;
+  engine_id: string;
+  label: string;
   status: string;
   created_at: string;
   runtime?: RuntimeOut | null;
+};
+
+type SessionStats = {
+  torrents: number;
+  torrents_active: number;
+  download_rate: number;
+  upload_rate: number;
+  total_uploaded: number;
+  total_downloaded: number;
+  engines_ok?: number;
+  engines_total?: number;
 };
 
 type RuntimeOut = {
@@ -77,6 +90,11 @@ let detailAbort: AbortController | null = null;
 let listLoadGeneration = 0;
 let lastListItems: TorrentOut[] = [];
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
+let selectedIds = new Set<number>();
+let listSearch = "";
+let listStatusFilter = "";
+let listLabelFilter = "";
+let listSort: "name" | "progress" | "up" | "added" = "added";
 
 type DetailSpoilerKey = "files" | "trackers" | "peers" | "meta";
 const detailSpoilerOpenById = new Map<number, Record<DetailSpoilerKey, boolean>>();
@@ -304,6 +322,93 @@ async function postAction(path: string): Promise<void> {
   await fetchJson(path, { method: "POST" });
 }
 
+function filterAndSortItems(items: TorrentOut[]): TorrentOut[] {
+  let out = items.slice();
+  const q = listSearch.trim().toLowerCase();
+  if (q) {
+    out = out.filter(
+      (t) =>
+        (t.display_name || "").toLowerCase().includes(q) ||
+        (t.label || "").toLowerCase().includes(q) ||
+        (t.info_hash || "").toLowerCase().includes(q),
+    );
+  }
+  if (listStatusFilter) {
+    out = out.filter((t) => effectiveStatus(t) === listStatusFilter);
+  }
+  if (listLabelFilter) {
+    out = out.filter((t) => (t.label || "") === listLabelFilter);
+  }
+  out.sort((a, b) => {
+    if (listSort === "name") return (a.display_name || "").localeCompare(b.display_name || "", "ru");
+    if (listSort === "progress") return (b.runtime?.progress ?? 0) - (a.runtime?.progress ?? 0);
+    if (listSort === "up") return (b.runtime?.upload_rate ?? 0) - (a.runtime?.upload_rate ?? 0);
+    return b.id - a.id;
+  });
+  return out;
+}
+
+async function loadSessionStats(): Promise<SessionStats | null> {
+  try {
+    return await fetchJson<SessionStats>("/session/stats");
+  } catch {
+    return null;
+  }
+}
+
+function mountSessionBar(stats: SessionStats | null): HTMLElement {
+  const bar = el("div", { className: "session-bar" });
+  if (!stats) {
+    bar.append(el("span", { className: "session-bar__muted" }, ["Статистика недоступна"]));
+    return bar;
+  }
+  bar.append(
+    el("span", {}, [`Раздач: ${stats.torrents} (${stats.torrents_active} актив.)`]),
+    el("span", {}, [`↓ ${fmtRate(stats.download_rate)}`]),
+    el("span", {}, [`↑ ${fmtRate(stats.upload_rate)}`]),
+    el("span", {}, [`Всего отдано: ${fmtBytes(stats.total_uploaded)}`]),
+  );
+  return bar;
+}
+
+function mountGlobalLimitsPanel(): HTMLElement {
+  const panel = el("details", { className: "panel panel--compact" });
+  const body = el("div", { className: "panel__body" });
+  const dlInput = el("input", { type: "number", min: "0", placeholder: "∞" }) as HTMLInputElement;
+  const ulInput = el("input", { type: "number", min: "0", placeholder: "∞" }) as HTMLInputElement;
+  const applyBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, [
+    "Применить на все движки",
+  ]);
+  applyBtn.addEventListener("click", async () => {
+    applyBtn.disabled = true;
+    const parse = (s: string) => {
+      const n = Number(s.trim());
+      return Number.isFinite(n) && n > 0 ? Math.round(n * 1024) : 0;
+    };
+    try {
+      await fetchJson("/session/limits", {
+        method: "POST",
+        body: JSON.stringify({ download_limit: parse(dlInput.value), upload_limit: parse(ulInput.value) }),
+      });
+      showToast("Глобальные лимиты применены");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      applyBtn.disabled = false;
+    }
+  });
+  body.append(
+    el("p", { className: "field__hint" }, ["Лимиты сессии libtorrent (0 = без ограничения)"]),
+    el("div", { className: "limits-form" }, [
+      el("label", { className: "limits-form__field" }, ["↓ КБ/с", dlInput]),
+      el("label", { className: "limits-form__field" }, ["↑ КБ/с", ulInput]),
+      applyBtn,
+    ]),
+  );
+  panel.append(el("summary", {}, ["Глобальные лимиты"]), body);
+  return panel;
+}
+
 function effectiveStatus(t: TorrentOut | TorrentDetailOut): string {
   const rs = (t.runtime?.runtime_status || "").toLowerCase();
   const lt = (t.runtime?.lt_state || "").toLowerCase();
@@ -483,22 +588,63 @@ function buildTrackersSpoiler(
     }
   });
   announceRow.append(annBtn);
-  inner.append(announceRow);
+
+  const addRow = el("div", { className: "tracker-add-row" });
+  const urlInput = el("input", {
+    type: "url",
+    placeholder: "https://tracker.example/announce",
+  }) as HTMLInputElement;
+  const addBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Добавить"]);
+  addBtn.addEventListener("click", async () => {
+    const url = urlInput.value.trim();
+    if (!url) return;
+    addBtn.disabled = true;
+    try {
+      await fetchJson(`/torrents/${torrentId}/trackers`, {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      });
+      urlInput.value = "";
+      showToast("Трекер добавлен");
+      onReannounce();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      addBtn.disabled = false;
+    }
+  });
+  addRow.append(urlInput, addBtn);
+  inner.append(announceRow, addRow);
 
   if (trackers.length === 0) {
     inner.append(el("p", { className: "details-block__empty" }, ["Нет трекеров"]));
   } else {
     const table = el("table", { className: "peer-table" });
     const headRow = el("tr");
-    for (const label of ["Трекер", "Сообщение", "Пиры", "✓"]) headRow.append(el("th", {}, [label]));
+    for (const label of ["Трекер", "Сообщение", "Пиры", "✓", ""]) headRow.append(el("th", {}, [label]));
     const body = el("tbody");
     for (const t of trackers) {
       const row = el("tr");
+      const delBtn = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["×"]);
+      delBtn.addEventListener("click", async () => {
+        delBtn.disabled = true;
+        try {
+          await fetchJson(`/torrents/${torrentId}/trackers?url=${encodeURIComponent(t.url)}`, {
+            method: "DELETE",
+          });
+          showToast("Трекер удалён");
+          onReannounce();
+        } catch (e) {
+          showToast(e instanceof Error ? e.message : String(e), true);
+          delBtn.disabled = false;
+        }
+      });
       row.append(
         el("td", { className: "peer-table__mono" }, [t.url]),
         el("td", {}, [t.message || "—"]),
         el("td", { className: "peer-table__num" }, [String(t.num_peers)]),
         el("td", { className: "peer-table__num" }, [t.verified ? "✓" : "—"]),
+        el("td", {}, [delBtn]),
       );
       body.append(row);
     }
@@ -613,10 +759,17 @@ async function deleteTorrentWithDialog(
   }
 }
 
-function renderTorrentCard(t: TorrentOut, onChange: () => void): HTMLElement {
+function renderTorrentCard(
+  t: TorrentOut,
+  onChange: () => void,
+  onSelectToggle: (id: number, checked: boolean) => void,
+): HTMLElement {
   const progress = t.runtime?.progress ?? 0;
   const pct = Math.round(progress * 1000) / 10;
   const card = el("li", { className: "torrent-card" });
+  const checkbox = el("input", { type: "checkbox", className: "torrent-card__check" }) as HTMLInputElement;
+  checkbox.checked = selectedIds.has(t.id);
+  checkbox.addEventListener("change", () => onSelectToggle(t.id, checkbox.checked));
   const title = el(
     "h3",
     { className: "torrent-card__title" },
@@ -634,6 +787,10 @@ function renderTorrentCard(t: TorrentOut, onChange: () => void): HTMLElement {
   );
   const st = effectiveStatus(t);
   const badge = el("span", { className: badgeClass(st) }, [displayStatusLabel(t)]);
+  const labelBadge =
+    t.label && t.label.trim()
+      ? el("span", { className: "badge badge--label" }, [t.label])
+      : null;
   const bar = el("div", { className: "progress" });
   const barInner = el("div", {
     className: `progress__bar${pct >= 100 ? " progress__bar--complete" : ""}`,
@@ -681,8 +838,10 @@ function renderTorrentCard(t: TorrentOut, onChange: () => void): HTMLElement {
   if (t.status === "paused") pauseBtn.disabled = true;
   else resumeBtn.disabled = true;
   actions.append(pauseBtn, resumeBtn, delBtn);
+  const topRight = el("div", { className: "torrent-card__badges" }, [badge]);
+  if (labelBadge) topRight.append(labelBadge);
   card.append(
-    el("div", { className: "torrent-card__top" }, [title, badge]),
+    el("div", { className: "torrent-card__top" }, [checkbox, title, topRight]),
     bar,
     stats,
     actions,
@@ -700,24 +859,35 @@ function updateLiveMeta(metaEl: HTMLElement, items: TorrentOut[]): void {
 
 function paintTorrentList(refs: ListHostRefs, items: TorrentOut[]): void {
   const { listEl, countEl, metaEl } = refs;
+  const filtered = filterAndSortItems(items);
+  const total = items.length;
+  const shown = filtered.length;
   countEl.textContent =
-    items.length === 0
-      ? "Нет торрентов"
-      : `${items.length} ${items.length === 1 ? "торрент" : items.length < 5 ? "торрента" : "торрентов"}`;
+    shown === total
+      ? `${total} ${total === 1 ? "торрент" : total < 5 ? "торрента" : "торрентов"}`
+      : `${shown} из ${total}`;
   updateLiveMeta(metaEl, items);
   listEl.replaceChildren();
-  if (items.length === 0) {
+  if (shown === 0) {
     listEl.append(
       el("div", { className: "empty-state" }, [
-        el("p", {}, ["Пока пусто"]),
-        el("p", {}, ["Добавьте magnet или .torrent ниже"]),
+        el("p", {}, [total === 0 ? "Пока пусто" : "Ничего не найдено"]),
+        el("p", {}, [total === 0 ? "Добавьте magnet, URL или .torrent ниже" : "Измените фильтр"]),
       ]),
     );
     return;
   }
   const ul = el("ul", { className: "torrent-list" });
-  const refresh = () => void loadTorrents(refs.listEl, refs.countEl, refs.metaEl, { silent: true, scheduleNext: refs.scheduleNext });
-  for (const t of items) ul.append(renderTorrentCard(t, refresh));
+  const refresh = () =>
+    void loadTorrents(refs.listEl, refs.countEl, refs.metaEl, {
+      silent: true,
+      scheduleNext: refs.scheduleNext,
+    });
+  const onSelectToggle = (id: number, checked: boolean) => {
+    if (checked) selectedIds.add(id);
+    else selectedIds.delete(id);
+  };
+  for (const t of filtered) ul.append(renderTorrentCard(t, refresh, onSelectToggle));
   listEl.append(ul);
 }
 
@@ -783,32 +953,42 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   const tabMagnet = el("button", { type: "button", className: "tab tab--active", "data-tab": "magnet" }, [
     "Magnet",
   ]);
+  const tabUrl = el("button", { type: "button", className: "tab", "data-tab": "url" }, ["URL"]);
   const tabFile = el("button", { type: "button", className: "tab", "data-tab": "file" }, ["Файл"]);
-  tabs.append(tabMagnet, tabFile);
+  tabs.append(tabMagnet, tabUrl, tabFile);
 
   const magnetPanel = el("div", { className: "tab-panel", "data-panel": "magnet" });
+  const urlPanel = el("div", { className: "tab-panel", "data-panel": "url", hidden: "" });
   const filePanel = el("div", { className: "tab-panel", "data-panel": "file", hidden: "" });
 
   const magnetInput = el("input", {
     type: "text",
     placeholder: "magnet:?xt=urn:btih:…",
   }) as HTMLInputElement;
+  const urlInput = el("input", {
+    type: "url",
+    placeholder: "https://example.com/file.torrent",
+  }) as HTMLInputElement;
   const savePathInput = el("input", {
     type: "text",
     value: savePathDefault,
   }) as HTMLInputElement;
+  const labelInput = el("input", { type: "text", placeholder: "Метка (необязательно)" }) as HTMLInputElement;
   const nameMagnet = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
+  const nameUrl = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
   const torrentFile = el("input", { type: "file", accept: ".torrent" }) as HTMLInputElement;
   const nameFile = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
 
-  const switchTab = (name: "magnet" | "file") => {
-    const magnet = name === "magnet";
-    tabMagnet.classList.toggle("tab--active", magnet);
-    tabFile.classList.toggle("tab--active", !magnet);
-    magnetPanel.hidden = !magnet;
-    filePanel.hidden = magnet;
+  const switchTab = (name: "magnet" | "url" | "file") => {
+    tabMagnet.classList.toggle("tab--active", name === "magnet");
+    tabUrl.classList.toggle("tab--active", name === "url");
+    tabFile.classList.toggle("tab--active", name === "file");
+    magnetPanel.hidden = name !== "magnet";
+    urlPanel.hidden = name !== "url";
+    filePanel.hidden = name !== "file";
   };
   tabMagnet.addEventListener("click", () => switchTab("magnet"));
+  tabUrl.addEventListener("click", () => switchTab("url"));
   tabFile.addEventListener("click", () => switchTab("file"));
 
   magnetPanel.append(
@@ -816,6 +996,14 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     field("Название", nameMagnet),
     el("div", { className: "btn-row" }, [
       el("button", { type: "button", className: "btn btn--primary", id: "btn-add-magnet" }, ["Добавить"]),
+    ]),
+  );
+
+  urlPanel.append(
+    field("URL .torrent", urlInput),
+    field("Название", nameUrl),
+    el("div", { className: "btn-row" }, [
+      el("button", { type: "button", className: "btn btn--primary", id: "btn-add-url" }, ["Загрузить по URL"]),
     ]),
   );
 
@@ -827,7 +1015,14 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     ]),
   );
 
-  body.append(field("Папка на сервере", savePathInput, "Обычно /data в Docker"), tabs, magnetPanel, filePanel);
+  body.append(
+    field("Папка на сервере", savePathInput, "Обычно /data/b1 для движка b1"),
+    field("Метка", labelInput),
+    tabs,
+    magnetPanel,
+    urlPanel,
+    filePanel,
+  );
 
   magnetPanel.querySelector("#btn-add-magnet")?.addEventListener("click", async () => {
     const magnet_uri = magnetInput.value.trim();
@@ -843,11 +1038,38 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
           magnet_uri,
           save_path,
           display_name: nameMagnet.value.trim(),
+          label: labelInput.value.trim(),
         }),
       });
       magnetInput.value = "";
       nameMagnet.value = "";
       showToast("Торрент добавлен");
+      onAdded(created);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    }
+  });
+
+  urlPanel.querySelector("#btn-add-url")?.addEventListener("click", async () => {
+    const url = urlInput.value.trim();
+    const save_path = savePathInput.value.trim();
+    if (!url || !save_path) {
+      showToast("Укажите URL и папку", true);
+      return;
+    }
+    try {
+      const created = await fetchJson<TorrentOut>("/torrents/url", {
+        method: "POST",
+        body: JSON.stringify({
+          url,
+          save_path,
+          display_name: nameUrl.value.trim(),
+          label: labelInput.value.trim(),
+        }),
+      });
+      urlInput.value = "";
+      nameUrl.value = "";
+      showToast("Торрент загружен по URL");
       onAdded(created);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), true);
@@ -866,6 +1088,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
       body.set("torrent_file", file, file.name);
       body.set("save_path", save_path);
       body.set("display_name", nameFile.value.trim());
+      body.set("label", labelInput.value.trim());
       const res = await fetch(`${API}/torrents/upload`, { method: "POST", headers: apiHeaders(false), body });
       await throwIfNotOk(res);
       const created = (await res.json()) as TorrentOut;
@@ -893,6 +1116,7 @@ function mountListShell(root: HTMLElement): void {
   const metaEl = el("div", { className: "app-header__meta" });
   const listHost = el("div", { id: "torrent-list-host" });
   const countEl = el("span", { className: "list-toolbar__count" });
+  const sessionBarHost = el("div", { id: "session-bar-host" });
 
   const listRefs: ListHostRefs = {
     listEl: listHost,
@@ -908,28 +1132,141 @@ function mountListShell(root: HTMLElement): void {
       scheduleNext: listRefs.scheduleNext,
     });
 
+  const repaint = () => paintTorrentList(listRefs, lastListItems);
+
   const onAdded = (created?: TorrentOut) => {
     if (created) showTorrentInList(listRefs, created);
     void refresh({ afterAdd: true });
   };
+
+  const searchInput = el("input", {
+    type: "search",
+    placeholder: "Поиск по названию, метке, hash…",
+    className: "list-filter__search",
+    value: listSearch,
+  }) as HTMLInputElement;
+  searchInput.addEventListener("input", () => {
+    listSearch = searchInput.value;
+    repaint();
+  });
+
+  const statusSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
+  for (const [val, label] of [
+    ["", "Все статусы"],
+    ["seeding", "Раздача"],
+    ["downloading", "Загрузка"],
+    ["paused", "Пауза"],
+  ]) {
+    const o = el("option", { value: val }, [label]) as HTMLOptionElement;
+    if (val === listStatusFilter) o.selected = true;
+    statusSelect.append(o);
+  }
+  statusSelect.addEventListener("change", () => {
+    listStatusFilter = statusSelect.value;
+    repaint();
+  });
+
+  const labelSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
+  const reloadLabels = async () => {
+    labelSelect.replaceChildren(el("option", { value: "" }, ["Все метки"]));
+    try {
+      const labels = await fetchJson<string[]>("/labels");
+      for (const lb of labels) {
+        const o = el("option", { value: lb }, [lb]) as HTMLOptionElement;
+        if (lb === listLabelFilter) o.selected = true;
+        labelSelect.append(o);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+  labelSelect.addEventListener("change", () => {
+    listLabelFilter = labelSelect.value;
+    repaint();
+  });
+
+  const sortSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
+  for (const [val, label] of [
+    ["added", "Сорт: новые"],
+    ["name", "Сорт: имя"],
+    ["progress", "Сорт: прогресс"],
+    ["up", "Сорт: отдача"],
+  ]) {
+    const o = el("option", { value: val }, [label]) as HTMLOptionElement;
+    if (val === listSort) o.selected = true;
+    sortSelect.append(o);
+  }
+  sortSelect.addEventListener("change", () => {
+    listSort = sortSelect.value as typeof listSort;
+    repaint();
+  });
+
+  const bulkPause = el("button", { type: "button", className: "btn btn--sm" }, ["Пауза выбранные"]);
+  const bulkResume = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Старт выбранные"]);
+  const bulkDel = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["Удалить выбранные"]);
+  const runBulk = async (path: string) => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) {
+      showToast("Ничего не выбрано", true);
+      return;
+    }
+    try {
+      await fetchJson(path, { method: "POST", body: JSON.stringify({ ids }) });
+      selectedIds.clear();
+      showToast("Готово");
+      void refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    }
+  };
+  bulkPause.addEventListener("click", () => void runBulk("/torrents/bulk/pause"));
+  bulkResume.addEventListener("click", () => void runBulk("/torrents/bulk/resume"));
+  bulkDel.addEventListener("click", async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) {
+      showToast("Ничего не выбрано", true);
+      return;
+    }
+    if (!window.confirm(`Удалить ${ids.length} торрент(ов) из списка?`)) return;
+    try {
+      await fetchJson("/torrents/bulk/delete", { method: "POST", body: JSON.stringify({ ids }) });
+      selectedIds.clear();
+      showToast("Удалено");
+      void refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    }
+  });
 
   const header = el("header", { className: "app-header" }, [
     el("div", {}, [el("h1", {}, ["Раздача"]), el("p", { className: "field__hint" }, ["Управление торрентами"])]),
     metaEl,
   ]);
 
+  const filters = el("div", { className: "list-filters" }, [searchInput, statusSelect, labelSelect, sortSelect]);
   const toolbar = el("div", { className: "list-toolbar" }, [
     countEl,
     el("button", { type: "button", className: "btn btn--ghost btn--sm", id: "btn-refresh" }, ["Обновить"]),
+    bulkPause,
+    bulkResume,
+    bulkDel,
   ]);
   toolbar.querySelector("#btn-refresh")?.addEventListener("click", () => void refresh());
 
   root.append(
     header,
-    mountAddPanel("/data", onAdded),
+    sessionBarHost,
+    mountGlobalLimitsPanel(),
+    mountAddPanel("/data/b1", onAdded),
+    filters,
     toolbar,
     listHost,
   );
+
+  void reloadLabels();
+  void loadSessionStats().then((s) => {
+    sessionBarHost.replaceChildren(mountSessionBar(s));
+  });
 
   const onVisibility = () => {
     if (parseRoute().view !== "list") return;
@@ -1006,7 +1343,34 @@ async function loadDetail(
     addStat("ETA", fmtEta(data.runtime?.eta));
     addStat("Лимиты ↓/↑", `${fmtLimit(data.runtime?.download_limit)} / ${fmtLimit(data.runtime?.upload_limit)}`);
     addStat("Папка", data.save_path);
+    addStat("Метка", data.label || "—");
     addStat("Статус", displayStatusLabel(data));
+
+    const backRefresh = () => loadDetail(id, container, metaEl, scheduleNext);
+
+    const labelRow = el("div", { className: "label-edit-row" });
+    const labelInput = el("input", {
+      type: "text",
+      placeholder: "Метка",
+      value: data.label || "",
+    }) as HTMLInputElement;
+    const labelSave = el("button", { type: "button", className: "btn btn--sm" }, ["Сохранить метку"]);
+    labelSave.addEventListener("click", async () => {
+      labelSave.disabled = true;
+      try {
+        await fetchJson(`/torrents/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ label: labelInput.value.trim() }),
+        });
+        showToast("Метка сохранена");
+        await backRefresh();
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : String(e), true);
+      } finally {
+        labelSave.disabled = false;
+      }
+    });
+    labelRow.append(labelInput, labelSave);
 
     const actions = el("div", { className: "btn-row" });
     const pauseBtn = el("button", { type: "button", className: "btn" }, ["Пауза"]);
@@ -1014,7 +1378,6 @@ async function loadDetail(
     const recheckBtn = el("button", { type: "button", className: "btn" }, ["Проверить"]);
     const reannounceBtn = el("button", { type: "button", className: "btn" }, ["Переанонс"]);
     const delBtn = el("button", { type: "button", className: "btn btn--danger" }, ["Удалить"]);
-    const backRefresh = () => loadDetail(id, container, metaEl, scheduleNext);
 
     recheckBtn.addEventListener("click", async () => {
       recheckBtn.disabled = true;
@@ -1070,6 +1433,7 @@ async function loadDetail(
       el("h1", {}, [data.display_name || `Торрент #${data.id}`]),
       bar,
       grid,
+      labelRow,
       actions,
       buildLimitsForm(data, () => void backRefresh()),
       buildFilesSpoiler(files, id, () => void backRefresh()),

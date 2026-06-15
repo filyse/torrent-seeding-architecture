@@ -29,5 +29,6 @@ class TorrentRecord(Base):
     display_name: Mapped[str] = mapped_column(String(512), default="")
     save_path: Mapped[str] = mapped_column(Text, default="")
     engine_id: Mapped[str] = mapped_column(String(32), default="default", index=True)
+    label: Mapped[str] = mapped_column(String(128), default="", index=True)
     status: Mapped[str] = mapped_column(String(32), default=TorrentStatus.queued.value)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

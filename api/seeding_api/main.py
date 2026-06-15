@@ -16,6 +16,7 @@ from seeding_api.engine_pool import EnginePool
 from seeding_api.restore import maybe_restore_torrents_to_engine
 from seeding_api.routers import engines as engines_router
 from seeding_api.routers import jobs as jobs_router
+from seeding_api.routers import session as session_router
 from seeding_api.routers import torrents as torrents_router
 
 
@@ -103,6 +104,11 @@ async def root():
     return {"docs": "/docs", "health": "/api/v1/health"}
 
 
+app.include_router(
+    session_router.router,
+    prefix="/api/v1",
+    dependencies=[Depends(require_api_key_if_configured)],
+)
 app.include_router(
     torrents_router.router,
     prefix="/api/v1/torrents",

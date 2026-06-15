@@ -125,6 +125,39 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def add_tracker(self, db_id: int, url: str) -> list[dict]:
+        r = await self._client.post(
+            f"/internal/v1/torrents/{db_id}/trackers",
+            json={"url": url},
+        )
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else []
+
+    async def remove_tracker(self, db_id: int, url: str) -> list[dict]:
+        r = await self._client.delete(
+            f"/internal/v1/torrents/{db_id}/trackers",
+            params={"url": url},
+        )
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else []
+
+    async def session_stats(self) -> dict:
+        r = await self._client.get("/internal/v1/session/stats")
+        r.raise_for_status()
+        return r.json()
+
+    async def set_session_limits(
+        self, download_limit: int | None, upload_limit: int | None
+    ) -> dict:
+        r = await self._client.post(
+            "/internal/v1/session/limits",
+            json={"download_limit": download_limit, "upload_limit": upload_limit},
+        )
+        r.raise_for_status()
+        return r.json()
+
     async def remove_from_runtime(
         self,
         db_id: int,

@@ -49,3 +49,49 @@ class EnginePool:
             except httpx.HTTPError:
                 out[spec.id] = False
         return out
+
+    async def session_stats_all(self) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for spec in self._specs:
+            try:
+                out[spec.id] = await self._by_id[spec.id].session_stats()
+            except httpx.HTTPError:
+                out[spec.id] = {"error": True}
+        return out
+
+    async def set_session_limits_all(
+        self, download_limit: int | None, upload_limit: int | None
+    ) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for spec in self._specs:
+            try:
+                out[spec.id] = await self._by_id[spec.id].set_session_limits(
+                    download_limit, upload_limit
+                )
+            except httpx.HTTPError as exc:
+                out[spec.id] = {"error": str(exc)}
+        return out
+
+    @staticmethod
+    def aggregate_session_stats(by_engine: dict[str, dict]) -> dict:
+        total: dict[str, int] = {
+            "torrents": 0,
+            "torrents_active": 0,
+            "download_rate": 0,
+            "upload_rate": 0,
+            "total_uploaded": 0,
+            "total_downloaded": 0,
+        }
+        engines_ok = 0
+        for stats in by_engine.values():
+            if stats.get("error"):
+                continue
+            engines_ok += 1
+            for key in total:
+                total[key] += int(stats.get(key) or 0)
+        return {
+            **total,
+            "engines_ok": engines_ok,
+            "engines_total": len(by_engine),
+            "by_engine": by_engine,
+        }

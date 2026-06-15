@@ -15,5 +15,11 @@ def test_still_downloading_below_complete():
     assert status_from_runtime("active", "downloading", 0.5) == TorrentStatus.downloading.value
 
 
-def test_paused_wins():
-    assert status_from_runtime("paused", "seeding", 1.0) == TorrentStatus.paused.value
+def test_paused_wins_when_incomplete():
+    assert status_from_runtime("paused", "downloading", 0.5) == TorrentStatus.paused.value
+
+
+def test_complete_seed_not_stuck_paused():
+    """После restore готовый сид не должен оставаться paused в БД."""
+    assert status_from_runtime("paused", "seeding", 1.0) == TorrentStatus.seeding.value
+    assert status_from_runtime("paused", "finished", 1.0) == TorrentStatus.seeding.value
