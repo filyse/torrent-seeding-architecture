@@ -833,19 +833,47 @@ body {
 }
 
 .list-toolbar__label-input {
-  padding: 0.4rem 0.55rem;
+  padding: 0.35rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   color: inherit;
   font: inherit;
-  font-size: 0.875rem;
-  width: 11rem;
+  font-size: 0.85rem;
+  width: 10rem;
 }
 
 .list-toolbar__label-input:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* Контекстная панель массовых действий — появляется только при выделении. */
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.bulk-bar[hidden] {
+  display: none;
+}
+
+.bulk-bar__count {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-right: 0.35rem;
+  white-space: nowrap;
+}
+
+.bulk-bar__spacer {
+  margin-left: auto;
 }
 
 .torrent-card__top {

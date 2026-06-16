@@ -117,6 +117,7 @@ let listLoadGeneration = 0;
 let lastListItems: TorrentOut[] = [];
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let selectedIds = new Set<number>();
+let selectionChanged: (() => void) | null = null;
 
 function lsGet(key: string): string | null {
   try {
@@ -964,6 +965,17 @@ function paintTorrentList(refs: ListHostRefs, items: TorrentOut[]): void {
     );
     return;
   }
+  // Чистим выделение от исчезнувших раздач, чтобы счётчик и массовые действия были точны.
+  const presentIds = new Set(items.map((t) => t.id));
+  let pruned = false;
+  for (const id of [...selectedIds]) {
+    if (!presentIds.has(id)) {
+      selectedIds.delete(id);
+      pruned = true;
+    }
+  }
+  if (pruned) selectionChanged?.();
+
   const ul = el("ul", { className: "torrent-list" });
   const refresh = () =>
     void loadTorrents(refs.listEl, refs.countEl, refs.metaEl, {
@@ -973,6 +985,7 @@ function paintTorrentList(refs: ListHostRefs, items: TorrentOut[]): void {
   const onSelectToggle = (id: number, checked: boolean) => {
     if (checked) selectedIds.add(id);
     else selectedIds.delete(id);
+    selectionChanged?.();
   };
   for (const t of filtered) ul.append(renderTorrentCard(t, refresh, onSelectToggle));
   listEl.append(ul);
@@ -1467,9 +1480,9 @@ function mountListShell(root: HTMLElement): void {
     applyDensity();
   });
 
-  const bulkPause = el("button", { type: "button", className: "btn btn--sm" }, ["Пауза выбранные"]);
-  const bulkResume = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Старт выбранные"]);
-  const bulkDel = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["Удалить выбранные"]);
+  const bulkPause = el("button", { type: "button", className: "btn btn--sm" }, ["⏸ Пауза"]);
+  const bulkResume = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["▶ Старт"]);
+  const bulkDel = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["🗑 Удалить"]);
   const runBulk = async (path: string) => {
     const ids = [...selectedIds];
     if (ids.length === 0) {
@@ -1479,6 +1492,7 @@ function mountListShell(root: HTMLElement): void {
     try {
       await fetchJson(path, { method: "POST", body: JSON.stringify({ ids }) });
       selectedIds.clear();
+      syncBulkBar();
       showToast("Готово");
       void refresh();
     } catch (e) {
@@ -1491,10 +1505,10 @@ function mountListShell(root: HTMLElement): void {
   const bulkLabelInput = el("input", {
     type: "text",
     className: "list-toolbar__label-input",
-    placeholder: "Метка для выбранных",
+    placeholder: "Метка…",
     list: "label-suggestions",
   }) as HTMLInputElement;
-  const bulkLabelBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Назначить метку"]);
+  const bulkLabelBtn = el("button", { type: "button", className: "btn btn--sm" }, ["🏷 Метка"]);
   const applyBulkLabel = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) {
@@ -1506,6 +1520,7 @@ function mountListShell(root: HTMLElement): void {
       await fetchJson("/torrents/bulk/label", { method: "POST", body: JSON.stringify({ ids, label }) });
       bulkLabelInput.value = "";
       selectedIds.clear();
+      syncBulkBar();
       showToast(label ? `Метка «${label}» назначена` : "Метка снята");
       await reloadLabels();
       void refresh();
@@ -1527,6 +1542,7 @@ function mountListShell(root: HTMLElement): void {
     try {
       await fetchJson("/torrents/bulk/delete", { method: "POST", body: JSON.stringify({ ids }) });
       selectedIds.clear();
+      syncBulkBar();
       showToast("Удалено");
       void refresh();
     } catch (e) {
@@ -1571,23 +1587,44 @@ function mountListShell(root: HTMLElement): void {
     resetFilters,
   ]);
   applyDensity();
-  const toolbar = el("div", { className: "list-toolbar" }, [
-    countEl,
-    el("button", { type: "button", className: "btn btn--ghost btn--sm", id: "btn-refresh" }, ["Обновить"]),
-    bulkPause,
+
+  // Обычная панель: только счётчик и обновление — без нагромождения кнопок.
+  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["Обновить"]);
+  refreshBtn.addEventListener("click", () => void refresh());
+  const toolbar = el("div", { className: "list-toolbar" }, [countEl, refreshBtn, labelSuggestions]);
+
+  // Контекстная панель массовых действий: видна только когда что-то выбрано.
+  const bulkCount = el("span", { className: "bulk-bar__count" });
+  const clearSelBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["Снять"]);
+  clearSelBtn.addEventListener("click", () => {
+    selectedIds.clear();
+    repaint();
+    syncBulkBar();
+  });
+  const bulkBar = el("div", { className: "bulk-bar", hidden: "" }, [
+    bulkCount,
     bulkResume,
+    bulkPause,
     bulkLabelInput,
     bulkLabelBtn,
     bulkDel,
-    labelSuggestions,
+    el("span", { className: "bulk-bar__spacer" }),
+    clearSelBtn,
   ]);
-  toolbar.querySelector("#btn-refresh")?.addEventListener("click", () => void refresh());
+  function syncBulkBar(): void {
+    const n = selectedIds.size;
+    bulkBar.hidden = n === 0;
+    bulkCount.textContent = `Выбрано: ${n}`;
+  }
+  selectionChanged = syncBulkBar;
+  syncBulkBar();
 
   root.append(
     header,
     sessionBarHost,
     filters,
     toolbar,
+    bulkBar,
     listHost,
   );
 
