@@ -29,6 +29,38 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        log.warning("%s ignored (not int): %s", name, raw)
+        return default
+
+
+def _clear_auto_managed_params(lt, p) -> None:
+    """Сидбокс: ручное управление паузой. Снимаем auto_managed и paused у add_torrent_params,
+    чтобы libtorrent не ставил готовые сиды на паузу сам и пауза от пользователя «прилипала»."""
+    tf = getattr(lt, "torrent_flags", None)
+    if tf is None:
+        if hasattr(p, "auto_managed"):
+            p.auto_managed = False
+        if hasattr(p, "paused"):
+            p.paused = False
+        return
+    try:
+        flags = p.flags
+        if hasattr(tf, "auto_managed"):
+            flags &= ~tf.auto_managed
+        if hasattr(tf, "paused"):
+            flags &= ~tf.paused
+        p.flags = flags
+    except Exception as exc:  # noqa: BLE001
+        log.warning("clear auto_managed on params failed: %s", exc)
+
+
 def _apply_libtorrent_session_settings(lt, ses) -> None:
     """DHT/LSD/UPnP/NAT-PMP и лимиты из env (разные версии биндингов — best effort)."""
     listen_ifs = os.getenv("LT_LISTEN_INTERFACES", "0.0.0.0:51413,[::]:51413").strip()
@@ -37,6 +69,12 @@ def _apply_libtorrent_session_settings(lt, ses) -> None:
         "enable_lsd": _env_bool("LT_ENABLE_LSD", True),
         "enable_upnp": _env_bool("LT_ENABLE_UPNP", True),
         "enable_natpmp": _env_bool("LT_ENABLE_NATPMP", True),
+        # Сидбокс: не даём auto-manager ставить сиды на паузу сверх лимитов.
+        # -1 = без ограничения. Это и есть корневой фикс «после рестарта часть в паузе».
+        "active_seeds": _env_int("LT_ACTIVE_SEEDS", -1),
+        "active_downloads": _env_int("LT_ACTIVE_DOWNLOADS", -1),
+        "active_limit": _env_int("LT_ACTIVE_LIMIT", -1),
+        "dont_count_slow_torrents": _env_bool("LT_DONT_COUNT_SLOW", True),
     }
     if listen_ifs:
         settings["listen_interfaces"] = listen_ifs
@@ -454,6 +492,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 except Exception as exc:  # noqa: BLE001
                     raise ValueError(f"invalid .torrent data: {exc}") from exc
             p.save_path = save_path
+            _clear_auto_managed_params(lt, p)
             return ses.add_torrent(p)
 
         try:
@@ -738,13 +777,30 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             upload_limit=up_limit,
         )
 
+    def _unset_auto_managed(self, h) -> None:
+        lt = self._lt
+        tf = getattr(lt, "torrent_flags", None)
+        if tf is not None and hasattr(h, "unset_flags") and hasattr(tf, "auto_managed"):
+            try:
+                h.unset_flags(tf.auto_managed)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("unset auto_managed failed: %s", exc)
+
+    def _manual_pause(self, h) -> None:
+        self._unset_auto_managed(h)
+        h.pause()
+
+    def _manual_resume(self, h) -> None:
+        self._unset_auto_managed(h)
+        h.resume()
+
     async def pause(self, db_id: int) -> RuntimeHandle | None:
         lt = self._lt
         async with self._lock:
             h = self._handles.get(db_id)
         if h is None:
             return None
-        await asyncio.to_thread(h.pause)
+        await asyncio.to_thread(self._manual_pause, h)
         await asyncio.to_thread(save_fastresume, lt, h, db_id)
         return await self._snapshot(db_id)
 
@@ -753,7 +809,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             h = self._handles.get(db_id)
         if h is None:
             return None
-        await asyncio.to_thread(h.resume)
+        await asyncio.to_thread(self._manual_resume, h)
         return await self._snapshot(db_id)
 
     async def get(self, db_id: int) -> RuntimeHandle | None:

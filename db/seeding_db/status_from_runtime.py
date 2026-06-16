@@ -5,13 +5,6 @@ from __future__ import annotations
 from seeding_db.models import TorrentStatus
 
 
-def _is_complete_seed(lt_state: str | None, progress: float | None) -> bool:
-    st = (lt_state or "").strip().lower()
-    if st in {"seeding", "finished"}:
-        return True
-    return progress is not None and progress >= 0.999 and st not in {"downloading", "downloading_metadata"}
-
-
 def status_from_runtime(
     runtime_status: str | None,
     lt_state: str | None,
@@ -19,9 +12,9 @@ def status_from_runtime(
 ) -> str:
     rs = (runtime_status or "").strip().lower()
     st = (lt_state or "").strip().lower()
-    # Готовый сид: не записываем paused из transient-состояния handle после restore
-    if rs == "paused" and _is_complete_seed(st, progress):
-        return TorrentStatus.seeding.value
+    # paused в runtime — это правда (ручная пауза). Не маскируем её под seeding,
+    # иначе UI врёт и пауза «не прилипает». Корневой фикс рестарт-паузы — в движке
+    # (auto_managed=False + неограниченные active_* лимиты) и в restore (авто-resume сидов).
     if rs == "paused":
         return TorrentStatus.paused.value
     if rs == "error":

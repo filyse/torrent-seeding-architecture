@@ -19,7 +19,9 @@ def test_paused_wins_when_incomplete():
     assert status_from_runtime("paused", "downloading", 0.5) == TorrentStatus.paused.value
 
 
-def test_complete_seed_not_stuck_paused():
-    """После restore готовый сид не должен оставаться paused в БД."""
-    assert status_from_runtime("paused", "seeding", 1.0) == TorrentStatus.seeding.value
-    assert status_from_runtime("paused", "finished", 1.0) == TorrentStatus.seeding.value
+def test_paused_is_truthful_for_complete_seed():
+    """Ручная пауза готового сида должна отражаться честно (а не маскироваться под seeding).
+    «Не зависать в паузе после рестарта» обеспечивают движок (auto_managed=False,
+    неограниченные active_*) и restore (авто-resume сидов), а не подмена статуса здесь."""
+    assert status_from_runtime("paused", "seeding", 1.0) == TorrentStatus.paused.value
+    assert status_from_runtime("paused", "finished", 1.0) == TorrentStatus.paused.value
