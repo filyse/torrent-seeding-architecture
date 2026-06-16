@@ -80,7 +80,7 @@ type TorrentPeerOut = {
 };
 
 type TorrentDetailOut = TorrentOut & { runtime: RuntimeOut | null; peer_list?: TorrentPeerOut[] };
-type Route = { view: "list" } | { view: "detail"; id: number };
+type Route = { view: "list" } | { view: "detail"; id: number } | { view: "settings" };
 type DeleteTorrentChoice = "cancel" | "torrent_only" | "torrent_and_files";
 
 let listPollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -248,8 +248,10 @@ function el<K extends keyof HTMLElementTagNameMap>(
 }
 
 function parseRoute(): Route {
-  const m = /^#\/torrent\/(\d+)$/.exec(window.location.hash || "");
+  const hash = window.location.hash || "";
+  const m = /^#\/torrent\/(\d+)$/.exec(hash);
   if (m) return { view: "detail", id: Number(m[1]) };
+  if (hash === "#/settings") return { view: "settings" };
   return { view: "list" };
 }
 
@@ -259,6 +261,20 @@ function setHashList(): void {
 
 function setHashDetail(id: number): void {
   window.location.hash = `#/torrent/${id}`;
+}
+
+function setHashSettings(): void {
+  window.location.hash = "#/settings";
+}
+
+function navLink(label: string, onClick: () => void): HTMLElement {
+  const a = el("a", { href: "#", className: "back-link" }, [label]);
+  a.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    onClick();
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+  return a;
 }
 
 function fmtPercent(v: number | null | undefined): string {
@@ -1238,9 +1254,15 @@ function mountListShell(root: HTMLElement): void {
     }
   });
 
+  const settingsLink = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["⚙ Настройки"]);
+  settingsLink.addEventListener("click", () => {
+    setHashSettings();
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+
   const header = el("header", { className: "app-header" }, [
     el("div", {}, [el("h1", {}, ["Раздача"]), el("p", { className: "field__hint" }, ["Управление торрентами"])]),
-    metaEl,
+    el("div", { className: "app-header__actions" }, [settingsLink, metaEl]),
   ]);
 
   const filters = el("div", { className: "list-filters" }, [searchInput, statusSelect, labelSelect, sortSelect]);
@@ -1256,7 +1278,6 @@ function mountListShell(root: HTMLElement): void {
   root.append(
     header,
     sessionBarHost,
-    mountGlobalLimitsPanel(),
     mountAddPanel("/data/b1", onAdded),
     filters,
     toolbar,
@@ -1513,6 +1534,28 @@ function mountDetailShell(root: HTMLElement, id: number): void {
   void run();
 }
 
+function mountSettingsShell(root: HTMLElement): void {
+  const back = navLink("← Назад к списку", () => setHashList());
+
+  const header = el("header", { className: "app-header" }, [
+    el("div", {}, [
+      el("h1", {}, ["Настройки"]),
+      el("p", { className: "field__hint" }, ["Глобальные параметры платформы"]),
+    ]),
+  ]);
+
+  const statsHost = el("div", { id: "settings-session-host" });
+
+  const limits = mountGlobalLimitsPanel();
+  limits.setAttribute("open", "");
+
+  root.append(back, header, statsHost, limits);
+
+  void loadSessionStats().then((s) => {
+    statsHost.replaceChildren(mountSessionBar(s));
+  });
+}
+
 function render(): void {
   clearViewPolls();
   const root = document.getElementById("app");
@@ -1520,6 +1563,7 @@ function render(): void {
   root.replaceChildren();
   const route = parseRoute();
   if (route.view === "list") mountListShell(root);
+  else if (route.view === "settings") mountSettingsShell(root);
   else mountDetailShell(root, route.id);
 }
 

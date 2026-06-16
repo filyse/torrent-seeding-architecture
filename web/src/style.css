@@ -75,6 +75,12 @@ body {
   white-space: nowrap;
 }
 
+.app-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .live-dot {
   display: inline-block;
   width: 0.45rem;
@@ -167,6 +173,8 @@ body {
 }
 
 .field input[type="text"],
+.field input[type="url"],
+.field input[type="search"],
 .field input[type="file"] {
   width: 100%;
   padding: 0.5rem 0.65rem;
@@ -702,7 +710,12 @@ body {
   flex-wrap: wrap;
   gap: 0.4rem;
   align-items: center;
+  justify-content: flex-start;
   margin-bottom: 0.75rem;
+}
+
+.list-toolbar__count {
+  margin-right: auto;
 }
 
 .torrent-card__top {
