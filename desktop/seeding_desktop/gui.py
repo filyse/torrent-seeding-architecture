@@ -214,6 +214,11 @@ class ApiClient:
     def reannounce(self, tid: int) -> Any:
         return self._post(f"/api/v1/torrents/{tid}/reannounce")
 
+    def migrate(self, tid: int, engine_id: str) -> Any:
+        from urllib.parse import quote
+
+        return self._post(f"/api/v1/torrents/{tid}/migrate?engine_id={quote(engine_id)}")
+
 
 # --- фоновый снапшот ----------------------------------------------------------
 
@@ -495,7 +500,7 @@ class MainWindow(QMainWindow):
         tb.addWidget(self.search, 2)
         self.status_filter = QComboBox()
         self.status_filter.addItem("Все статусы", "")
-        for s in ("seeding", "downloading", "paused", "checking", "error"):
+        for s in ("seeding", "downloading", "paused", "migrating", "checking", "error"):
             self.status_filter.addItem(s, s)
         self.status_filter.currentIndexChanged.connect(self.render)
         tb.addWidget(self.status_filter)
@@ -540,6 +545,7 @@ class MainWindow(QMainWindow):
             ("⏸ Пауза", self.on_pause),
             ("▶ Старт", self.on_resume),
             ("🏷 Метка", self.on_label),
+            ("⇄ Перенести", self.on_migrate),
             ("🗑 Удалить", self.on_remove),
         ):
             b = QPushButton(text)
@@ -737,6 +743,42 @@ class MainWindow(QMainWindow):
         if not ok:
             return
         self._bulk(self.api.bulk_label, text.strip())
+
+    def on_migrate(self) -> None:
+        ids = self._selected_ids()
+        if len(ids) != 1:
+            QMessageBox.information(self, "Перенос", "Выберите ровно одну раздачу для переноса.")
+            return
+        tid = ids[0]
+        source = ""
+        for t in self._rows:
+            if t.get("id") == tid:
+                source = str(t.get("engine_id", ""))
+                break
+        self.refresh_meta()
+        targets = [str(e.get("id")) for e in self._engines if str(e.get("id")) != source]
+        if not targets:
+            QMessageBox.information(self, "Перенос", "Нет других движков для переноса.")
+            return
+        from PySide6.QtWidgets import QInputDialog
+
+        target, ok = QInputDialog.getItem(
+            self,
+            "Перенос раздачи",
+            f"Движок-источник: {source}\nКуда перенести:",
+            targets,
+            0,
+            False,
+        )
+        if not ok or not target:
+            return
+        try:
+            self.api.migrate(tid, target)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Ошибка", str(exc))
+            return
+        self.statusBar().showMessage(f"Перенос #{tid} → {target} запущен", 5000)
+        self.refresh()
 
     def on_remove(self) -> None:
         ids = self._selected_ids()
