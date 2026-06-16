@@ -1121,6 +1121,43 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   return panel;
 }
 
+function showAddTorrentDialog(savePathDefault: string, onAdded: (created?: TorrentOut) => void): void {
+  const overlay = el("div", { className: "modal-overlay" });
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape") close();
+  };
+
+  const panel = mountAddPanel(savePathDefault, (created) => {
+    close();
+    onAdded(created);
+  });
+  panel.classList.add("modal-panel");
+
+  const closeBtn = el(
+    "button",
+    { type: "button", className: "btn btn--ghost btn--sm modal-close", "aria-label": "Закрыть" },
+    ["✕"],
+  );
+  closeBtn.addEventListener("click", close);
+  const head = panel.querySelector(".panel__head");
+  if (head) {
+    head.classList.add("panel__head--with-action");
+    head.append(closeBtn);
+  }
+
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) close();
+  });
+  document.addEventListener("keydown", onKey);
+
+  overlay.append(panel);
+  document.body.append(overlay);
+}
+
 function field(label: string, input: HTMLElement, hint?: string): HTMLElement {
   const f = el("div", { className: "field" });
   f.append(el("label", {}, [label, input]));
@@ -1254,6 +1291,9 @@ function mountListShell(root: HTMLElement): void {
     }
   });
 
+  const addTorrentBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, ["+ Добавить торрент"]);
+  addTorrentBtn.addEventListener("click", () => showAddTorrentDialog("/data/b1", onAdded));
+
   const settingsLink = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["⚙ Настройки"]);
   settingsLink.addEventListener("click", () => {
     setHashSettings();
@@ -1262,7 +1302,7 @@ function mountListShell(root: HTMLElement): void {
 
   const header = el("header", { className: "app-header" }, [
     el("div", {}, [el("h1", {}, ["Раздача"]), el("p", { className: "field__hint" }, ["Управление торрентами"])]),
-    el("div", { className: "app-header__actions" }, [settingsLink, metaEl]),
+    el("div", { className: "app-header__actions" }, [addTorrentBtn, settingsLink, metaEl]),
   ]);
 
   const filters = el("div", { className: "list-filters" }, [searchInput, statusSelect, labelSelect, sortSelect]);
@@ -1278,7 +1318,6 @@ function mountListShell(root: HTMLElement): void {
   root.append(
     header,
     sessionBarHost,
-    mountAddPanel("/data/b1", onAdded),
     filters,
     toolbar,
     listHost,

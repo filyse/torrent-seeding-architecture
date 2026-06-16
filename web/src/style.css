@@ -578,6 +578,25 @@ body {
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
 }
 
+.modal-panel {
+  width: 100%;
+  max-width: 30rem;
+  max-height: calc(100vh - 2rem);
+  margin: 0;
+  overflow: auto;
+}
+
+.panel__head--with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.modal-close {
+  flex-shrink: 0;
+}
+
 .modal-title {
   margin: 0 0 0.35rem;
   font-size: 1.05rem;
