@@ -15,6 +15,7 @@ class TorrentStatus(str, Enum):
     downloading = "downloading"
     seeding = "seeding"
     paused = "paused"
+    migrating = "migrating"
     error = "error"
 
 

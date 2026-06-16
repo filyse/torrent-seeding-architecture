@@ -64,6 +64,40 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def get_torrent_file(self, db_id: int) -> bytes | None:
+        """Скачать сохранённый .torrent с движка (для переноса на другой движок)."""
+        r = await self._client.get(f"/internal/v1/torrents/{db_id}/torrent-file")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        data = r.json()
+        b64 = data.get("torrent_b64") if isinstance(data, dict) else None
+        return base64.b64decode(b64) if b64 else None
+
+    async def import_local(
+        self,
+        db_id: int,
+        torrent_bytes: bytes,
+        save_path: str,
+        src_content_path: str,
+    ) -> dict:
+        """Импорт раздачи на этот движок копированием контента из /media (перенос b→b).
+
+        Копирование контента может занять минуты — отдельный длинный таймаут вместо
+        дефолтных 30s, чтобы не оборвать перенос крупной раздачи."""
+        r = await self._client.post(
+            "/internal/v1/torrents/import-local",
+            json={
+                "db_id": db_id,
+                "torrent_b64": base64.b64encode(torrent_bytes).decode("ascii"),
+                "save_path": save_path,
+                "src_content_path": src_content_path,
+            },
+            timeout=httpx.Timeout(connect=30.0, read=None, write=None, pool=None),
+        )
+        r.raise_for_status()
+        return r.json()
+
     async def restore_from_disk(self, db_id: int, save_path: str) -> dict | None:
         r = await self._client.post(
             f"/internal/v1/torrents/{db_id}/restore-from-disk",

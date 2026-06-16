@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from seeding_db.models import TorrentRecord
+from seeding_db.models import TorrentRecord, TorrentStatus
 from seeding_db.repository import TorrentRepository
 from seeding_db.status_from_runtime import status_from_runtime
 
@@ -13,6 +13,10 @@ async def merge_runtime_into_row(
     runtime: dict | None,
 ) -> str:
     """Возвращает актуальный status для ответа API; при расхождении обновляет БД."""
+    # Перенос между движками: статус «migrating» держится до завершения переноса и не
+    # перетирается рантаймом (на источнике раздача может стоять на паузе во время копии).
+    if row.status == TorrentStatus.migrating.value:
+        return row.status
     if not runtime:
         return row.status
     target = status_from_runtime(

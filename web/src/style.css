@@ -485,6 +485,30 @@ body {
   background: color-mix(in srgb, var(--warn) 15%, transparent);
 }
 
+.badge--migrating {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  animation: badge-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.migrate-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.migrate-row__label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .empty-state {
   text-align: center;
   padding: 2.5rem 1rem;

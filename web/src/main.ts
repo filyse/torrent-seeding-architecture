@@ -511,6 +511,7 @@ function effectiveStatus(t: TorrentOut | TorrentDetailOut): string {
   const rs = (t.runtime?.runtime_status || "").toLowerCase();
   const lt = (t.runtime?.lt_state || "").toLowerCase();
   const progress = t.runtime?.progress;
+  if (t.status === "migrating") return "migrating";
   if (rs === "paused" || t.status === "paused") return "paused";
   if (lt === "seeding" || lt === "finished") return "seeding";
   if (progress != null && progress >= 0.999 && lt !== "downloading" && lt !== "downloading_metadata") {
@@ -527,6 +528,7 @@ function statusLabel(status: string, ltState?: string | null): string {
     seeding: "Раздача",
     paused: "Пауза",
     queued: "В очереди",
+    migrating: "Перенос",
     error: "Ошибка",
   };
   return map[status] ?? status;
@@ -542,6 +544,7 @@ function badgeClass(status: string): string {
   if (status === "seeding") return "badge badge--seeding";
   if (status === "paused") return "badge badge--paused";
   if (status === "queued") return "badge badge--queued";
+  if (status === "migrating") return "badge badge--migrating";
   return "badge badge--downloading";
 }
 
@@ -752,6 +755,69 @@ function buildTrackersSpoiler(
   const d = buildDetailsSpoiler(`Трекеры (${trackers.length})`, inner);
   applyDetailSpoilerState(d, torrentId, "trackers");
   return d;
+}
+
+function buildMigrateRow(data: TorrentDetailOut, onStarted: () => void): HTMLElement {
+  const wrap = el("div", { className: "migrate-row" });
+  const select = el("select", { className: "select" }) as HTMLSelectElement;
+  select.append(el("option", { value: "" }, ["Загрузка движков…"]));
+  const btn = el("button", { type: "button", className: "btn btn--sm" }, ["Перенести"]) as HTMLButtonElement;
+  btn.disabled = true;
+
+  const migrating = data.status === "migrating";
+  if (migrating) {
+    select.replaceChildren(el("option", { value: "" }, ["Перенос выполняется…"]));
+    select.disabled = true;
+  } else {
+    void (async () => {
+      try {
+        const engines = await fetchJson<EngineOut[]>("/engines");
+        select.replaceChildren();
+        const targets = engines.filter((e) => e.id !== data.engine_id);
+        if (targets.length === 0) {
+          select.append(el("option", { value: "" }, ["Нет других движков"]));
+          return;
+        }
+        select.append(el("option", { value: "" }, ["Выберите целевой движок…"]));
+        for (const e of targets) {
+          const free = e.disk_free != null ? `своб. ${fmtBytes(e.disk_free)}` : "место неизв.";
+          const off = e.online === false ? " — офлайн" : "";
+          const opt = el("option", { value: e.id }, [`${e.id} · ${free}${off}`]) as HTMLOptionElement;
+          if (e.online === false) opt.disabled = true;
+          select.append(opt);
+        }
+        btn.disabled = true;
+      } catch (e) {
+        select.replaceChildren(el("option", { value: "" }, ["Ошибка загрузки движков"]));
+        showToast(e instanceof Error ? e.message : String(e), true);
+      }
+    })();
+  }
+
+  select.addEventListener("change", () => {
+    btn.disabled = !select.value;
+  });
+
+  btn.addEventListener("click", async () => {
+    const target = select.value;
+    if (!target) return;
+    btn.disabled = true;
+    try {
+      await postAction(`/torrents/${data.id}/migrate?engine_id=${encodeURIComponent(target)}`);
+      showToast(`Перенос на ${target} запущен`);
+      onStarted();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+      btn.disabled = false;
+    }
+  });
+
+  wrap.append(
+    el("span", { className: "migrate-row__label" }, [`Движок: ${data.engine_id}`]),
+    select,
+    btn,
+  );
+  return wrap;
 }
 
 function buildLimitsForm(data: TorrentDetailOut, onApplied: () => void): HTMLElement {
@@ -1828,7 +1894,13 @@ async function loadDetail(
     });
     if (data.status === "paused") pauseBtn.disabled = true;
     else resumeBtn.disabled = true;
+    const migrating = data.status === "migrating";
+    if (migrating) {
+      for (const b of [pauseBtn, resumeBtn, recheckBtn, reannounceBtn, delBtn]) b.disabled = true;
+    }
     actions.append(pauseBtn, resumeBtn, recheckBtn, reannounceBtn, delBtn);
+
+    const migrateRow = buildMigrateRow(data, () => void backRefresh());
 
     body.append(
       el("span", { className: badgeClass(effectiveStatus(data)) }, [displayStatusLabel(data)]),
@@ -1837,6 +1909,7 @@ async function loadDetail(
       grid,
       labelRow,
       actions,
+      migrateRow,
       buildLimitsForm(data, () => void backRefresh()),
       buildFilesSpoiler(files, id, () => void backRefresh()),
       buildTrackersSpoiler(trackers, id, () => void backRefresh()),

@@ -13,9 +13,19 @@ class EngineSpec:
     url: str
     storage_prefix: str
     listen_port: int | None = None
+    # Путь, по которому контент ЭТОГО движка виден ДРУГИМ движкам через общий
+    # read-only mount (`/media`). Нужен для переноса раздач между движками одной машины:
+    # целевой движок копирует контент из `media_path/<name>`. None → перенос «через /media»
+    # с этого движка недоступен (напр. движок на другой машине).
+    media_path: str | None = None
 
     def normalized_prefix(self) -> str:
         return self.storage_prefix.replace("\\", "/").rstrip("/")
+
+    def normalized_media_path(self) -> str | None:
+        if not self.media_path:
+            return None
+        return self.media_path.replace("\\", "/").rstrip("/")
 
 
 def _parse_specs(raw: str) -> list[EngineSpec]:
@@ -33,7 +43,17 @@ def _parse_specs(raw: str) -> list[EngineSpec]:
             raise ValueError("engine entry requires id, url, storage_prefix")
         lp = item.get("listen_port")
         listen_port = int(lp) if lp is not None else None
-        specs.append(EngineSpec(id=eid, url=url, storage_prefix=prefix, listen_port=listen_port))
+        mp = item.get("media_path")
+        media_path = str(mp).strip() if mp not in (None, "") else None
+        specs.append(
+            EngineSpec(
+                id=eid,
+                url=url,
+                storage_prefix=prefix,
+                listen_port=listen_port,
+                media_path=media_path,
+            )
+        )
     return specs
 
 

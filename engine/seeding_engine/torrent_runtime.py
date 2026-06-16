@@ -622,6 +622,66 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         root = Path(os.getenv("SEEDING_DATA_ROOT", "/data"))
         return root / ".torrents"
 
+    async def read_torrent_file(self, db_id: int) -> bytes | None:
+        """Сохранённый .torrent движка (для переноса раздачи на другой движок)."""
+        path = self._torrent_files_dir() / f"{db_id}.torrent"
+        if not path.is_file():
+            return None
+        return await asyncio.to_thread(path.read_bytes)
+
+    @staticmethod
+    def _torrent_name_from_data(lt, torrent_data: bytes) -> str:
+        ti = lt.torrent_info(lt.bdecode(torrent_data))
+        return str(ti.name())
+
+    async def import_local(
+        self,
+        db_id: int,
+        save_path: str,
+        src_content_path: str,
+        torrent_data: bytes,
+    ) -> RuntimeHandle:
+        """Принять раздачу с другого движка одной машины: скопировать контент из
+        read-only `src_content_path` (виден через общий /media-mount) в свой том, затем
+        добавить торрент и перепроверить хэш — на выходе honest seeding/downloading."""
+        lt = self._lt
+        if not torrent_data:
+            raise ValueError("torrent_data is required for import")
+        src = Path(src_content_path)
+        if not src.exists():
+            raise ValueError(f"source content not found: {src_content_path}")
+
+        name = await asyncio.to_thread(self._torrent_name_from_data, lt, torrent_data)
+        if not name:
+            raise ValueError("cannot resolve torrent name from metadata")
+
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        dst = Path(save_path) / name
+
+        def _copy() -> None:
+            if dst.exists():
+                # Уже на месте (повторный запуск/частичный перенос) — recheck разберётся.
+                return
+            tmp = dst.with_name(dst.name + ".part")
+            if tmp.exists():
+                if tmp.is_dir():
+                    shutil.rmtree(tmp, ignore_errors=True)
+                else:
+                    tmp.unlink(missing_ok=True)
+            if src.is_dir():
+                shutil.copytree(src, tmp)
+            else:
+                tmp.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, tmp)
+            os.replace(tmp, dst)
+
+        await asyncio.to_thread(_copy)
+
+        handle = await self.add_torrent(db_id, None, save_path, torrent_data=torrent_data)
+        # Перепроверяем скопированные данные: при совпадении пиров libtorrent поднимет до seeding.
+        await self.recheck(db_id)
+        return handle
+
     def _persist_torrent_file(self, db_id: int, torrent_data: bytes) -> None:
         d = self._torrent_files_dir()
         d.mkdir(parents=True, exist_ok=True)

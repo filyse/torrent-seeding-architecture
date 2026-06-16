@@ -1,13 +1,15 @@
+import asyncio
 import logging
 import os
 
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from seeding_db.engine_registry import normalize_save_path
 from seeding_db.models import TorrentStatus
 from seeding_db.repository import TorrentRepository
 
 from seeding_api.deps import DbSession, EnginePoolDep
+from seeding_api.migrate import run_migration
 from seeding_api.runtime_sync import merge_runtime_into_row
 from seeding_api.schemas import (
     BatchUploadItem,
@@ -323,6 +325,92 @@ async def bulk_delete(
         await repo.delete(row.id)
         ok += 1
     return {"ok": ok, "fail": fail}
+
+
+@router.post("/{torrent_id}/migrate")
+async def migrate_torrent(
+    torrent_id: int,
+    request: Request,
+    session: DbSession,
+    pool: EnginePoolDep,
+    engine_id: str = Query(..., min_length=1, description="Целевой движок переноса"),
+):
+    """Перенести раздачу на другой движок одной машины (копия через /media + recheck).
+
+    Запускает фоновый перенос и сразу возвращает статус `migrating`. Контент источника
+    удаляется только после подтверждённой полной копии на цели."""
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+
+    target_id = engine_id.strip()
+    target_spec = pool.spec(target_id)
+    if target_spec is None:
+        raise HTTPException(status_code=422, detail=f"unknown engine_id: {target_id}")
+    if target_id == row.engine_id:
+        raise HTTPException(status_code=422, detail="target engine equals source engine")
+    if row.status == TorrentStatus.migrating.value:
+        raise HTTPException(status_code=409, detail="torrent is already migrating")
+
+    source_spec = pool.spec(row.engine_id)
+    if source_spec is None:
+        raise HTTPException(status_code=422, detail=f"unknown source engine: {row.engine_id}")
+    source_media = source_spec.normalized_media_path()
+    if not source_media:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"source engine '{row.engine_id}' has no media_path configured; "
+                "cross-machine migration is not supported yet"
+            ),
+        )
+
+    # Имя контента на диске = имя раздачи в рантайме источника (нужно для пути в /media).
+    try:
+        runtime = await pool.client_for(row.engine_id).runtime_snapshot(torrent_id)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="source engine unavailable") from exc
+    name = (runtime or {}).get("name") if runtime else None
+    if not name:
+        raise HTTPException(
+            status_code=409,
+            detail="torrent is not active on source engine; cannot determine content path",
+        )
+
+    src_content_path = f"{source_media}/{name}"
+    source_save_path = source_spec.normalized_prefix()
+    target_save_path = target_spec.normalized_prefix()
+
+    await repo.update_status(torrent_id, TorrentStatus.migrating.value)
+    await session.commit()
+
+    task = asyncio.create_task(
+        run_migration(
+            request.app.state.session_factory,
+            pool,
+            torrent_id=torrent_id,
+            source_engine_id=row.engine_id,
+            target_engine_id=target_id,
+            source_save_path=source_save_path,
+            target_save_path=target_save_path,
+            src_content_path=src_content_path,
+            display_name=row.display_name,
+        )
+    )
+    tasks = getattr(request.app.state, "migrate_tasks", None)
+    if tasks is None:
+        tasks = set()
+        request.app.state.migrate_tasks = tasks
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+
+    return {
+        "id": torrent_id,
+        "status": TorrentStatus.migrating.value,
+        "source_engine_id": row.engine_id,
+        "engine_id": target_id,
+    }
 
 
 @router.get("/{torrent_id}", response_model=TorrentDetailOut)

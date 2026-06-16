@@ -15,6 +15,18 @@ class TorrentRegisterIn(BaseModel):
     save_path: str = Field(..., min_length=1)
 
 
+class TorrentImportIn(BaseModel):
+    db_id: int = Field(..., ge=1)
+    torrent_b64: str = Field(..., min_length=1)
+    save_path: str = Field(..., min_length=1)
+    src_content_path: str = Field(..., min_length=1)
+
+
+class TorrentFileBytesOut(BaseModel):
+    db_id: int
+    torrent_b64: str
+
+
 class TorrentPeerOut(BaseModel):
     endpoint: str
     client: str | None = None
@@ -113,6 +125,37 @@ async def register_torrent(request: Request, body: TorrentRegisterIn):
             raise HTTPException(status_code=422, detail="invalid torrent_b64 payload") from exc
     try:
         h = await rt.add_torrent(body.db_id, body.magnet_uri, body.save_path, torrent_data=torrent_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RuntimeHandleOut.model_validate(h)
+
+
+@router.get("/torrents/{db_id}/torrent-file", response_model=TorrentFileBytesOut)
+async def get_torrent_file(request: Request, db_id: int):
+    """Отдать сохранённый .torrent (для переноса раздачи на другой движок)."""
+    rt = get_runtime(request)
+    read_fn = getattr(rt, "read_torrent_file", None)
+    if read_fn is None:
+        raise HTTPException(status_code=501, detail="torrent-file not supported for this backend")
+    data = await read_fn(db_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="no .torrent file on disk for this db_id")
+    return TorrentFileBytesOut(db_id=db_id, torrent_b64=base64.b64encode(data).decode("ascii"))
+
+
+@router.post("/torrents/import-local", response_model=RuntimeHandleOut)
+async def import_local_torrent(request: Request, body: TorrentImportIn):
+    """Импорт раздачи с другого движка одной машины: копирование контента из /media + recheck."""
+    rt = get_runtime(request)
+    import_fn = getattr(rt, "import_local", None)
+    if import_fn is None:
+        raise HTTPException(status_code=501, detail="import-local not supported for this backend")
+    try:
+        torrent_data = base64.b64decode(body.torrent_b64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail="invalid torrent_b64 payload") from exc
+    try:
+        h = await import_fn(body.db_id, body.save_path, body.src_content_path, torrent_data)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RuntimeHandleOut.model_validate(h)

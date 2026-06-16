@@ -117,6 +117,18 @@ class TorrentRepository:
         await self._session.flush()
         return row
 
+    async def update_engine(
+        self, torrent_id: int, engine_id: str, save_path: str
+    ) -> TorrentRecord | None:
+        """Сменить движок/путь раздачи (после успешного переноса между движками)."""
+        row = await self.get_by_id(torrent_id)
+        if row is None:
+            return None
+        row.engine_id = engine_id
+        row.save_path = save_path
+        await self._session.flush()
+        return row
+
     async def update_label(self, torrent_id: int, label: str) -> TorrentRecord | None:
         row = await self.get_by_id(torrent_id)
         if row is None:

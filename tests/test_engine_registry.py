@@ -47,7 +47,13 @@ def test_match_engine_id_strict_no_default():
 def test_load_engine_specs_from_json(monkeypatch):
     cfg = json.dumps(
         [
-            {"id": "b1", "url": "http://e1:8081", "storage_prefix": "/data/b1", "listen_port": 50001},
+            {
+                "id": "b1",
+                "url": "http://e1:8081",
+                "storage_prefix": "/data/b1",
+                "listen_port": 50001,
+                "media_path": "/media/seeding-test/b1/b1",
+            },
         ]
     )
     monkeypatch.setenv("ENGINES_CONFIG", cfg)
@@ -56,6 +62,17 @@ def test_load_engine_specs_from_json(monkeypatch):
     assert len(specs) == 1
     assert specs[0].id == "b1"
     assert specs[0].listen_port == 50001
+    assert specs[0].media_path == "/media/seeding-test/b1/b1"
+    assert specs[0].normalized_media_path() == "/media/seeding-test/b1/b1"
+
+
+def test_media_path_optional_and_normalized():
+    spec = EngineSpec(id="b1", url="http://e1", storage_prefix="/data/b1")
+    assert spec.normalized_media_path() is None
+    spec2 = EngineSpec(
+        id="b2", url="http://e2", storage_prefix="/data/b2", media_path="/media/x/b2/"
+    )
+    assert spec2.normalized_media_path() == "/media/x/b2"
 
 
 def test_load_engine_specs_fallback(monkeypatch):
