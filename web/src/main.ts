@@ -44,6 +44,16 @@ type BatchUploadResult = {
   items: BatchUploadItem[];
 };
 
+type EngineOut = {
+  id: string;
+  url: string;
+  storage_prefix: string;
+  listen_port: number | null;
+  disk_total?: number | null;
+  disk_free?: number | null;
+  online?: boolean;
+};
+
 type RuntimeOut = {
   db_id: number;
   magnet_uri: string | null;
@@ -1000,9 +1010,12 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     type: "url",
     placeholder: "https://example.com/file.torrent",
   }) as HTMLInputElement;
-  const savePathInput = el("input", {
+  const engineSelect = el("select", { className: "select" }) as HTMLSelectElement;
+  engineSelect.append(el("option", { value: "" }, ["Загрузка движков…"]));
+  const customPathInput = el("input", {
     type: "text",
-    value: savePathDefault,
+    placeholder: `Напр. ${savePathDefault || "/data/b1"}/movies`,
+    value: "",
   }) as HTMLInputElement;
   const labelInput = el("input", { type: "text", placeholder: "Метка (необязательно)" }) as HTMLInputElement;
   const nameMagnet = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
@@ -1046,8 +1059,19 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     ]),
   );
 
+  const advanced = el("details", { className: "advanced" });
+  advanced.append(
+    el("summary", {}, ["Дополнительно: свой путь"]),
+    field(
+      "Папка на сервере",
+      customPathInput,
+      "Если задано — переопределяет выбор движка. Обычно /data/b1 для движка b1.",
+    ),
+  );
+
   body.append(
-    field("Папка на сервере", savePathInput, "Обычно /data/b1 для движка b1"),
+    field("Движок", engineSelect, "Контент сохраняется в хранилище выбранного движка"),
+    advanced,
     field("Метка", labelInput),
     tabs,
     magnetPanel,
@@ -1055,19 +1079,64 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     filePanel,
   );
 
+  void (async () => {
+    try {
+      const engines = await fetchJson<EngineOut[]>("/engines");
+      engineSelect.replaceChildren();
+      if (engines.length === 0) {
+        engineSelect.append(el("option", { value: "" }, ["Нет движков"]));
+        return;
+      }
+      let firstOnline = "";
+      for (const e of engines) {
+        const free = e.disk_free != null ? `своб. ${fmtBytes(e.disk_free)}` : "место неизв.";
+        const total = e.disk_total != null ? ` из ${fmtBytes(e.disk_total)}` : "";
+        const off = e.online === false ? " — офлайн" : "";
+        const opt = el("option", { value: e.id }, [`${e.id} · ${free}${total}${off}`]) as HTMLOptionElement;
+        if (e.online === false) opt.disabled = true;
+        else if (!firstOnline) firstOnline = e.id;
+        engineSelect.append(opt);
+      }
+      if (firstOnline) engineSelect.value = firstOnline;
+    } catch (e) {
+      engineSelect.replaceChildren(el("option", { value: "" }, ["Ошибка загрузки движков"]));
+      showToast(e instanceof Error ? e.message : String(e), true);
+    }
+  })();
+
+  // Куда добавлять: свой путь (если задан) приоритетнее выбора движка.
+  const targetJson = (): { engine_id?: string; save_path?: string } | null => {
+    const custom = customPathInput.value.trim();
+    if (custom) return { save_path: custom };
+    const eid = engineSelect.value;
+    if (!eid) {
+      showToast("Выберите движок или укажите свой путь", true);
+      return null;
+    }
+    return { engine_id: eid };
+  };
+  const applyTargetToForm = (form: FormData): boolean => {
+    const t = targetJson();
+    if (!t) return false;
+    if (t.engine_id) form.set("engine_id", t.engine_id);
+    if (t.save_path) form.set("save_path", t.save_path);
+    return true;
+  };
+
   magnetPanel.querySelector("#btn-add-magnet")?.addEventListener("click", async () => {
     const magnet_uri = magnetInput.value.trim();
-    const save_path = savePathInput.value.trim();
-    if (!magnet_uri || !save_path) {
-      showToast("Укажите magnet и папку", true);
+    if (!magnet_uri) {
+      showToast("Укажите magnet", true);
       return;
     }
+    const target = targetJson();
+    if (!target) return;
     try {
       const created = await fetchJson<TorrentOut>("/torrents", {
         method: "POST",
         body: JSON.stringify({
           magnet_uri,
-          save_path,
+          ...target,
           display_name: nameMagnet.value.trim(),
           label: labelInput.value.trim(),
         }),
@@ -1083,17 +1152,18 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
 
   urlPanel.querySelector("#btn-add-url")?.addEventListener("click", async () => {
     const url = urlInput.value.trim();
-    const save_path = savePathInput.value.trim();
-    if (!url || !save_path) {
-      showToast("Укажите URL и папку", true);
+    if (!url) {
+      showToast("Укажите URL", true);
       return;
     }
+    const target = targetJson();
+    if (!target) return;
     try {
       const created = await fetchJson<TorrentOut>("/torrents/url", {
         method: "POST",
         body: JSON.stringify({
           url,
-          save_path,
+          ...target,
           display_name: nameUrl.value.trim(),
           label: labelInput.value.trim(),
         }),
@@ -1108,17 +1178,16 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   });
 
   filePanel.querySelector("#btn-add-file")?.addEventListener("click", async () => {
-    const save_path = savePathInput.value.trim();
     const files = torrentFile.files ? Array.from(torrentFile.files) : [];
-    if (files.length === 0 || !save_path) {
-      showToast("Выберите файл(ы) и папку", true);
+    if (files.length === 0) {
+      showToast("Выберите файл(ы)", true);
       return;
     }
     try {
       if (files.length === 1) {
         const body = new FormData();
         body.set("torrent_file", files[0], files[0].name);
-        body.set("save_path", save_path);
+        if (!applyTargetToForm(body)) return;
         body.set("display_name", nameFile.value.trim());
         body.set("label", labelInput.value.trim());
         const res = await fetch(`${API}/torrents/upload`, { method: "POST", headers: apiHeaders(false), body });
@@ -1133,7 +1202,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
 
       const body = new FormData();
       for (const f of files) body.append("torrent_files", f, f.name);
-      body.set("save_path", save_path);
+      if (!applyTargetToForm(body)) return;
       body.set("label", labelInput.value.trim());
       const res = await fetch(`${API}/torrents/upload-batch`, { method: "POST", headers: apiHeaders(false), body });
       await throwIfNotOk(res);

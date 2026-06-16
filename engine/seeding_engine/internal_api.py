@@ -1,4 +1,6 @@
 import base64
+import os
+import shutil
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -200,7 +202,17 @@ async def set_runtime_limits(request: Request, db_id: int, body: LimitsIn):
 @router.get("/session/stats")
 async def session_stats(request: Request):
     rt = get_runtime(request)
-    return await rt.session_stats()
+    stats = await rt.session_stats()
+    # Свободное место на томе движка — чтобы UI понимал, влезет ли контент.
+    try:
+        root = os.getenv("SEEDING_DATA_ROOT", "/data")
+        usage = shutil.disk_usage(root)
+        if isinstance(stats, dict):
+            stats["disk_total"] = int(usage.total)
+            stats["disk_free"] = int(usage.free)
+    except OSError:
+        pass
+    return stats
 
 
 @router.post("/session/limits")

@@ -35,6 +35,21 @@ def _require_engine_for_delete() -> bool:
     return v in ("1", "true", "yes")
 
 
+def _resolve_target(pool, engine_id: str | None, save_path: str | None) -> tuple[str, str]:
+    """Куда класть торрент: либо явный engine_id (UI выбирает движок, путь = его storage_prefix),
+    либо обратная совместимость по save_path (матчинг префикса). Возвращает (engine_id, save_path)."""
+    eid = (engine_id or "").strip()
+    if eid:
+        spec = pool.spec(eid)
+        if spec is None:
+            raise HTTPException(status_code=422, detail=f"unknown engine_id: {eid}")
+        return spec.id, spec.normalized_prefix()
+    sp = (save_path or "").strip()
+    if not sp:
+        raise HTTPException(status_code=422, detail="engine_id or save_path is required")
+    return pool.resolve_engine_id(sp), sp
+
+
 @router.get("", response_model=list[TorrentDetailOut])
 async def list_torrents(session: DbSession, pool: EnginePoolDep):
     repo = TorrentRepository(session)
@@ -58,11 +73,11 @@ async def list_torrents(session: DbSession, pool: EnginePoolDep):
 async def create_torrent(body: TorrentCreate, session: DbSession, pool: EnginePoolDep):
     if not body.magnet_uri.startswith("magnet:"):
         raise HTTPException(status_code=422, detail="magnet_uri must start with magnet:")
-    engine_id = pool.resolve_engine_id(body.save_path)
+    engine_id, sp = _resolve_target(pool, body.engine_id, body.save_path)
     repo = TorrentRepository(session)
     row = await repo.create(
         display_name=body.display_name,
-        save_path=body.save_path,
+        save_path=sp,
         magnet_uri=body.magnet_uri,
         engine_id=engine_id,
         label=body.label.strip(),
@@ -70,7 +85,7 @@ async def create_torrent(body: TorrentCreate, session: DbSession, pool: EnginePo
     await session.flush()
     await session.refresh(row)
     try:
-        await pool.client_for(engine_id).register_torrent(row.id, body.magnet_uri, body.save_path)
+        await pool.client_for(engine_id).register_torrent(row.id, body.magnet_uri, row.save_path)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="engine unavailable") from exc
     await repo.update_status(row.id, TorrentStatus.downloading.value)
@@ -83,21 +98,19 @@ async def upload_torrent_file(
     session: DbSession,
     pool: EnginePoolDep,
     torrent_file: UploadFile = File(...),
-    save_path: str = Form(...),
+    save_path: str = Form(""),
+    engine_id: str = Form(""),
     display_name: str = Form(""),
     label: str = Form(""),
 ):
     filename = (torrent_file.filename or "").strip()
     if not filename.lower().endswith(".torrent"):
         raise HTTPException(status_code=422, detail="only .torrent files are supported")
-    if not save_path.strip():
-        raise HTTPException(status_code=422, detail="save_path is required")
     payload = await torrent_file.read()
     if not payload:
         raise HTTPException(status_code=422, detail="torrent file is empty")
 
-    sp = save_path.strip()
-    engine_id = pool.resolve_engine_id(sp)
+    engine_id, sp = _resolve_target(pool, engine_id, save_path)
     repo = TorrentRepository(session)
     row = await repo.create(
         display_name=display_name.strip() or filename,
@@ -124,18 +137,16 @@ async def upload_torrent_files(
     session: DbSession,
     pool: EnginePoolDep,
     torrent_files: list[UploadFile] = File(...),
-    save_path: str = Form(...),
+    save_path: str = Form(""),
+    engine_id: str = Form(""),
     label: str = Form(""),
 ):
     """Мульти-загрузка: несколько .torrent за один запрос. Отчёт по каждому файлу;
     сбой одного файла не отменяет остальные (частичный успех допустим)."""
-    if not save_path.strip():
-        raise HTTPException(status_code=422, detail="save_path is required")
     if not torrent_files:
         raise HTTPException(status_code=422, detail="no files provided")
 
-    sp = save_path.strip()
-    engine_id = pool.resolve_engine_id(sp)
+    engine_id, sp = _resolve_target(pool, engine_id, save_path)
     repo = TorrentRepository(session)
     client = pool.client_for(engine_id)
 
@@ -183,8 +194,7 @@ async def create_torrent_from_url(body: TorrentUrlCreate, session: DbSession, po
     url = body.url.strip()
     if not url.lower().startswith(("http://", "https://")):
         raise HTTPException(status_code=422, detail="url must be http or https")
-    sp = body.save_path.strip()
-    engine_id = pool.resolve_engine_id(sp)
+    engine_id, sp = _resolve_target(pool, body.engine_id, body.save_path)
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0), follow_redirects=True) as client:
             resp = await client.get(url)

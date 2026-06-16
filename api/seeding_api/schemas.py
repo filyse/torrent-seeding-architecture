@@ -5,14 +5,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class TorrentCreate(BaseModel):
     display_name: str = Field(default="", max_length=512)
-    save_path: str = Field(..., min_length=1)
+    save_path: str = Field(default="")
+    engine_id: str | None = Field(default=None, max_length=64)
     magnet_uri: str = Field(..., min_length=12)
     label: str = Field(default="", max_length=128)
 
 
 class TorrentUrlCreate(BaseModel):
     url: str = Field(..., min_length=8)
-    save_path: str = Field(..., min_length=1)
+    save_path: str = Field(default="")
+    engine_id: str | None = Field(default=None, max_length=64)
     display_name: str = Field(default="", max_length=512)
     label: str = Field(default="", max_length=128)
 
@@ -27,6 +29,9 @@ class EngineOut(BaseModel):
     url: str
     storage_prefix: str
     listen_port: int | None = None
+    disk_total: int | None = None
+    disk_free: int | None = None
+    online: bool = True
 
 
 class BulkIdsIn(BaseModel):

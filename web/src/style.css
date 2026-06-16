@@ -175,7 +175,8 @@ body {
 .field input[type="text"],
 .field input[type="url"],
 .field input[type="search"],
-.field input[type="file"] {
+.field input[type="file"],
+.field select.select {
   width: 100%;
   padding: 0.5rem 0.65rem;
   font: inherit;
@@ -185,9 +186,28 @@ body {
   border-radius: 6px;
 }
 
-.field input:focus {
+.field input:focus,
+.field select.select:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.advanced {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.65rem;
+  background: var(--surface-2);
+}
+
+.advanced > summary {
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.advanced[open] > summary {
+  margin-bottom: 0.5rem;
 }
 
 .field__hint {
