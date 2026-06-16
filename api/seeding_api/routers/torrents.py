@@ -12,6 +12,7 @@ from seeding_api.schemas import (
     BatchUploadItem,
     BatchUploadResult,
     BulkIdsIn,
+    BulkLabelIn,
     FilePrioritiesIn,
     LimitsIn,
     TorrentCreate,
@@ -265,6 +266,19 @@ async def bulk_resume(body: BulkIdsIn, session: DbSession, pool: EnginePoolDep):
         except httpx.HTTPError:
             fail += 1
     return {"ok": ok, "fail": fail}
+
+
+@router.post("/bulk/label")
+async def bulk_label(body: BulkLabelIn, session: DbSession):
+    """Массовое назначение метки выбранным раздачам (пустая строка — снять метку)."""
+    repo = TorrentRepository(session)
+    label = body.label.strip()
+    rows = await repo.get_by_ids(body.ids)
+    ok = 0
+    for row in rows:
+        await repo.update_label(row.id, label)
+        ok += 1
+    return {"ok": ok, "label": label}
 
 
 @router.post("/bulk/delete")

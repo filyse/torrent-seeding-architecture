@@ -1323,14 +1323,17 @@ function mountListShell(root: HTMLElement): void {
   });
 
   const labelSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
+  const labelSuggestions = el("datalist", { id: "label-suggestions" }) as HTMLDataListElement;
   const reloadLabels = async () => {
     labelSelect.replaceChildren(el("option", { value: "" }, ["Все метки"]));
+    labelSuggestions.replaceChildren();
     try {
       const labels = await fetchJson<string[]>("/labels");
       for (const lb of labels) {
         const o = el("option", { value: lb }, [lb]) as HTMLOptionElement;
         if (lb === listLabelFilter) o.selected = true;
         labelSelect.append(o);
+        labelSuggestions.append(el("option", { value: lb }));
       }
     } catch {
       /* ignore */
@@ -1377,6 +1380,36 @@ function mountListShell(root: HTMLElement): void {
   };
   bulkPause.addEventListener("click", () => void runBulk("/torrents/bulk/pause"));
   bulkResume.addEventListener("click", () => void runBulk("/torrents/bulk/resume"));
+
+  const bulkLabelInput = el("input", {
+    type: "text",
+    className: "list-toolbar__label-input",
+    placeholder: "Метка для выбранных",
+    list: "label-suggestions",
+  }) as HTMLInputElement;
+  const bulkLabelBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Назначить метку"]);
+  const applyBulkLabel = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) {
+      showToast("Ничего не выбрано", true);
+      return;
+    }
+    const label = bulkLabelInput.value.trim();
+    try {
+      await fetchJson("/torrents/bulk/label", { method: "POST", body: JSON.stringify({ ids, label }) });
+      bulkLabelInput.value = "";
+      selectedIds.clear();
+      showToast(label ? `Метка «${label}» назначена` : "Метка снята");
+      await reloadLabels();
+      void refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    }
+  };
+  bulkLabelBtn.addEventListener("click", () => void applyBulkLabel());
+  bulkLabelInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") void applyBulkLabel();
+  });
   bulkDel.addEventListener("click", async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) {
@@ -1414,7 +1447,10 @@ function mountListShell(root: HTMLElement): void {
     el("button", { type: "button", className: "btn btn--ghost btn--sm", id: "btn-refresh" }, ["Обновить"]),
     bulkPause,
     bulkResume,
+    bulkLabelInput,
+    bulkLabelBtn,
     bulkDel,
+    labelSuggestions,
   ]);
   toolbar.querySelector("#btn-refresh")?.addEventListener("click", () => void refresh());
 

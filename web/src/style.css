@@ -757,6 +757,22 @@ body {
   margin-right: auto;
 }
 
+.list-toolbar__label-input {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  width: 11rem;
+}
+
+.list-toolbar__label-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .torrent-card__top {
   display: flex;
   align-items: flex-start;

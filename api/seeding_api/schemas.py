@@ -38,6 +38,11 @@ class BulkIdsIn(BaseModel):
     ids: list[int] = Field(..., min_length=1)
 
 
+class BulkLabelIn(BaseModel):
+    ids: list[int] = Field(..., min_length=1)
+    label: str = Field(default="", max_length=128)
+
+
 class TrackerAddIn(BaseModel):
     url: str = Field(..., min_length=8)
 
