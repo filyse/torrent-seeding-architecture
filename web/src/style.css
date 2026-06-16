@@ -389,17 +389,49 @@ body {
 .torrent-list--compact .torrent-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
-  gap: 0.6rem;
+  gap: 0.7rem;
 }
 .torrent-list--compact .torrent-card {
   display: flex;
   flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.7rem 0.8rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.torrent-list--compact .torrent-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  transform: translateY(-1px);
+}
+.torrent-list--compact .torrent-card__top {
+  margin-bottom: 0;
+  gap: 0.5rem;
+}
+/* Заголовок в 2 строки с многоточием — выравнивает прогресс-бары по строке. */
+.torrent-list--compact .torrent-card__title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.5em;
+  font-size: 0.9rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.torrent-list--compact .torrent-card .progress {
+  margin: 0;
 }
 .torrent-list--compact .torrent-card__stats {
   flex: 1 1 auto;
+  margin-bottom: 0;
 }
 .torrent-list--compact .torrent-card .btn-row {
   margin-top: auto;
+  gap: 0.3rem;
+}
+.torrent-list--compact .torrent-card .btn-row .btn {
+  flex: 1 1 0;
+  padding: 0.3rem 0.4rem;
 }
 
 .progress {

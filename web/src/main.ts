@@ -860,7 +860,9 @@ function renderTorrentCard(
     { className: "torrent-card__title" },
     [
       (() => {
-        const a = el("a", { href: `#/torrent/${t.id}` }, [t.display_name || `Торрент #${t.id}`]);
+        const fullName = t.display_name || `Торрент #${t.id}`;
+        const shownName = fullName.replace(/\.torrent$/i, "") || fullName;
+        const a = el("a", { href: `#/torrent/${t.id}`, title: fullName }, [shownName]);
         a.addEventListener("click", (ev) => {
           ev.preventDefault();
           setHashDetail(t.id);
