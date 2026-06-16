@@ -461,6 +461,7 @@ class MainWindow(QMainWindow):
         self._engines: list[dict[str, Any]] = []
         self._labels: list[str] = []
         self._busy = False
+        self._last_n = -1
 
         root = QWidget(self)
         self.setCentralWidget(root)
@@ -520,6 +521,13 @@ class MainWindow(QMainWindow):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
+        self.table.setAlternatingRowColors(True)
+        # Убираем пунктирную focus-рамку и частичную заливку ячеек: выделяем строку целиком.
+        self.table.setStyleSheet(
+            "QTableView { outline: 0; }"
+            "QTableView::item { border: 0; }"
+            "QTableView::item:selected { background: #2f6fed; color: #ffffff; }"
+        )
         self.table.doubleClicked.connect(self.on_details)
         outer.addWidget(self.table, 1)
 
@@ -642,6 +650,7 @@ class MainWindow(QMainWindow):
         else:
             rows.sort(key=lambda t: t.get("id", 0), reverse=True)
 
+        selected = set(self._selected_ids())
         self.table.setRowCount(len(rows))
         for i, t in enumerate(rows):
             rt = t.get("runtime") or {}
@@ -667,8 +676,18 @@ class MainWindow(QMainWindow):
                 if c == 1:
                     item.setToolTip(str(t.get("display_name", "")))
                 self.table.setItem(i, c, item)
-        self.table.resizeColumnsToContents()
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        # Восстанавливаем выделение по id (автообновление не должно его сбрасывать).
+        if selected:
+            self.table.clearSelection()
+            for i in range(self.table.rowCount()):
+                it = self.table.item(i, 0)
+                if it and it.text().isdigit() and int(it.text()) in selected:
+                    self.table.selectRow(i)
+        # Ширину колонок подгоняем только при изменении числа строк, а не каждые 5с.
+        if self.table.rowCount() != self._last_n:
+            self.table.resizeColumnsToContents()
+            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            self._last_n = self.table.rowCount()
         self._sync_sel()
 
     # --- действия ---
