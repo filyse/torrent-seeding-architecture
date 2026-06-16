@@ -109,6 +109,7 @@ type Route = { view: "list" } | { view: "detail"; id: number } | { view: "settin
 type DeleteTorrentChoice = "cancel" | "torrent_only" | "torrent_and_files";
 
 let listPollTimer: ReturnType<typeof setTimeout> | null = null;
+let listStream: EventSource | null = null;
 let detailPollTimer: ReturnType<typeof setTimeout> | null = null;
 let listAbort: AbortController | null = null;
 let detailAbort: AbortController | null = null;
@@ -215,7 +216,15 @@ function upsertTorrentInList(torrent: TorrentOut): TorrentOut[] {
   return lastListItems;
 }
 
+function stopListStream(): void {
+  if (listStream !== null) {
+    listStream.close();
+    listStream = null;
+  }
+}
+
 function clearViewPolls(): void {
+  stopListStream();
   if (listPollTimer !== null) {
     clearTimeout(listPollTimer);
     listPollTimer = null;
@@ -1020,6 +1029,45 @@ function scheduleListPoll(
   }, ms);
 }
 
+// Push-обновления через SSE. При успехе вытесняют поллинг; при ошибке — откат на поллинг.
+function startListStream(refs: ListHostRefs, sessionBarHost: HTMLElement, onFallback: () => void): void {
+  stopListStream();
+  let url = `${API}/stream?interval=3`;
+  try {
+    const key = localStorage.getItem("seedingApiKey");
+    if (key) url += `&api_key=${encodeURIComponent(key)}`;
+  } catch {
+    /* ignore */
+  }
+  let es: EventSource;
+  try {
+    es = new EventSource(url);
+  } catch {
+    onFallback();
+    return;
+  }
+  listStream = es;
+  es.addEventListener("snapshot", (ev) => {
+    if (listStream !== es || parseRoute().view !== "list") return;
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { torrents: TorrentOut[]; stats: SessionStats };
+      stopListPoll();
+      lastListItems = data.torrents;
+      paintTorrentList(refs, data.torrents);
+      sessionBarHost.replaceChildren(mountSessionBar(data.stats));
+    } catch {
+      /* ignore malformed frame */
+    }
+  });
+  es.onerror = () => {
+    // EventSource сам пытается переподключаться; не блокируем UI — откатываемся на поллинг.
+    if (listStream === es) {
+      stopListStream();
+      onFallback();
+    }
+  };
+}
+
 function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) => void): HTMLElement {
   const panel = el("section", { className: "panel" });
   panel.append(el("div", { className: "panel__head" }, ["Добавить торрент"]));
@@ -1546,17 +1594,22 @@ function mountListShell(root: HTMLElement): void {
     sessionBarHost.replaceChildren(mountSessionBar(s));
   });
 
+  const startStream = () => startListStream(listRefs, sessionBarHost, () => void refresh());
+
   const onVisibility = () => {
     if (parseRoute().view !== "list") return;
-    if (!document.hidden) void refresh();
-    else if (listPollTimer !== null) {
-      clearTimeout(listPollTimer);
-      listPollTimer = null;
+    if (document.hidden) {
+      stopListStream();
+      stopListPoll();
+    } else {
+      void refresh();
+      startStream();
     }
   };
   document.addEventListener("visibilitychange", onVisibility);
 
   void refresh();
+  startStream();
 }
 
 async function loadDetail(

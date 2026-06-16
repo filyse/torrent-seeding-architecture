@@ -17,6 +17,7 @@ from seeding_api.restore import maybe_restore_torrents_to_engine
 from seeding_api.routers import engines as engines_router
 from seeding_api.routers import jobs as jobs_router
 from seeding_api.routers import session as session_router
+from seeding_api.routers import stream as stream_router
 from seeding_api.routers import torrents as torrents_router
 
 
@@ -124,3 +125,5 @@ app.include_router(
     prefix="/api/v1",
     dependencies=[Depends(require_api_key_if_configured)],
 )
+# SSE: ключ проверяется внутри (query-параметр), т.к. EventSource не шлёт заголовки.
+app.include_router(stream_router.router, prefix="/api/v1")
