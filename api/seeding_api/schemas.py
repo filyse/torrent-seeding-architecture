@@ -34,6 +34,20 @@ class EngineOut(BaseModel):
     online: bool = True
 
 
+class EngineRegistryItem(BaseModel):
+    id: str
+    url: str
+    storage_prefix: str
+    media_path: str | None = None
+    listen_port: int | None = None
+    enabled: bool = True
+    last_seen: datetime | None = None
+    age_seconds: int | None = None
+    stale: bool = False
+    in_pool: bool = False
+    source: str = "dynamic"  # static | dynamic | static+dynamic
+
+
 class EngineRegisterIn(BaseModel):
     id: str = Field(..., min_length=1, max_length=32)
     url: str = Field(..., min_length=4)

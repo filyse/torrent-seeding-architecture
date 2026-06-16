@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from datetime import datetime, timezone
 
 import httpx
 from seeding_db.engine_registry import (
@@ -24,6 +26,14 @@ from seeding_db.repository import EngineRepository
 from seeding_api.engine_client import EngineClient
 
 log = logging.getLogger(__name__)
+
+
+def engine_ttl_seconds() -> int:
+    """Сколько секунд без heartbeat движок ещё считается живым (по умолчанию 3 пропуска)."""
+    try:
+        return max(30, int(os.getenv("SEEDING_ENGINE_TTL", "180")))
+    except ValueError:
+        return 180
 
 
 def _merge_specs(static: list[EngineSpec], db_rows) -> list[EngineSpec]:
@@ -60,6 +70,7 @@ class EnginePool:
         except Exception as exc:  # noqa: BLE001
             log.warning("engine pool refresh: DB read failed: %s", exc)
             return
+        db_rows = self._evict_stale(db_rows)
         new_specs = _merge_specs(self._static, db_rows)
         new_ids = {s.id for s in new_specs}
         async with self._lock:
@@ -84,9 +95,47 @@ class EnginePool:
             except Exception:  # noqa: BLE001
                 pass
 
+    def _evict_stale(self, db_rows):
+        """Убрать из активного состава динамические движки без свежего heartbeat.
+
+        Статически сконфигурированные движки (`engines.json`) всегда остаются — их наличие
+        задаётся локальным конфигом, а не heartbeat'ом. Выбывают только самозарегистрированные
+        движки, от которых не было сигнала дольше TTL (машина выключена/убрана)."""
+        ttl = engine_ttl_seconds()
+        now = datetime.now(timezone.utc)
+        static_ids = {s.id for s in self._static}
+        kept = []
+        for r in db_rows:
+            if r.id in static_ids:
+                kept.append(r)
+                continue
+            ls = r.last_seen
+            if ls is None:
+                log.info("engine pool: drop never-seen dynamic engine %s", r.id)
+                continue
+            if ls.tzinfo is None:
+                ls = ls.replace(tzinfo=timezone.utc)
+            age = (now - ls).total_seconds()
+            if age <= ttl:
+                kept.append(r)
+            else:
+                log.info(
+                    "engine pool: evicting stale engine %s (last_seen %ds ago > ttl %ds)",
+                    r.id, int(age), ttl,
+                )
+        return kept
+
     @property
     def specs(self) -> list[EngineSpec]:
         return list(self._specs)
+
+    @property
+    def static_ids(self) -> set[str]:
+        return {s.id for s in self._static}
+
+    @staticmethod
+    def ttl_seconds() -> int:
+        return engine_ttl_seconds()
 
     def resolve_engine_id(self, save_path: str) -> str:
         return resolve_engine_id(save_path, self._specs)

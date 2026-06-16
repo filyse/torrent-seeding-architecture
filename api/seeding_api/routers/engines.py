@@ -1,10 +1,11 @@
 import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from seeding_db.repository import EngineRepository
 
 from seeding_api.deps import DbSession, EnginePoolDep
-from seeding_api.schemas import EngineOut, EngineRegisterIn
+from seeding_api.schemas import EngineOut, EngineRegisterIn, EngineRegistryItem
 
 router = APIRouter()
 
@@ -37,6 +38,48 @@ async def list_engines(pool: EnginePoolDep):
                 disk_total=int(dt) if dt is not None else None,
                 disk_free=int(df) if df is not None else None,
                 online=online,
+            )
+        )
+    return out
+
+
+@router.get("/registry", response_model=list[EngineRegistryItem])
+async def engine_registry(session: DbSession, pool: EnginePoolDep):
+    """Полный реестр движков с last_seen/staleness (включая выбывшие, которых нет в активном пуле)."""
+    rows = await EngineRepository(session).list_all()
+    db_by_id = {r.id: r for r in rows}
+    ttl = pool.ttl_seconds()
+    now = datetime.now(timezone.utc)
+    pool_ids = {s.id for s in pool.specs}
+    static_ids = pool.static_ids
+    out: list[EngineRegistryItem] = []
+    for eid in sorted(set(db_by_id) | static_ids):
+        r = db_by_id.get(eid)
+        spec = pool.spec(eid)
+        last_seen = r.last_seen if r else None
+        age: int | None = None
+        stale = False
+        if last_seen is not None:
+            ls = last_seen if last_seen.tzinfo else last_seen.replace(tzinfo=timezone.utc)
+            age = int((now - ls).total_seconds())
+            stale = age > ttl and eid not in static_ids
+        elif eid not in static_ids:
+            stale = True
+        in_static, in_db = eid in static_ids, r is not None
+        source = "static+dynamic" if (in_static and in_db) else ("static" if in_static else "dynamic")
+        out.append(
+            EngineRegistryItem(
+                id=eid,
+                url=(spec.url if spec else (r.url if r else "")),
+                storage_prefix=(spec.storage_prefix if spec else (r.storage_prefix if r else "")),
+                media_path=(spec.media_path if spec else (r.media_path if r else None)),
+                listen_port=(spec.listen_port if spec else (r.listen_port if r else None)),
+                enabled=(r.enabled if r else True),
+                last_seen=last_seen,
+                age_seconds=age,
+                stale=stale,
+                in_pool=eid in pool_ids,
+                source=source,
             )
         )
     return out
