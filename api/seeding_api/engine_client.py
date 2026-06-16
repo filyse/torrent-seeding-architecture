@@ -25,6 +25,10 @@ class EngineClient:
             base_url=self._base, timeout=httpx.Timeout(30.0), transport=transport
         )
 
+    @property
+    def base_url(self) -> str:
+        return self._base
+
     async def aclose(self) -> None:
         await self._client.aclose()
 

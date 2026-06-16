@@ -1,7 +1,9 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from seeding_db.models import TorrentRecord, TorrentStatus
+from seeding_db.models import EngineRecord, TorrentRecord, TorrentStatus
 
 
 class TorrentRepository:
@@ -158,3 +160,58 @@ class TorrentRepository:
         await self._session.delete(row)
         await self._session.flush()
         return True
+
+
+class EngineRepository:
+    """Динамический реестр движков в БД (Фаза 4.5)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def upsert(
+        self,
+        *,
+        engine_id: str,
+        url: str,
+        storage_prefix: str,
+        media_path: str | None = None,
+        listen_port: int | None = None,
+    ) -> EngineRecord:
+        """Зарегистрировать/обновить движок и отметить его «живым» (last_seen=now)."""
+        row = await self._session.get(EngineRecord, engine_id)
+        if row is None:
+            row = EngineRecord(id=engine_id)
+            self._session.add(row)
+        row.url = url
+        row.storage_prefix = storage_prefix
+        row.media_path = media_path or None
+        row.listen_port = listen_port
+        row.enabled = True
+        row.last_seen = datetime.now(timezone.utc)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def list_all(self) -> list[EngineRecord]:
+        result = await self._session.execute(select(EngineRecord).order_by(EngineRecord.id))
+        return list(result.scalars())
+
+    async def list_enabled(self) -> list[EngineRecord]:
+        result = await self._session.execute(
+            select(EngineRecord).where(EngineRecord.enabled.is_(True)).order_by(EngineRecord.id)
+        )
+        return list(result.scalars())
+
+    async def set_enabled(self, engine_id: str, enabled: bool) -> EngineRecord | None:
+        row = await self._session.get(EngineRecord, engine_id)
+        if row is None:
+            return None
+        row.enabled = enabled
+        await self._session.flush()
+        return row
+
+    async def touch(self, engine_id: str) -> None:
+        row = await self._session.get(EngineRecord, engine_id)
+        if row is not None:
+            row.last_seen = datetime.now(timezone.utc)
+            await self._session.flush()

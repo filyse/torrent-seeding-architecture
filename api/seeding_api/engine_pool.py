@@ -1,6 +1,15 @@
-"""Пул HTTP-клиентов к нескольким движкам."""
+"""Пул HTTP-клиентов к нескольким движкам.
+
+Источник специй — статический `engines.json` (база) плюс динамический реестр в БД
+(Фаза 4.5): движки могут регистрироваться сами по API-ключу. `refresh()` сливает оба
+источника (записи БД дополняют/переопределяют статику, но не затирают известные поля
+вроде `media_path` значениями None) и пересобирает HTTP-клиентов под изменившийся состав.
+"""
 
 from __future__ import annotations
+
+import asyncio
+import logging
 
 import httpx
 from seeding_db.engine_registry import (
@@ -10,14 +19,70 @@ from seeding_db.engine_registry import (
     resolve_engine_id,
     spec_by_id,
 )
+from seeding_db.repository import EngineRepository
 
 from seeding_api.engine_client import EngineClient
 
+log = logging.getLogger(__name__)
+
+
+def _merge_specs(static: list[EngineSpec], db_rows) -> list[EngineSpec]:
+    """Слить статику и БД по id. Поля из БД переопределяют статику, но пустые/None из БД
+    не затирают известные значения статики (важно для `media_path`)."""
+    merged: dict[str, EngineSpec] = {s.id: s for s in static}
+    for r in db_rows:
+        base = merged.get(r.id)
+        merged[r.id] = EngineSpec(
+            id=r.id,
+            url=(r.url or (base.url if base else "")),
+            storage_prefix=(r.storage_prefix or (base.storage_prefix if base else "")),
+            listen_port=(r.listen_port if r.listen_port is not None else (base.listen_port if base else None)),
+            media_path=(r.media_path or (base.media_path if base else None)),
+        )
+    return list(merged.values())
+
 
 class EnginePool:
-    def __init__(self, specs: list[EngineSpec] | None = None) -> None:
-        self._specs = specs if specs is not None else load_engine_specs()
+    def __init__(self, specs: list[EngineSpec] | None = None, session_factory=None) -> None:
+        self._static = specs if specs is not None else load_engine_specs()
+        self._session_factory = session_factory
+        self._specs = list(self._static)
         self._by_id: dict[str, EngineClient] = {s.id: EngineClient(s.url) for s in self._specs}
+        self._lock = asyncio.Lock()
+
+    async def refresh(self) -> None:
+        """Перечитать реестр из БД и пересобрать клиентов под новый состав движков."""
+        if self._session_factory is None:
+            return
+        try:
+            async with self._session_factory() as session:
+                db_rows = await EngineRepository(session).list_enabled()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("engine pool refresh: DB read failed: %s", exc)
+            return
+        new_specs = _merge_specs(self._static, db_rows)
+        new_ids = {s.id for s in new_specs}
+        async with self._lock:
+            to_close: list[EngineClient] = []
+            for eid in list(self._by_id):
+                if eid not in new_ids:
+                    to_close.append(self._by_id.pop(eid))
+            by_id: dict[str, EngineClient] = {}
+            for s in new_specs:
+                existing = self._by_id.get(s.id)
+                if existing is not None and existing.base_url == s.url.rstrip("/"):
+                    by_id[s.id] = existing
+                else:
+                    if existing is not None:
+                        to_close.append(existing)
+                    by_id[s.id] = EngineClient(s.url)
+            self._by_id = by_id
+            self._specs = new_specs
+        for client in to_close:
+            try:
+                await client.aclose()
+            except Exception:  # noqa: BLE001
+                pass
 
     @property
     def specs(self) -> list[EngineSpec]:

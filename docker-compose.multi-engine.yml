@@ -19,6 +19,10 @@ x-engine-common: &engine-common
     LT_CONNECTIONS_LIMIT: "500"
     LT_ENABLE_UPNP: "0"
     LT_ENABLE_NATPMP: "0"
+    # Саморегистрация в оркестраторе (Фаза 4.5). id/порт/префикс выводятся из
+    # ENGINE_STORAGE_SUBDIR + LT_LISTEN_INTERFACES + SEEDING_DATA_ROOT.
+    SEEDING_ORCHESTRATOR_URL: "http://api:8000"
+    SEEDING_ENGINE_REGISTER_KEY: "ct400-engine-register"
   healthcheck:
     test:
       [
@@ -136,6 +140,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       ENGINES_CONFIG_FILE: /config/engines.json
       SEEDING_RESTORE_CONCURRENCY: "32"
+      # Должен совпадать с SEEDING_ENGINE_REGISTER_KEY движков (Фаза 4.5).
+      SEEDING_ENGINE_REGISTER_KEY: "ct400-engine-register"
     volumes:
       - ./config/engines.ct400.json:/config/engines.json:ro
     ports:
@@ -207,4 +213,4 @@ volumes:
   seeding_b4:
   seeding_b5:
   seeding_b6:
-
+

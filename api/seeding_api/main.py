@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 from arq import create_pool
@@ -20,8 +21,27 @@ from seeding_api.routers import session as session_router
 from seeding_api.routers import stream as stream_router
 from seeding_api.routers import torrents as torrents_router
 
-
 app = FastAPI(title="Torrent seeding API", version="0.2.0")
+
+
+def _engine_refresh_interval() -> int:
+    try:
+        return max(0, int(os.getenv("SEEDING_ENGINE_REFRESH_INTERVAL", "30")))
+    except ValueError:
+        return 30
+
+
+async def _engine_refresh_loop(pool: EnginePool) -> None:
+    """Периодически подхватывать только что зарегистрированные движки из БД."""
+    interval = _engine_refresh_interval()
+    if interval <= 0:
+        return
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            await pool.refresh()
+    except asyncio.CancelledError:
+        raise
 
 
 @app.on_event("startup")
@@ -32,17 +52,26 @@ async def startup() -> None:
     app.state.session_factory = create_session_factory(engine)
     if os.getenv("SEEDING_AUTO_SCHEMA", "").lower() in ("1", "true", "yes"):
         await init_models(engine)
-    pool = EnginePool()
+    pool = EnginePool(session_factory=app.state.session_factory)
+    await pool.refresh()
     app.state.engine_pool = pool
     await maybe_restore_torrents_to_engine(app.state.session_factory, pool)
     app.state.arq_pool = None
     redis_url = os.getenv("REDIS_URL")
     if redis_url:
         app.state.arq_pool = await create_pool(redis_settings_from_url(redis_url))
+    app.state.engine_refresh_task = asyncio.create_task(_engine_refresh_loop(pool))
 
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
+    task = getattr(app.state, "engine_refresh_task", None)
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
     if getattr(app.state, "arq_pool", None) is not None:
         await app.state.arq_pool.close()
     if getattr(app.state, "engine_pool", None) is not None:

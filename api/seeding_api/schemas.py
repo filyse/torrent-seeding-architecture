@@ -34,6 +34,14 @@ class EngineOut(BaseModel):
     online: bool = True
 
 
+class EngineRegisterIn(BaseModel):
+    id: str = Field(..., min_length=1, max_length=32)
+    url: str = Field(..., min_length=4)
+    storage_prefix: str = Field(..., min_length=1)
+    media_path: str | None = Field(default=None)
+    listen_port: int | None = Field(default=None)
+
+
 class BulkIdsIn(BaseModel):
     ids: list[int] = Field(..., min_length=1)
 

@@ -1,14 +1,4 @@
-import os
-from collections.abc import AsyncGenerator
-from typing import Annotated
-
-from fastapi import Depends, Header, HTTPException, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from seeding_api.engine_pool import EnginePool
-
-
-async def get_db_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
+import osfrom collections.abc import AsyncGeneratorfrom typing import Annotatedfrom fastapi import Depends, Header, HTTPException, Requestfrom sqlalchemy.ext.asyncio import AsyncSessionfrom seeding_api.engine_pool import EnginePoolasync def get_db_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     factory = request.app.state.session_factory
     async with factory() as session:
         try:
