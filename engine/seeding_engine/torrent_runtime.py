@@ -385,6 +385,9 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self._listen_high = int(os.getenv("LT_LISTEN_PORT_HIGH", "51413"))
         sp = session_state_path()
         self._state_path: str | None = str(sp) if sp else None
+        # Периодическое сохранение fastresume/session.state — устойчивость к падению/kill -9.
+        self._save_interval = _env_int("SEEDING_FASTRESUME_SAVE_INTERVAL", 300)
+        self._save_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         lt = self._lt
@@ -418,10 +421,65 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             except Exception as exc:  # noqa: BLE001
                 log.warning("engine self-restore failed: %s", exc)
 
+        if self._save_interval > 0 and self._save_task is None:
+            self._save_task = asyncio.create_task(self._periodic_save_loop())
+            log.info("periodic fastresume save every %ss", max(self._save_interval, 30))
+
+    async def _save_all_to_disk(self) -> int:
+        """Сохранить fastresume всех раздач + session.state. Reused периодикой и stop()."""
+        lt = self._lt
+        async with self._lock:
+            ses = self._ses
+            handles = dict(self._handles)
+        if ses is None:
+            return 0
+        saved = 0
+        for db_id, h in handles.items():
+            try:
+                await asyncio.to_thread(save_fastresume, lt, h, db_id)
+                saved += 1
+            except Exception as exc:  # noqa: BLE001
+                log.warning("save_fastresume db_id=%s: %s", db_id, exc)
+        if self._state_path:
+            state_path = self._state_path
+
+            def _save_state(ses_inner=ses):
+                try:
+                    blob = lt.bencode(ses_inner.save_state())
+                    Path(state_path).parent.mkdir(parents=True, exist_ok=True)
+                    Path(state_path).write_bytes(blob)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("save_state: %s", exc)
+
+            await asyncio.to_thread(_save_state)
+        return saved
+
+    async def _periodic_save_loop(self) -> None:
+        interval = max(self._save_interval, 30)
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    n = await self._save_all_to_disk()
+                    log.debug("periodic fastresume save: %s torrent(s)", n)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("periodic save loop iteration failed: %s", exc)
+        except asyncio.CancelledError:
+            raise
+
     async def stop(self) -> None:
         """Остановка сессии; при SEEDING_LT_STATE_FILE — сохранение состояния (best effort)."""
         lt = self._lt
         state_path = self._state_path
+        if self._save_task is not None:
+            self._save_task.cancel()
+            try:
+                await self._save_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:  # noqa: BLE001
+                pass
+            self._save_task = None
         async with self._lock:
             ses = self._ses
             handles = dict(self._handles)
