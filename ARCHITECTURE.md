@@ -62,14 +62,26 @@ flowchart TB
     R[(Redis)]
     Q[ARQ queue_worker]
   end
-  subgraph engines [Data plane: движки libtorrent]
-    E1[engine-b1 :8081<br/>BT :50001]
-    E2[engine-b2 :8081<br/>BT :50002]
-    E6[engine-b6 :8081<br/>BT :50006]
+  subgraph eng1 [engine-b1 :8081 · BT :50001]
+    E1[libtorrent-сессия b1]
+    P1[Пиры и трекеры b1]
+    F1[(Контент b1<br/>/data/b1)]
+    E1 --- P1
+    E1 --- F1
   end
-  subgraph ext [Снаружи]
-    Peers[Пиры и трекеры]
-    Files[(Контент на диске)]
+  subgraph eng2 [engine-b2 :8081 · BT :50002]
+    E2[libtorrent-сессия b2]
+    P2[Пиры и трекеры b2]
+    F2[(Контент b2<br/>/data/b2)]
+    E2 --- P2
+    E2 --- F2
+  end
+  subgraph eng6 [engine-b6 :8081 · BT :50006]
+    E6[libtorrent-сессия b6]
+    P6[Пиры и трекеры b6]
+    F6[(Контент b6<br/>/data/b6)]
+    E6 --- P6
+    E6 --- F6
   end
   Web --> API
   Desk --> API
@@ -77,9 +89,14 @@ flowchart TB
   API --> DB
   API --> R --> Q --> DB
   POOL --> E1 & E2 & E6
-  E1 & E2 & E6 --> Peers
-  E1 & E2 & E6 --> Files
 ```
+
+> Каждый движок — **самостоятельный узел раздачи**: своя сессия libtorrent, свой набор
+> пиров/трекеров (DHT, соединения), свой BitTorrent-порт и **собственное хранилище контента**
+> (`/data/bX`, отдельный том/диск). Движки между собой не делят ни сессию, ни данные — общий
+> у них только control plane (API/БД/очередь). Это позволяет раскладывать раздачи по разным
+> дискам, а в перспективе — выносить движки на отдельные машины (см. [`ROADMAP.md`](ROADMAP.md),
+> фазы 4.5/4.6).
 
 **Маршрутизация (`EnginePool`).** В БД у каждой раздачи есть `engine_id` и `save_path`.
 API выбирает движок по совпадению `save_path` с `storage_prefix` движка из конфига
