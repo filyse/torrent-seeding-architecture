@@ -1,5 +1,7 @@
 import base64
+import contextlib
 import os
+from collections.abc import AsyncIterator
 
 import httpx
 
@@ -102,6 +104,56 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def path_exists(self, path: str) -> bool:
+        """Видит ли движок путь (общий /media) — факт-проверка для авто-выбора транспорта."""
+        r = await self._client.get("/internal/v1/fs/exists", params={"path": path})
+        r.raise_for_status()
+        data = r.json()
+        return bool(data.get("exists")) if isinstance(data, dict) else False
+
+    @contextlib.asynccontextmanager
+    async def stream_content(self, db_id: int):
+        """Открыть потоковую выгрузку контента (tar) с движка-источника.
+
+        Возвращает (response, content_total). Контекст держит соединение открытым,
+        пока оркестратор перекачивает байты в движок-приёмник."""
+        timeout = httpx.Timeout(connect=30.0, read=None, write=None, pool=None)
+        async with self._client.stream(
+            "GET", f"/internal/v1/torrents/{db_id}/content", timeout=timeout
+        ) as resp:
+            resp.raise_for_status()
+            try:
+                total = int(resp.headers.get("X-Content-Total", "0"))
+            except ValueError:
+                total = 0
+            yield resp, total
+
+    async def stage_remote(
+        self, db_id: int, torrent_bytes: bytes, save_path: str, content_total: int
+    ) -> dict:
+        r = await self._client.post(
+            "/internal/v1/torrents/stage-remote",
+            json={
+                "db_id": db_id,
+                "save_path": save_path,
+                "torrent_b64": base64.b64encode(torrent_bytes).decode("ascii"),
+                "content_total": int(content_total),
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+    async def import_remote(self, db_id: int, content_iter: AsyncIterator[bytes]) -> dict:
+        """Отправить tar-поток контента движку-приёмнику телом запроса (после stage-remote)."""
+        r = await self._client.post(
+            f"/internal/v1/torrents/{db_id}/import-remote",
+            content=content_iter,
+            headers={"Content-Type": "application/x-tar"},
+            timeout=httpx.Timeout(connect=30.0, read=None, write=None, pool=None),
+        )
+        r.raise_for_status()
+        return r.json()
+
     async def restore_from_disk(self, db_id: int, save_path: str) -> dict | None:
         r = await self._client.post(
             f"/internal/v1/torrents/{db_id}/restore-from-disk",
@@ -114,6 +166,13 @@ class EngineClient:
 
     async def runtime_snapshot(self, db_id: int) -> dict | None:
         r = await self._client.get(f"/internal/v1/torrents/{db_id}")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
+    async def get_migrate_progress(self, db_id: int) -> dict | None:
+        r = await self._client.get(f"/internal/v1/torrents/{db_id}/migrate-progress")
         if r.status_code == 404:
             return None
         r.raise_for_status()

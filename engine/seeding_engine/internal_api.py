@@ -1,8 +1,12 @@
+import asyncio
 import base64
 import os
 import shutil
+import tarfile
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
@@ -25,6 +29,13 @@ class TorrentImportIn(BaseModel):
 class TorrentFileBytesOut(BaseModel):
     db_id: int
     torrent_b64: str
+
+
+class StageRemoteIn(BaseModel):
+    db_id: int = Field(..., ge=1)
+    save_path: str = Field(..., min_length=1)
+    torrent_b64: str = Field(..., min_length=1)
+    content_total: int = Field(0, ge=0)
 
 
 class TorrentPeerOut(BaseModel):
@@ -159,6 +170,115 @@ async def import_local_torrent(request: Request, body: TorrentImportIn):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RuntimeHandleOut.model_validate(h)
+
+
+@router.get("/fs/exists")
+async def fs_exists(request: Request, path: str = Query(..., min_length=1)):
+    """Проверить, виден ли путь с этого движка (факт-проверка общего /media для авто-переноса)."""
+    p = Path(path)
+    try:
+        exists = p.exists()
+        is_dir = p.is_dir() if exists else False
+    except OSError:
+        exists, is_dir = False, False
+    return {"path": path, "exists": exists, "is_dir": is_dir}
+
+
+@router.get("/torrents/{db_id}/content")
+async def stream_content(request: Request, db_id: int):
+    """Отдать контент раздачи tar-потоком (источник сетевого переноса между машинами)."""
+    rt = get_runtime(request)
+    loc_fn = getattr(rt, "content_location", None)
+    if loc_fn is None:
+        raise HTTPException(status_code=501, detail="content streaming not supported for this backend")
+    loc = await loc_fn(db_id)
+    if loc is None:
+        raise HTTPException(status_code=404, detail="torrent not in runtime")
+    path, total = loc
+    p = Path(path)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="content not found on disk")
+
+    async def gen():
+        loop = asyncio.get_running_loop()
+        rfd, wfd = os.pipe()
+
+        def write_tar() -> None:
+            with os.fdopen(wfd, "wb") as wf, tarfile.open(fileobj=wf, mode="w|") as tf:
+                tf.add(str(p), arcname=p.name)
+
+        task = loop.run_in_executor(None, write_tar)
+        rf = os.fdopen(rfd, "rb")
+        try:
+            while True:
+                chunk = await loop.run_in_executor(None, rf.read, 1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            rf.close()
+            await task
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-tar",
+        headers={"X-Content-Total": str(total)},
+    )
+
+
+@router.post("/torrents/stage-remote")
+async def stage_remote_import(request: Request, body: StageRemoteIn):
+    """Сохранить метаданные перед приёмом потока контента (сетевой перенос, приёмник)."""
+    rt = get_runtime(request)
+    fn = getattr(rt, "stage_import", None)
+    if fn is None:
+        raise HTTPException(status_code=501, detail="remote import not supported for this backend")
+    try:
+        torrent_data = base64.b64decode(body.torrent_b64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail="invalid torrent_b64 payload") from exc
+    fn(body.db_id, body.save_path, torrent_data, body.content_total)
+    return {"ok": True}
+
+
+@router.post("/torrents/{db_id}/import-remote", response_model=RuntimeHandleOut)
+async def import_remote_torrent(request: Request, db_id: int):
+    """Принять tar-поток контента с движка другой машины (тело запроса) + recheck."""
+    rt = get_runtime(request)
+    pop_fn = getattr(rt, "pop_staged_import", None)
+    import_fn = getattr(rt, "import_remote", None)
+    if pop_fn is None or import_fn is None:
+        raise HTTPException(status_code=501, detail="remote import not supported for this backend")
+    staged = pop_fn(db_id)
+    if staged is None:
+        raise HTTPException(status_code=409, detail="import not staged; call stage-remote first")
+
+    async def src_iter():
+        async for chunk in request.stream():
+            yield chunk
+
+    try:
+        h = await import_fn(
+            db_id,
+            staged["save_path"],
+            staged["torrent_data"],
+            staged["content_total"],
+            src_iter(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RuntimeHandleOut.model_validate(h)
+
+
+@router.get("/torrents/{db_id}/migrate-progress")
+async def get_migrate_progress(request: Request, db_id: int):
+    """Прогресс копирования контента при импорте раздачи (перенос с другого движка)."""
+    rt = get_runtime(request)
+    fn = getattr(rt, "migrate_progress", None)
+    prog = fn(db_id) if fn is not None else None
+    if not prog:
+        return {"active": False}
+    return {"active": True, **prog}
 
 
 @router.get("/torrents/{db_id}", response_model=RuntimeHandleOut)

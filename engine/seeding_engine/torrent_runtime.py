@@ -6,7 +6,9 @@ import asyncio
 import logging
 import os
 import shutil
+import tarfile
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from seeding_engine.fastresume_io import (
@@ -381,6 +383,10 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self._lock = asyncio.Lock()
         self._handles: dict[int, object] = {}
         self._meta: dict[int, tuple[str | None, str]] = {}
+        # Прогресс активного импорта (перенос с другого движка): db_id -> {phase, copied, total}.
+        self._migrate_progress: dict[int, dict] = {}
+        # Метаданные сетевого импорта, ожидающего поток контента: db_id -> {save_path, torrent_data, ...}.
+        self._staged_imports: dict[int, dict] = {}
         self._listen_low = int(os.getenv("LT_LISTEN_PORT_LOW", "51413"))
         self._listen_high = int(os.getenv("LT_LISTEN_PORT_HIGH", "51413"))
         sp = session_state_path()
@@ -658,9 +664,15 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         Path(save_path).mkdir(parents=True, exist_ok=True)
         dst = Path(save_path) / name
 
+        total = await asyncio.to_thread(self._dir_size, src)
+        self._migrate_progress[db_id] = {"phase": "copying", "copied": 0, "total": total}
+
         def _copy() -> None:
+            prog = self._migrate_progress.get(db_id)
             if dst.exists():
                 # Уже на месте (повторный запуск/частичный перенос) — recheck разберётся.
+                if prog is not None:
+                    prog["copied"] = prog.get("total", 0)
                 return
             tmp = dst.with_name(dst.name + ".part")
             if tmp.exists():
@@ -668,19 +680,152 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     shutil.rmtree(tmp, ignore_errors=True)
                 else:
                     tmp.unlink(missing_ok=True)
-            if src.is_dir():
-                shutil.copytree(src, tmp)
-            else:
-                tmp.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, tmp)
+            self._copy_tracked(src, tmp, prog)
             os.replace(tmp, dst)
 
-        await asyncio.to_thread(_copy)
+        try:
+            await asyncio.to_thread(_copy)
+            self._migrate_progress[db_id] = {"phase": "checking", "copied": total, "total": total}
+            handle = await self.add_torrent(db_id, None, save_path, torrent_data=torrent_data)
+            # Перепроверяем скопированные данные: при совпадении пиров libtorrent поднимет до seeding.
+            await self.recheck(db_id)
+            return handle
+        finally:
+            # Прогресс копирования больше не нужен; recheck отслеживается через runtime snapshot.
+            self._migrate_progress.pop(db_id, None)
 
-        handle = await self.add_torrent(db_id, None, save_path, torrent_data=torrent_data)
-        # Перепроверяем скопированные данные: при совпадении пиров libtorrent поднимет до seeding.
-        await self.recheck(db_id)
-        return handle
+    def migrate_progress(self, db_id: int) -> dict | None:
+        """Снимок прогресса копирования контента при импорте (если идёт)."""
+        prog = self._migrate_progress.get(db_id)
+        return dict(prog) if prog is not None else None
+
+    def stage_import(self, db_id: int, save_path: str, torrent_data: bytes, content_total: int) -> None:
+        """Сохранить метаданные перед приёмом потока контента (см. import_remote)."""
+        self._staged_imports[db_id] = {
+            "save_path": save_path,
+            "torrent_data": torrent_data,
+            "content_total": int(content_total),
+        }
+
+    def pop_staged_import(self, db_id: int) -> dict | None:
+        return self._staged_imports.pop(db_id, None)
+
+    async def content_location(self, db_id: int) -> tuple[str, int] | None:
+        """Путь к контенту раздачи на диске + суммарный размер (для сетевого переноса)."""
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None:
+            return None
+
+        def _read() -> str | None:
+            st = h.status() if callable(getattr(h, "status", None)) else h.status
+            sp = str(getattr(st, "save_path", "") or "").strip()
+            name = str(getattr(st, "name", "") or "").strip()
+            if not sp or not name:
+                return None
+            return str(Path(sp) / name)
+
+        path = await asyncio.to_thread(_read)
+        if not path:
+            return None
+        total = await asyncio.to_thread(self._dir_size, Path(path))
+        return path, total
+
+    async def import_remote(
+        self,
+        db_id: int,
+        save_path: str,
+        torrent_data: bytes,
+        content_total: int,
+        src_iter: AsyncIterator[bytes],
+    ) -> RuntimeHandle:
+        """Принять раздачу с движка другой машины: распаковать tar-поток контента в свой том,
+        затем add + recheck. Поток приходит из тела HTTP-запроса (оркестратор проксирует source)."""
+        if not torrent_data:
+            raise ValueError("torrent_data is required for import")
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        self._migrate_progress[db_id] = {"phase": "copying", "copied": 0, "total": int(content_total)}
+
+        loop = asyncio.get_running_loop()
+        rfd, wfd = os.pipe()
+
+        def _extract() -> None:
+            with os.fdopen(rfd, "rb") as rf, tarfile.open(fileobj=rf, mode="r|") as tf:
+                # filter="data" блокирует path traversal и спец-файлы (Python 3.12+).
+                tf.extractall(save_path, filter="data")
+
+        extract_task = loop.run_in_executor(None, _extract)
+        wf = os.fdopen(wfd, "wb")
+        prog = self._migrate_progress.get(db_id)
+        try:
+            async for chunk in src_iter:
+                if not chunk:
+                    continue
+                await loop.run_in_executor(None, wf.write, chunk)
+                if prog is not None:
+                    prog["copied"] = prog.get("copied", 0) + len(chunk)
+        finally:
+            try:
+                wf.close()
+            finally:
+                await extract_task
+
+        self._migrate_progress[db_id] = {
+            "phase": "checking", "copied": int(content_total), "total": int(content_total),
+        }
+        try:
+            handle = await self.add_torrent(db_id, None, save_path, torrent_data=torrent_data)
+            await self.recheck(db_id)
+            return handle
+        finally:
+            self._migrate_progress.pop(db_id, None)
+
+    @staticmethod
+    def _dir_size(src: Path) -> int:
+        if src.is_file():
+            try:
+                return src.stat().st_size
+            except OSError:
+                return 0
+        total = 0
+        for root, _dirs, files in os.walk(src):
+            for fn in files:
+                try:
+                    total += (Path(root) / fn).stat().st_size
+                except OSError:
+                    pass
+        return total
+
+    @staticmethod
+    def _copy_tracked(src: Path, dst: Path, prog: dict | None) -> None:
+        """Копирование с обновлением счётчика байтов (для отображения прогресса переноса)."""
+        chunk = 4 * 1024 * 1024
+
+        def _copy_file(s: Path, d: Path) -> None:
+            d.parent.mkdir(parents=True, exist_ok=True)
+            with open(s, "rb") as fin, open(d, "wb") as fout:
+                while True:
+                    buf = fin.read(chunk)
+                    if not buf:
+                        break
+                    fout.write(buf)
+                    if prog is not None:
+                        prog["copied"] = prog.get("copied", 0) + len(buf)
+            try:
+                shutil.copystat(s, d)
+            except OSError:
+                pass
+
+        if src.is_file():
+            _copy_file(src, dst)
+            return
+        dst.mkdir(parents=True, exist_ok=True)
+        for root, _dirs, files in os.walk(src):
+            rel = Path(root).relative_to(src)
+            target_dir = dst / rel
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for fn in files:
+                _copy_file(Path(root) / fn, target_dir / fn)
 
     def _persist_torrent_file(self, db_id: int, torrent_data: bytes) -> None:
         d = self._torrent_files_dir()

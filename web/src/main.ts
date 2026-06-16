@@ -392,11 +392,6 @@ function fmtEta(seconds: number | null | undefined): string {
   return `${s}с`;
 }
 
-function fmtLimit(v: number | null | undefined): string {
-  if (v == null || v <= 0) return "∞";
-  return fmtRate(v);
-}
-
 const FILE_PRIORITY_OPTIONS: { value: number; label: string }[] = [
   { value: 0, label: "Не качать" },
   { value: 1, label: "Низкий" },
@@ -757,7 +752,73 @@ function buildTrackersSpoiler(
   return d;
 }
 
+type MigrateStatusOut = {
+  id: number;
+  active: boolean;
+  phase: string;
+  progress: number | null;
+  copied?: number | null;
+  total?: number | null;
+  message?: string | null;
+};
+
+const MIGRATE_PHASE_LABELS: Record<string, string> = {
+  preparing: "Подготовка…",
+  queued: "В очереди…",
+  copying: "Копирование файлов",
+  checking: "Проверка хэша",
+  finalizing: "Завершение…",
+  migrating: "Перенос…",
+  done: "Готово",
+  error: "Ошибка переноса",
+};
+
+function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLElement {
+  const wrap = el("div", { className: "migrate-progress migrate-progress--indeterminate" });
+  const label = el("div", { className: "migrate-progress__label" }, ["Подготовка…"]);
+  const track = el("div", { className: "progress" });
+  const fill = el("div", { className: "progress__bar" });
+  track.append(fill);
+  wrap.append(label, track);
+
+  let timer = 0;
+  const stop = () => {
+    if (timer) window.clearInterval(timer);
+    timer = 0;
+  };
+  const tick = async () => {
+    if (!document.body.contains(wrap)) {
+      stop();
+      return;
+    }
+    try {
+      const s = await fetchJson<MigrateStatusOut>(`/torrents/${data.id}/migrate-status`);
+      const phase = s.phase || "migrating";
+      const pct = typeof s.progress === "number" ? Math.round(s.progress * 100) : null;
+      let text = MIGRATE_PHASE_LABELS[phase] ?? phase;
+      if (pct != null && (phase === "copying" || phase === "checking")) text += ` · ${pct}%`;
+      if (phase === "copying" && s.total) text += `  (${fmtBytes(s.copied)} / ${fmtBytes(s.total)})`;
+      if (phase === "error" && s.message) text += ` — ${s.message}`;
+      label.textContent = text;
+      const indeterminate = pct == null && phase !== "error" && phase !== "done";
+      wrap.classList.toggle("migrate-progress--indeterminate", indeterminate);
+      wrap.classList.toggle("migrate-progress--error", phase === "error");
+      fill.style.width = pct != null ? `${pct}%` : "100%";
+      if (!s.active) {
+        stop();
+        window.setTimeout(() => onDone(), 1000);
+      }
+    } catch {
+      // транзиентная ошибка опроса — попробуем на следующем тике
+    }
+  };
+  void tick();
+  timer = window.setInterval(() => void tick(), 1000);
+  return wrap;
+}
+
 function buildMigrateRow(data: TorrentDetailOut, onStarted: () => void): HTMLElement {
+  if (data.status === "migrating") return buildMigrateProgress(data, onStarted);
   const wrap = el("div", { className: "migrate-row" });
   const select = el("select", { className: "select" }) as HTMLSelectElement;
   select.append(el("option", { value: "" }, ["Загрузка движков…"]));
@@ -1777,6 +1838,19 @@ async function loadDetail(
       document.createTextNode(`Обновлено ${formatTime(new Date())}`),
     );
 
+    // Не перерисовываем дерево, пока пользователь работает с контролом
+    // (открыт выпадающий список движков, ввод метки/лимитов) — иначе он закроется/сбросится.
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (
+      container.childElementCount > 0 &&
+      activeEl &&
+      container.contains(activeEl) &&
+      ["SELECT", "INPUT", "TEXTAREA"].includes(activeEl.tagName)
+    ) {
+      scheduleNext?.(data);
+      return;
+    }
+
     const progress = data.runtime?.progress ?? 0;
     const pct = Math.round(progress * 1000) / 10;
 
@@ -1794,59 +1868,65 @@ async function loadDetail(
       }),
     );
 
-    const grid = el("div", { className: "detail-grid" });
-    const addStat = (label: string, value: string) => {
-      const box = el("div", { className: "stat-box" });
-      box.append(el("div", { className: "stat-box__label" }, [label]), el("div", { className: "stat-box__value" }, [value]));
-      grid.append(box);
-    };
-    addStat("Прогресс", fmtPercent(data.runtime?.progress));
-    addStat("Размер", fmtBytes(data.runtime?.size));
-    addStat("Скачивание", fmtRate(data.runtime?.download_rate));
-    addStat("Отдача", fmtRate(data.runtime?.upload_rate));
-    addStat("Отдано всего", fmtBytes(data.runtime?.total_uploaded));
-    addStat("Скачано всего", fmtBytes(data.runtime?.downloaded));
-    addStat("Рейтинг", fmtRatio(data.runtime?.ratio));
-    addStat("Сиды / пиры", `${data.runtime?.num_seeds ?? 0} / ${data.runtime?.peers ?? 0}`);
-    addStat("ETA", fmtEta(data.runtime?.eta));
-    addStat("Лимиты ↓/↑", `${fmtLimit(data.runtime?.download_limit)} / ${fmtLimit(data.runtime?.upload_limit)}`);
-    addStat("Папка", data.save_path);
-    addStat("Метка", data.label || "—");
-    addStat("Статус", displayStatusLabel(data));
-
     const backRefresh = () => loadDetail(id, container, metaEl, scheduleNext);
+    const st = effectiveStatus(data);
+    const migrating = data.status === "migrating";
 
-    const labelRow = el("div", { className: "label-edit-row" });
-    const labelInput = el("input", {
-      type: "text",
-      placeholder: "Метка",
-      value: data.label || "",
-    }) as HTMLInputElement;
-    const labelSave = el("button", { type: "button", className: "btn btn--sm" }, ["Сохранить метку"]);
-    labelSave.addEventListener("click", async () => {
-      labelSave.disabled = true;
-      try {
-        await fetchJson(`/torrents/${id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ label: labelInput.value.trim() }),
-        });
-        showToast("Метка сохранена");
-        await backRefresh();
-      } catch (e) {
-        showToast(e instanceof Error ? e.message : String(e), true);
-      } finally {
-        labelSave.disabled = false;
-      }
-    });
-    labelRow.append(labelInput, labelSave);
+    let title = data.display_name || `Торрент #${data.id}`;
+    if (title.toLowerCase().endsWith(".torrent")) title = title.slice(0, -".torrent".length);
 
-    const actions = el("div", { className: "btn-row" });
-    const pauseBtn = el("button", { type: "button", className: "btn" }, ["Пауза"]);
-    const resumeBtn = el("button", { type: "button", className: "btn btn--primary" }, ["Старт"]);
+    const head = el("div", { className: "detail-head" }, [
+      el("span", { className: badgeClass(st) }, [displayStatusLabel(data)]),
+      el("h1", {}, [title]),
+    ]);
+
+    // Статичные факты — компактной подстрокой, без отдельных боксов.
+    const subParts = [`#${data.id}`, `движок ${data.engine_id}`, fmtBytes(data.runtime?.size)];
+    const ratioStr = fmtRatio(data.runtime?.ratio);
+    if (ratioStr !== "—") subParts.push(`рейтинг ${ratioStr}`);
+    if (data.runtime?.added_time) {
+      subParts.push(`добавлено ${new Date(data.runtime.added_time * 1000).toLocaleDateString("ru-RU")}`);
+    }
+    const sub = el("div", { className: "detail-sub" }, [subParts.join("  ·  ")]);
+
+    const progressWrap = el("div", { className: "detail-progress" });
+    progressWrap.append(bar, el("span", { className: "detail-progress__pct" }, [fmtPercent(progress)]));
+    if (st === "downloading") {
+      const eta = fmtEta(data.runtime?.eta);
+      if (eta !== "—") progressWrap.append(el("span", { className: "detail-progress__eta" }, [`ETA ${eta}`]));
+    }
+
+    // Живые показатели — чипами; «скачано» только если реально качали.
+    const chips = el("div", { className: "detail-chips" });
+    chips.append(
+      statChip(`↓ ${fmtRate(data.runtime?.download_rate)}`, "Скачивание", "dl"),
+      statChip(`↑ ${fmtRate(data.runtime?.upload_rate)}`, "Отдача", "ul"),
+      statChip(`${data.runtime?.num_seeds ?? 0} / ${data.runtime?.peers ?? 0}`, "Сиды / пиры"),
+      statChip(fmtBytes(data.runtime?.total_uploaded), "Отдано всего"),
+    );
+    const dl = data.runtime?.downloaded ?? 0;
+    if (dl > 0) chips.append(statChip(fmtBytes(dl), "Скачано всего"));
+
+    // Тулбар: основное действие (пауза/старт) + проверка/переанонс, удаление справа.
+    const toolbar = el("div", { className: "detail-toolbar" });
+    const toggleBtn = el("button", {
+      type: "button",
+      className: st === "paused" ? "btn btn--primary" : "btn",
+    }, [st === "paused" ? "▶ Старт" : "⏸ Пауза"]);
     const recheckBtn = el("button", { type: "button", className: "btn" }, ["Проверить"]);
     const reannounceBtn = el("button", { type: "button", className: "btn" }, ["Переанонс"]);
     const delBtn = el("button", { type: "button", className: "btn btn--danger" }, ["Удалить"]);
 
+    toggleBtn.addEventListener("click", async () => {
+      toggleBtn.disabled = true;
+      try {
+        await fetchJson(`/torrents/${id}/${st === "paused" ? "resume" : "pause"}`, { method: "POST" });
+        await backRefresh();
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : String(e), true);
+        toggleBtn.disabled = false;
+      }
+    });
     recheckBtn.addEventListener("click", async () => {
       recheckBtn.disabled = true;
       try {
@@ -1869,65 +1949,86 @@ async function loadDetail(
         reannounceBtn.disabled = false;
       }
     });
-
-    pauseBtn.addEventListener("click", async () => {
-      try {
-        await fetchJson(`/torrents/${id}/pause`, { method: "POST" });
-        await backRefresh();
-      } catch (e) {
-        showToast(e instanceof Error ? e.message : String(e), true);
-      }
-    });
-    resumeBtn.addEventListener("click", async () => {
-      try {
-        await fetchJson(`/torrents/${id}/resume`, { method: "POST" });
-        await backRefresh();
-      } catch (e) {
-        showToast(e instanceof Error ? e.message : String(e), true);
-      }
-    });
     delBtn.addEventListener("click", () => {
       void deleteTorrentWithDialog({ id: data.id, display_name: data.display_name }, () => {
         setHashList();
         window.dispatchEvent(new HashChangeEvent("hashchange"));
       });
     });
-    if (data.status === "paused") pauseBtn.disabled = true;
-    else resumeBtn.disabled = true;
-    const migrating = data.status === "migrating";
     if (migrating) {
-      for (const b of [pauseBtn, resumeBtn, recheckBtn, reannounceBtn, delBtn]) b.disabled = true;
+      for (const b of [toggleBtn, recheckBtn, reannounceBtn, delBtn]) b.disabled = true;
     }
-    actions.append(pauseBtn, resumeBtn, recheckBtn, reannounceBtn, delBtn);
+    toolbar.append(
+      toggleBtn,
+      recheckBtn,
+      reannounceBtn,
+      el("span", { className: "detail-toolbar__spacer" }),
+      delBtn,
+    );
 
-    const migrateRow = buildMigrateRow(data, () => void backRefresh());
+    // Метка — редактируемая прямо в карточке управления.
+    const labelInput = el("input", {
+      type: "text",
+      placeholder: "Без метки",
+      value: data.label || "",
+    }) as HTMLInputElement;
+    const labelSave = el("button", { type: "button", className: "btn btn--sm" }, ["Сохранить"]);
+    labelSave.addEventListener("click", async () => {
+      labelSave.disabled = true;
+      try {
+        await fetchJson(`/torrents/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ label: labelInput.value.trim() }),
+        });
+        showToast("Метка сохранена");
+        await backRefresh();
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : String(e), true);
+      } finally {
+        labelSave.disabled = false;
+      }
+    });
+    const labelRow = el("div", { className: "manage-card__row" }, [labelInput, labelSave]);
+
+    const manageCard = (heading: string, node: HTMLElement) =>
+      el("div", { className: "manage-card" }, [
+        el("div", { className: "manage-card__title" }, [heading]),
+        node,
+      ]);
+
+    const manage = el("div", { className: "detail-manage" }, [
+      manageCard("Метка", labelRow),
+      manageCard("Лимиты скорости", buildLimitsForm(data, () => void backRefresh())),
+      manageCard("Перенести на движок", buildMigrateRow(data, () => void backRefresh())),
+    ]);
+
+    // Технические подробности — в сворачиваемом блоке (папка, hash, magnet).
+    const detailsContent = el("div", { className: "details-block__content" });
+    const dlist = el("dl", { className: "def-list" });
+    const defRow = (k: string, v: string) => dlist.append(el("dt", {}, [k]), el("dd", {}, [v]));
+    defRow("Папка", data.save_path || "—");
+    defRow("Info hash", data.info_hash || "—");
+    defRow("Состояние lt", data.runtime ? (data.runtime.lt_state ?? data.runtime.runtime_status ?? "—") : "—");
+    detailsContent.append(dlist);
+    if (data.magnet_uri) {
+      const pre = el("pre", { className: "def-list__magnet" });
+      pre.textContent = data.magnet_uri;
+      detailsContent.append(pre);
+    }
+    const metaBlock = buildDetailsSpoiler("Подробности", detailsContent);
+    applyDetailSpoilerState(metaBlock, id, "meta");
 
     body.append(
-      el("span", { className: badgeClass(effectiveStatus(data)) }, [displayStatusLabel(data)]),
-      el("h1", {}, [data.display_name || `Торрент #${data.id}`]),
-      bar,
-      grid,
-      labelRow,
-      actions,
-      migrateRow,
-      buildLimitsForm(data, () => void backRefresh()),
+      head,
+      sub,
+      progressWrap,
+      chips,
+      toolbar,
+      manage,
       buildFilesSpoiler(files, id, () => void backRefresh()),
       buildTrackersSpoiler(trackers, id, () => void backRefresh()),
       buildPeersSpoiler(data.peer_list ?? [], id),
-      (() => {
-        const pre = el("pre", {});
-        pre.textContent = [
-          data.magnet_uri ? `Magnet:\n${data.magnet_uri}` : "Magnet: —",
-          data.info_hash ? `\n\nInfo hash: ${data.info_hash}` : "",
-          data.runtime ? `\n\nДвижок: ${data.runtime.lt_state ?? data.runtime.runtime_status}` : "",
-        ].join("");
-        const metaBlock = buildDetailsSpoiler(
-          "Подробности",
-          el("div", { className: "details-block__content" }, [pre]),
-        );
-        applyDetailSpoilerState(metaBlock, id, "meta");
-        return metaBlock;
-      })(),
+      metaBlock,
     );
     container.append(hero);
     scheduleNext?.(data);

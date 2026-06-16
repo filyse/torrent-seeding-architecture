@@ -509,6 +509,62 @@ body {
   color: var(--muted);
 }
 
+.migrate-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  font-size: 0.875rem;
+}
+
+.migrate-row select:disabled {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+.migrate-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.migrate-progress__label {
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.migrate-progress .progress {
+  margin: 0;
+  overflow: hidden;
+}
+
+.migrate-progress .progress__bar {
+  transition: width 0.4s ease;
+}
+
+.migrate-progress--indeterminate .progress__bar {
+  width: 40% !important;
+  border-radius: inherit;
+  animation: migrate-indeterminate 1.3s ease-in-out infinite;
+}
+
+@keyframes migrate-indeterminate {
+  0% { margin-left: -40%; }
+  100% { margin-left: 100%; }
+}
+
+.migrate-progress--error .migrate-progress__label {
+  color: var(--danger, #d64545);
+}
+
+.migrate-progress--error .progress__bar {
+  background: var(--danger, #d64545);
+  animation: none;
+}
+
 .empty-state {
   text-align: center;
   padding: 2.5rem 1rem;
@@ -526,38 +582,139 @@ body {
   margin-bottom: 1rem;
 }
 
-.detail-hero h1 {
-  margin: 0 0 0.5rem;
+.detail-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.7rem;
+  margin-bottom: 0.35rem;
+}
+
+.detail-head h1 {
+  margin: 0;
   font-size: 1.2rem;
   font-weight: 600;
   word-break: break-word;
 }
 
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
-  gap: 0.65rem;
+.detail-sub {
+  color: var(--muted);
+  font-size: 0.85rem;
   margin-bottom: 1rem;
 }
 
-.stat-box {
-  padding: 0.65rem 0.75rem;
-  background: var(--surface-2);
-  border-radius: 8px;
-  border: 1px solid var(--border);
+.detail-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
 }
 
-.stat-box__label {
+.detail-progress .progress {
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.detail-progress__pct {
+  font-weight: 700;
+  font-size: 0.95rem;
+  min-width: 3.2rem;
+  text-align: right;
+}
+
+.detail-progress__eta {
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.detail-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.detail-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.detail-toolbar__spacer {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.detail-manage {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.manage-card {
+  padding: 0.7rem 0.8rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.manage-card__title {
   font-size: 0.7rem;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.55rem;
 }
 
-.stat-box__value {
-  font-size: 0.95rem;
-  font-weight: 600;
+.manage-card__row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.manage-card__row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+}
+
+/* Внутри карточек управления формы не должны добавлять лишние отступы. */
+.manage-card .limits-form,
+.manage-card .migrate-row {
+  margin: 0;
+}
+
+.def-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.3rem 0.9rem;
+  margin: 0;
+}
+
+.def-list dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.def-list dd {
+  margin: 0;
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+.def-list__magnet {
+  margin: 0.75rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.8rem;
 }
 
 .details-block {

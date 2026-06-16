@@ -9,7 +9,7 @@ from seeding_db.models import TorrentStatus
 from seeding_db.repository import TorrentRepository
 
 from seeding_api.deps import DbSession, EnginePoolDep
-from seeding_api.migrate import run_migration
+from seeding_api.migrate import run_migration, set_progress
 from seeding_api.runtime_sync import merge_runtime_into_row
 from seeding_api.schemas import (
     BatchUploadItem,
@@ -334,6 +334,7 @@ async def migrate_torrent(
     session: DbSession,
     pool: EnginePoolDep,
     engine_id: str = Query(..., min_length=1, description="Целевой движок переноса"),
+    transport: str = Query("auto", description="auto|media|http — способ передачи контента"),
 ):
     """Перенести раздачу на другой движок одной машины (копия через /media + recheck).
 
@@ -357,16 +358,11 @@ async def migrate_torrent(
     if source_spec is None:
         raise HTTPException(status_code=422, detail=f"unknown source engine: {row.engine_id}")
     source_media = source_spec.normalized_media_path()
-    if not source_media:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"source engine '{row.engine_id}' has no media_path configured; "
-                "cross-machine migration is not supported yet"
-            ),
-        )
+    mode = transport.strip().lower()
+    if mode not in ("auto", "media", "http"):
+        raise HTTPException(status_code=422, detail="transport must be auto|media|http")
 
-    # Имя контента на диске = имя раздачи в рантайме источника (нужно для пути в /media).
+    # Имя контента нужно и для пути в /media, и для tar-стрима, и для факт-проверки видимости.
     try:
         runtime = await pool.client_for(row.engine_id).runtime_snapshot(torrent_id)
     except httpx.HTTPError as exc:
@@ -375,15 +371,40 @@ async def migrate_torrent(
     if not name:
         raise HTTPException(
             status_code=409,
-            detail="torrent is not active on source engine; cannot determine content path",
+            detail="torrent is not active on source engine; cannot migrate",
         )
 
-    src_content_path = f"{source_media}/{name}"
+    probe_path = f"{source_media}/{name}" if source_media else ""
+    if mode == "auto":
+        # Решаем по факту: реально ли приёмник видит контент источника через общий mount.
+        mode = "http"
+        if probe_path:
+            try:
+                if await pool.client_for(target_id).path_exists(probe_path):
+                    mode = "media"
+            except httpx.HTTPError:
+                mode = "http"
+    if mode == "media" and not source_media:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"source engine '{row.engine_id}' has no media_path; "
+                "use transport=http for cross-machine migration"
+            ),
+        )
+
+    src_content_path = probe_path if mode == "media" else ""
     source_save_path = source_spec.normalized_prefix()
     target_save_path = target_spec.normalized_prefix()
 
     await repo.update_status(torrent_id, TorrentStatus.migrating.value)
     await session.commit()
+
+    progress_store = getattr(request.app.state, "migrate_progress", None)
+    if progress_store is None:
+        progress_store = {}
+        request.app.state.migrate_progress = progress_store
+    set_progress(progress_store, torrent_id, "preparing", message=f"→ {target_id}")
 
     task = asyncio.create_task(
         run_migration(
@@ -396,6 +417,8 @@ async def migrate_torrent(
             target_save_path=target_save_path,
             src_content_path=src_content_path,
             display_name=row.display_name,
+            transport=mode,
+            progress_store=progress_store,
         )
     )
     tasks = getattr(request.app.state, "migrate_tasks", None)
@@ -410,6 +433,27 @@ async def migrate_torrent(
         "status": TorrentStatus.migrating.value,
         "source_engine_id": row.engine_id,
         "engine_id": target_id,
+        "transport": mode,
+    }
+
+
+@router.get("/{torrent_id}/migrate-status")
+async def migrate_status(torrent_id: int, request: Request, session: DbSession):
+    """Текущий прогресс переноса для опроса из UI (фаза + проценты)."""
+    store = getattr(request.app.state, "migrate_progress", None)
+    snap = store.get(torrent_id) if store else None
+    if snap is not None:
+        return {"id": torrent_id, "active": snap.get("phase") not in ("done", "error"), **snap}
+    # Прогресса нет: либо перенос не запускался, либо движок перезапустился во время него.
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    migrating = bool(row and row.status == TorrentStatus.migrating.value)
+    return {
+        "id": torrent_id,
+        "active": migrating,
+        "phase": "migrating" if migrating else "idle",
+        "progress": None,
+        "message": None,
     }
 
 
