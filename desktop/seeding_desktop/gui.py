@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -22,9 +22,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
-    QProgressBar,
     QPushButton,
-    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -240,27 +238,6 @@ class _SnapshotTask(QRunnable):
             self.signals.done.emit({"torrents": torrents, "stats": stats})
         except Exception as exc:  # noqa: BLE001
             self.signals.error.emit(str(exc))
-
-
-class _ProgressDelegate(QStyledItemDelegate):
-    """Рисует прогресс-бар в колонке «%»."""
-
-    def paint(self, painter, option, index):  # noqa: ANN001
-        v = index.data(Qt.ItemDataRole.UserRole)
-        if v is None:
-            super().paint(painter, option, index)
-            return
-        bar = QProgressBar()
-        bar.setGeometry(option.rect)
-        bar.setMinimum(0)
-        bar.setMaximum(100)
-        bar.setValue(int(max(0.0, min(1.0, float(v))) * 100))
-        bar.setTextVisible(True)
-        bar.setFormat(f"{float(v) * 100:.0f}%")
-        painter.save()
-        painter.translate(option.rect.topLeft())
-        bar.render(painter)
-        painter.restore()
 
 
 # --- диалог добавления --------------------------------------------------------
@@ -542,7 +519,7 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.setItemDelegateForColumn(4, _ProgressDelegate(self.table))
+        self.table.verticalHeader().setVisible(False)
         self.table.doubleClicked.connect(self.on_details)
         outer.addWidget(self.table, 1)
 
@@ -676,7 +653,7 @@ class MainWindow(QMainWindow):
                 name,
                 str(t.get("label", "")),
                 str(t.get("status", "")),
-                "",  # прогресс рисует делегат
+                _fmt_percent(rt.get("progress")),
                 _fmt_bytes(rt.get("size")),
                 _fmt_rate(rt.get("download_rate")),
                 _fmt_rate(rt.get("upload_rate")),
@@ -690,8 +667,8 @@ class MainWindow(QMainWindow):
                 if c == 1:
                     item.setToolTip(str(t.get("display_name", "")))
                 self.table.setItem(i, c, item)
-            prog = self.table.item(i, 4)
-            prog.setData(Qt.ItemDataRole.UserRole, rt.get("progress"))
+        self.table.resizeColumnsToContents()
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._sync_sel()
 
     # --- действия ---
