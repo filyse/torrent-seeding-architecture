@@ -12,6 +12,7 @@ from pathlib import Path
 from seeding_engine.fastresume_io import (
     delete_fastresume,
     ensure_engine_dirs,
+    fastresume_dir,
     fastresume_path,
     save_fastresume,
     session_state_path,
@@ -409,6 +410,14 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             self._ses = await asyncio.to_thread(_mk)
         log.info("libtorrent session started listen %s-%s", self._listen_low, self._listen_high)
 
+        if _env_bool("SEEDING_ENGINE_SELF_RESTORE", True):
+            try:
+                n = await self._self_restore_from_disk()
+                if n:
+                    log.info("engine self-restore: loaded %s torrent(s) from disk on start", n)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("engine self-restore failed: %s", exc)
+
     async def stop(self) -> None:
         """Остановка сессии; при SEEDING_LT_STATE_FILE — сохранение состояния (best effort)."""
         lt = self._lt
@@ -666,6 +675,73 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     log.info("removed file %s", path)
             except OSError as exc:
                 log.warning("failed to remove %s: %s", path, exc)
+
+    def _default_save_path(self) -> str:
+        root = os.getenv("SEEDING_DATA_ROOT", "/data")
+        sub = os.getenv("ENGINE_STORAGE_SUBDIR", "").strip()
+        return str(Path(root) / sub) if sub else root
+
+    def _save_path_from_resume(self, fr: Path) -> str:
+        """save_path хранится внутри самого fastresume; читаем его, иначе дефолт движка."""
+        lt = self._lt
+        try:
+            params = lt.read_resume_data(fr.read_bytes())
+            sp = (getattr(params, "save_path", "") or "").strip()
+            if sp:
+                return sp
+        except Exception:  # noqa: BLE001
+            pass
+        return self._default_save_path()
+
+    async def _self_restore_from_disk(self) -> int:
+        """При старте движка поднять все раздачи с собственного тома (fastresume + .torrents).
+        Движок не читает БД — источник правды для рестарта движка это его собственный том,
+        который зеркалит назначенные ему раздачи (создаётся при add, удаляется при remove)."""
+        loaded = 0
+        seen: set[int] = set()
+
+        fr_dir = fastresume_dir()
+        if fr_dir.is_dir():
+            for fr in sorted(fr_dir.glob("*.fastresume")):
+                try:
+                    db_id = int(fr.stem)
+                except ValueError:
+                    continue
+                async with self._lock:
+                    if db_id in self._handles:
+                        seen.add(db_id)
+                        continue
+                save_path = self._save_path_from_resume(fr)
+                try:
+                    h = await self._add_from_fastresume(db_id, save_path, None, fr)
+                    async with self._lock:
+                        self._handles[db_id] = h
+                        self._meta[db_id] = (None, save_path)
+                    seen.add(db_id)
+                    loaded += 1
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("self-restore fastresume db_id=%s failed: %s", db_id, exc)
+
+        tdir = self._torrent_files_dir()
+        if tdir.is_dir():
+            default_sp = self._default_save_path()
+            for tf in sorted(tdir.glob("*.torrent")):
+                try:
+                    db_id = int(tf.stem)
+                except ValueError:
+                    continue
+                if db_id in seen:
+                    continue
+                async with self._lock:
+                    if db_id in self._handles:
+                        continue
+                try:
+                    await self.add_torrent(db_id, None, default_sp, torrent_data=tf.read_bytes())
+                    loaded += 1
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("self-restore torrent db_id=%s failed: %s", db_id, exc)
+
+        return loaded
 
     async def restore_from_disk(self, db_id: int, save_path: str) -> RuntimeHandle | None:
         """Перезагрузить из fastresume или /data/.torrents/{id}.torrent (после рестарта движка)."""
