@@ -3,6 +3,7 @@ import os
 
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from seeding_db.engine_registry import normalize_save_path
 from seeding_db.models import TorrentStatus
 from seeding_db.repository import TorrentRepository
 
@@ -38,7 +39,10 @@ def _require_engine_for_delete() -> bool:
 
 def _resolve_target(pool, engine_id: str | None, save_path: str | None) -> tuple[str, str]:
     """Куда класть торрент: либо явный engine_id (UI выбирает движок, путь = его storage_prefix),
-    либо обратная совместимость по save_path (матчинг префикса). Возвращает (engine_id, save_path)."""
+    либо save_path со строгим матчингом префикса. Возвращает (engine_id, save_path).
+
+    Никакого молчаливого дефолта: если путь относительный или не принадлежит ни одному движку —
+    явная 422, чтобы торрент не «уехал» не туда."""
     eid = (engine_id or "").strip()
     if eid:
         spec = pool.spec(eid)
@@ -48,7 +52,20 @@ def _resolve_target(pool, engine_id: str | None, save_path: str | None) -> tuple
     sp = (save_path or "").strip()
     if not sp:
         raise HTTPException(status_code=422, detail="engine_id or save_path is required")
-    return pool.resolve_engine_id(sp), sp
+    norm = normalize_save_path(sp)
+    if not norm.startswith("/"):
+        raise HTTPException(
+            status_code=422,
+            detail="save_path must be absolute (start with '/') or pass engine_id",
+        )
+    matched = pool.match_engine_id(norm)
+    if matched is None:
+        prefixes = ", ".join(s.normalized_prefix() for s in pool.specs)
+        raise HTTPException(
+            status_code=422,
+            detail=f"save_path '{norm}' does not belong to any engine (prefixes: {prefixes}); pass engine_id",
+        )
+    return matched, norm
 
 
 @router.get("", response_model=list[TorrentDetailOut])

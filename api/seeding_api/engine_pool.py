@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import httpx
-from seeding_db.engine_registry import EngineSpec, load_engine_specs, resolve_engine_id, spec_by_id
+from seeding_db.engine_registry import (
+    EngineSpec,
+    load_engine_specs,
+    match_engine_id,
+    resolve_engine_id,
+    spec_by_id,
+)
 
 from seeding_api.engine_client import EngineClient
 
@@ -19,6 +25,9 @@ class EnginePool:
 
     def resolve_engine_id(self, save_path: str) -> str:
         return resolve_engine_id(save_path, self._specs)
+
+    def match_engine_id(self, save_path: str) -> str | None:
+        return match_engine_id(save_path, self._specs)
 
     def client_for(self, engine_id: str) -> EngineClient:
         client = self._by_id.get(engine_id)

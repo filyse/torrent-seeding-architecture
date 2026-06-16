@@ -1,13 +1,29 @@
-import httpx
 import base64
+import os
+
+import httpx
+
+
+def _retries() -> int:
+    try:
+        return max(0, int(os.getenv("SEEDING_ENGINE_HTTP_RETRIES", "2")))
+    except ValueError:
+        return 2
 
 
 class EngineClient:
-    """HTTP-клиент к внутреннему API движка."""
+    """HTTP-клиент к внутреннему API движка.
+
+    Транспорт переподключается при сетевых сбоях (движок перезапускается/недоступен):
+    httpx.AsyncHTTPTransport(retries=N) повторяет установку соединения с экспоненциальным
+    backoff. Кол-во ретраев — `SEEDING_ENGINE_HTTP_RETRIES` (по умолчанию 2)."""
 
     def __init__(self, base_url: str) -> None:
         self._base = base_url.rstrip("/")
-        self._client = httpx.AsyncClient(base_url=self._base, timeout=httpx.Timeout(30.0))
+        transport = httpx.AsyncHTTPTransport(retries=_retries())
+        self._client = httpx.AsyncClient(
+            base_url=self._base, timeout=httpx.Timeout(30.0), transport=transport
+        )
 
     async def aclose(self) -> None:
         await self._client.aclose()

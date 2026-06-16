@@ -55,14 +55,36 @@ def load_engine_specs() -> list[EngineSpec]:
     return [EngineSpec(id="default", url=url, storage_prefix=root)]
 
 
-def resolve_engine_id(save_path: str, specs: list[EngineSpec]) -> str:
-    """Самый длинный совпадающий storage_prefix побеждает."""
-    norm = save_path.replace("\\", "/")
+def normalize_save_path(path: str) -> str:
+    """Нормализует путь сохранения: слэши, дубли слэшей, хвостовой слэш.
+    Не делает путь абсолютным — это решает вызывающий код."""
+    norm = (path or "").strip().replace("\\", "/")
+    while "//" in norm:
+        norm = norm.replace("//", "/")
+    if len(norm) > 1:
+        norm = norm.rstrip("/")
+    return norm
+
+
+def match_engine_id(save_path: str, specs: list[EngineSpec]) -> str | None:
+    """Строгий матчинг по самому длинному совпавшему storage_prefix.
+    Возвращает None, если путь не принадлежит ни одному движку (без молчаливого дефолта)."""
+    norm = normalize_save_path(save_path)
     ordered = sorted(specs, key=lambda s: len(s.normalized_prefix()), reverse=True)
     for spec in ordered:
         prefix = spec.normalized_prefix()
         if norm == prefix or norm.startswith(prefix + "/"):
             return spec.id
+    return None
+
+
+def resolve_engine_id(save_path: str, specs: list[EngineSpec]) -> str:
+    """Как match_engine_id, но с дефолтом (последний по длине префикса) при отсутствии совпадения.
+    Используется там, где нужна обратная совместимость; новый код предпочитает match_engine_id."""
+    matched = match_engine_id(save_path, specs)
+    if matched is not None:
+        return matched
+    ordered = sorted(specs, key=lambda s: len(s.normalized_prefix()), reverse=True)
     return ordered[-1].id if ordered else "default"
 
 
