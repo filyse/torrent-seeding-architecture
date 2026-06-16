@@ -116,6 +116,21 @@ class LimitsIn(BaseModel):
     upload_limit: int | None = Field(default=None, ge=0)
 
 
+class BatchUploadItem(BaseModel):
+    filename: str
+    ok: bool
+    id: int | None = None
+    display_name: str | None = None
+    error: str | None = None
+
+
+class BatchUploadResult(BaseModel):
+    total: int
+    ok: int
+    failed: int
+    items: list[BatchUploadItem]
+
+
 class TorrentDetailOut(TorrentOut):
     runtime: TorrentRuntimeOut | None = None
     peer_list: list[TorrentPeerOut] = Field(default_factory=list)

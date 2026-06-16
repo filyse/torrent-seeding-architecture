@@ -29,6 +29,21 @@ type SessionStats = {
   engines_total?: number;
 };
 
+type BatchUploadItem = {
+  filename: string;
+  ok: boolean;
+  id?: number | null;
+  display_name?: string | null;
+  error?: string | null;
+};
+
+type BatchUploadResult = {
+  total: number;
+  ok: number;
+  failed: number;
+  items: BatchUploadItem[];
+};
+
 type RuntimeOut = {
   db_id: number;
   magnet_uri: string | null;
@@ -992,7 +1007,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   const labelInput = el("input", { type: "text", placeholder: "Метка (необязательно)" }) as HTMLInputElement;
   const nameMagnet = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
   const nameUrl = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
-  const torrentFile = el("input", { type: "file", accept: ".torrent" }) as HTMLInputElement;
+  const torrentFile = el("input", { type: "file", accept: ".torrent", multiple: "" }) as HTMLInputElement;
   const nameFile = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
 
   const switchTab = (name: "magnet" | "url" | "file") => {
@@ -1024,8 +1039,8 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   );
 
   filePanel.append(
-    field("Файл .torrent", torrentFile),
-    field("Название", nameFile),
+    field("Файлы .torrent", torrentFile, "Можно выбрать сразу несколько файлов"),
+    field("Название", nameFile, "Используется только при загрузке одного файла"),
     el("div", { className: "btn-row" }, [
       el("button", { type: "button", className: "btn btn--primary", id: "btn-add-file" }, ["Загрузить"]),
     ]),
@@ -1094,24 +1109,43 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
 
   filePanel.querySelector("#btn-add-file")?.addEventListener("click", async () => {
     const save_path = savePathInput.value.trim();
-    const file = torrentFile.files?.[0];
-    if (!file || !save_path) {
-      showToast("Выберите файл и папку", true);
+    const files = torrentFile.files ? Array.from(torrentFile.files) : [];
+    if (files.length === 0 || !save_path) {
+      showToast("Выберите файл(ы) и папку", true);
       return;
     }
     try {
+      if (files.length === 1) {
+        const body = new FormData();
+        body.set("torrent_file", files[0], files[0].name);
+        body.set("save_path", save_path);
+        body.set("display_name", nameFile.value.trim());
+        body.set("label", labelInput.value.trim());
+        const res = await fetch(`${API}/torrents/upload`, { method: "POST", headers: apiHeaders(false), body });
+        await throwIfNotOk(res);
+        const created = (await res.json()) as TorrentOut;
+        torrentFile.value = "";
+        nameFile.value = "";
+        showToast("Торрент загружен");
+        onAdded(created);
+        return;
+      }
+
       const body = new FormData();
-      body.set("torrent_file", file, file.name);
+      for (const f of files) body.append("torrent_files", f, f.name);
       body.set("save_path", save_path);
-      body.set("display_name", nameFile.value.trim());
       body.set("label", labelInput.value.trim());
-      const res = await fetch(`${API}/torrents/upload`, { method: "POST", headers: apiHeaders(false), body });
+      const res = await fetch(`${API}/torrents/upload-batch`, { method: "POST", headers: apiHeaders(false), body });
       await throwIfNotOk(res);
-      const created = (await res.json()) as TorrentOut;
+      const result = (await res.json()) as BatchUploadResult;
       torrentFile.value = "";
-      nameFile.value = "";
-      showToast("Торрент загружен");
-      onAdded(created);
+      if (result.failed === 0) {
+        showToast(`Добавлено торрентов: ${result.ok}`);
+      } else {
+        const failed = result.items.filter((i) => !i.ok).map((i) => i.filename).join(", ");
+        showToast(`Добавлено ${result.ok}, ошибок ${result.failed}: ${failed}`, true);
+      }
+      if (result.ok > 0) onAdded();
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), true);
     }

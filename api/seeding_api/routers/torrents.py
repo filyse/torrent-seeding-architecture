@@ -9,6 +9,8 @@ from seeding_db.repository import TorrentRepository
 from seeding_api.deps import DbSession, EnginePoolDep
 from seeding_api.runtime_sync import merge_runtime_into_row
 from seeding_api.schemas import (
+    BatchUploadItem,
+    BatchUploadResult,
     BulkIdsIn,
     FilePrioritiesIn,
     LimitsIn,
@@ -115,6 +117,65 @@ async def upload_torrent_file(
     await repo.update_status(row.id, TorrentStatus.downloading.value)
     await session.refresh(row)
     return row
+
+
+@router.post("/upload-batch", response_model=BatchUploadResult, status_code=201)
+async def upload_torrent_files(
+    session: DbSession,
+    pool: EnginePoolDep,
+    torrent_files: list[UploadFile] = File(...),
+    save_path: str = Form(...),
+    label: str = Form(""),
+):
+    """Мульти-загрузка: несколько .torrent за один запрос. Отчёт по каждому файлу;
+    сбой одного файла не отменяет остальные (частичный успех допустим)."""
+    if not save_path.strip():
+        raise HTTPException(status_code=422, detail="save_path is required")
+    if not torrent_files:
+        raise HTTPException(status_code=422, detail="no files provided")
+
+    sp = save_path.strip()
+    engine_id = pool.resolve_engine_id(sp)
+    repo = TorrentRepository(session)
+    client = pool.client_for(engine_id)
+
+    items: list[BatchUploadItem] = []
+    ok = 0
+    for uf in torrent_files:
+        filename = (uf.filename or "").strip()
+        try:
+            if not filename.lower().endswith(".torrent"):
+                raise ValueError("only .torrent files are supported")
+            payload = await uf.read()
+            if not payload:
+                raise ValueError("torrent file is empty")
+
+            display_name = filename[: -len(".torrent")] or filename
+            row = await repo.create(
+                display_name=display_name,
+                save_path=sp,
+                magnet_uri=None,
+                engine_id=engine_id,
+                label=label.strip(),
+            )
+            await session.flush()
+            await session.refresh(row)
+            try:
+                await client.register_torrent_file(row.id, payload, row.save_path)
+            except (httpx.HTTPError, ValueError):
+                # не оставляем «осиротевшую» строку в БД, если движок не принял файл
+                await repo.delete(row.id)
+                raise
+            await repo.update_status(row.id, TorrentStatus.downloading.value)
+            items.append(
+                BatchUploadItem(filename=filename, ok=True, id=row.id, display_name=display_name)
+            )
+            ok += 1
+        except (ValueError, httpx.HTTPError) as exc:
+            detail = str(exc).strip() or exc.__class__.__name__
+            items.append(BatchUploadItem(filename=filename or "(без имени)", ok=False, error=detail))
+
+    return BatchUploadResult(total=len(torrent_files), ok=ok, failed=len(torrent_files) - ok, items=items)
 
 
 @router.post("/url", response_model=TorrentOut, status_code=201)
