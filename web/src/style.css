@@ -34,6 +34,31 @@
   }
 }
 
+/* Явный выбор темы переопределяет системную (data-theme на <html>). */
+:root[data-theme="light"] {
+  --bg: #f4f4f5;
+  --surface: #ffffff;
+  --surface-2: #fafafa;
+  --border: #e4e4e7;
+  --text: #18181b;
+  --muted: #71717a;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+:root[data-theme="dark"] {
+  --bg: #09090b;
+  --surface: #18181b;
+  --surface-2: #27272a;
+  --border: #3f3f46;
+  --text: #fafafa;
+  --muted: #a1a1aa;
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
 *,
 *::before,
 *::after {
@@ -358,6 +383,25 @@ body {
 .torrent-card__stats strong {
   color: var(--text);
   font-weight: 500;
+}
+
+/* Компактный пресет вида списка. */
+.torrent-list--compact .torrent-list {
+  gap: 0.4rem;
+}
+.torrent-list--compact .torrent-card {
+  padding: 0.5rem 0.7rem;
+}
+.torrent-list--compact .torrent-card__top {
+  margin-bottom: 0.3rem;
+}
+.torrent-list--compact .torrent-card__title {
+  font-size: 0.85rem;
+}
+.torrent-list--compact .torrent-card__stats {
+  margin-bottom: 0.3rem;
+  gap: 0.3rem 0.7rem;
+  font-size: 0.75rem;
 }
 
 .progress {

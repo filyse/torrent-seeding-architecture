@@ -116,10 +116,45 @@ let listLoadGeneration = 0;
 let lastListItems: TorrentOut[] = [];
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let selectedIds = new Set<number>();
-let listSearch = "";
-let listStatusFilter = "";
-let listLabelFilter = "";
-let listSort: "name" | "progress" | "up" | "added" = "added";
+
+function lsGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function lsSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* ignore (private mode / quota) */
+  }
+}
+
+type ListSort = "name" | "progress" | "up" | "added";
+type ListDensity = "comfortable" | "compact";
+type ThemeMode = "auto" | "light" | "dark";
+
+let listSearch = lsGet("ui.search") ?? "";
+let listStatusFilter = lsGet("ui.status") ?? "";
+let listLabelFilter = lsGet("ui.label") ?? "";
+let listSort: ListSort = ((): ListSort => {
+  const v = lsGet("ui.sort");
+  return v === "name" || v === "progress" || v === "up" || v === "added" ? v : "added";
+})();
+let listDensity: ListDensity = lsGet("ui.density") === "compact" ? "compact" : "comfortable";
+
+function getThemeMode(): ThemeMode {
+  const v = lsGet("ui.theme");
+  return v === "light" || v === "dark" ? v : "auto";
+}
+function applyTheme(mode: ThemeMode): void {
+  const root = document.documentElement;
+  if (mode === "auto") root.removeAttribute("data-theme");
+  else root.setAttribute("data-theme", mode);
+  lsSet("ui.theme", mode);
+}
 
 type DetailSpoilerKey = "files" | "trackers" | "peers" | "meta";
 const detailSpoilerOpenById = new Map<number, Record<DetailSpoilerKey, boolean>>();
@@ -1303,6 +1338,7 @@ function mountListShell(root: HTMLElement): void {
   }) as HTMLInputElement;
   searchInput.addEventListener("input", () => {
     listSearch = searchInput.value;
+    lsSet("ui.search", listSearch);
     repaint();
   });
 
@@ -1319,6 +1355,7 @@ function mountListShell(root: HTMLElement): void {
   }
   statusSelect.addEventListener("change", () => {
     listStatusFilter = statusSelect.value;
+    lsSet("ui.status", listStatusFilter);
     repaint();
   });
 
@@ -1341,6 +1378,7 @@ function mountListShell(root: HTMLElement): void {
   };
   labelSelect.addEventListener("change", () => {
     listLabelFilter = labelSelect.value;
+    lsSet("ui.label", listLabelFilter);
     repaint();
   });
 
@@ -1356,8 +1394,27 @@ function mountListShell(root: HTMLElement): void {
     sortSelect.append(o);
   }
   sortSelect.addEventListener("change", () => {
-    listSort = sortSelect.value as typeof listSort;
+    listSort = sortSelect.value as ListSort;
+    lsSet("ui.sort", listSort);
     repaint();
+  });
+
+  const densitySelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
+  for (const [val, label] of [
+    ["comfortable", "Вид: просторный"],
+    ["compact", "Вид: компактный"],
+  ]) {
+    const o = el("option", { value: val }, [label]) as HTMLOptionElement;
+    if (val === listDensity) o.selected = true;
+    densitySelect.append(o);
+  }
+  const applyDensity = () => {
+    listHost.classList.toggle("torrent-list--compact", listDensity === "compact");
+  };
+  densitySelect.addEventListener("change", () => {
+    listDensity = densitySelect.value === "compact" ? "compact" : "comfortable";
+    lsSet("ui.density", listDensity);
+    applyDensity();
   });
 
   const bulkPause = el("button", { type: "button", className: "btn btn--sm" }, ["Пауза выбранные"]);
@@ -1441,7 +1498,29 @@ function mountListShell(root: HTMLElement): void {
     el("div", { className: "app-header__actions" }, [addTorrentBtn, settingsLink, metaEl]),
   ]);
 
-  const filters = el("div", { className: "list-filters" }, [searchInput, statusSelect, labelSelect, sortSelect]);
+  const resetFilters = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["Сброс фильтров"]);
+  resetFilters.addEventListener("click", () => {
+    listSearch = "";
+    listStatusFilter = "";
+    listLabelFilter = "";
+    listSort = "added";
+    for (const k of ["ui.search", "ui.status", "ui.label", "ui.sort"]) lsSet(k, "");
+    searchInput.value = "";
+    statusSelect.value = "";
+    labelSelect.value = "";
+    sortSelect.value = "added";
+    repaint();
+  });
+
+  const filters = el("div", { className: "list-filters" }, [
+    searchInput,
+    statusSelect,
+    labelSelect,
+    sortSelect,
+    densitySelect,
+    resetFilters,
+  ]);
+  applyDensity();
   const toolbar = el("div", { className: "list-toolbar" }, [
     countEl,
     el("button", { type: "button", className: "btn btn--ghost btn--sm", id: "btn-refresh" }, ["Обновить"]),
@@ -1724,10 +1803,30 @@ function mountSettingsShell(root: HTMLElement): void {
 
   const statsHost = el("div", { id: "settings-session-host" });
 
+  const themePanel = el("section", { className: "panel" });
+  themePanel.append(el("div", { className: "panel__head" }, ["Внешний вид"]));
+  const themeBody = el("div", { className: "panel__body" });
+  const themeSelect = el("select", { className: "select" }) as HTMLSelectElement;
+  for (const [val, label] of [
+    ["auto", "Тема: как в системе"],
+    ["light", "Тема: светлая"],
+    ["dark", "Тема: тёмная"],
+  ]) {
+    const o = el("option", { value: val }, [label]) as HTMLOptionElement;
+    if (val === getThemeMode()) o.selected = true;
+    themeSelect.append(o);
+  }
+  themeSelect.addEventListener("change", () => {
+    const v = themeSelect.value;
+    applyTheme(v === "light" || v === "dark" ? v : "auto");
+  });
+  themeBody.append(field("Тема оформления", themeSelect, "Сохраняется в этом браузере"));
+  themePanel.append(themeBody);
+
   const limits = mountGlobalLimitsPanel();
   limits.setAttribute("open", "");
 
-  root.append(back, header, statsHost, limits);
+  root.append(back, header, statsHost, themePanel, limits);
 
   void loadSessionStats().then((s) => {
     statsHost.replaceChildren(mountSessionBar(s));
@@ -1746,5 +1845,6 @@ function render(): void {
 }
 
 document.title = "Раздача";
+applyTheme(getThemeMode());
 window.addEventListener("hashchange", () => render());
 render();
