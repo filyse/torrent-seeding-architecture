@@ -1109,6 +1109,14 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     continue
             dl_lim = int(ses_inner.download_rate_limit()) if hasattr(ses_inner, "download_rate_limit") else 0
             up_lim = int(ses_inner.upload_rate_limit()) if hasattr(ses_inner, "upload_rate_limit") else 0
+            # Порт слушателя отдаёт сам объект сессии (listen_port()), а не его status.
+            listening_port = getattr(ss, "listening_port", None)
+            if not listening_port and hasattr(ses_inner, "listen_port"):
+                try:
+                    lp = ses_inner.listen_port()
+                    listening_port = int(lp) if lp else None
+                except Exception:  # noqa: BLE001
+                    listening_port = None
             return {
                 "torrents": len(handles_inner),
                 "torrents_active": active,
@@ -1119,7 +1127,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 "download_limit": dl_lim,
                 "upload_limit": up_lim,
                 "dht_nodes": getattr(ss, "dht_nodes", None),
-                "listening_port": getattr(ss, "listening_port", None),
+                "listening_port": listening_port,
             }
 
         return await asyncio.to_thread(_collect)
