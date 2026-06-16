@@ -442,18 +442,30 @@ async function loadSessionStats(): Promise<SessionStats | null> {
   }
 }
 
+function statChip(value: string, label: string, accent?: "dl" | "ul"): HTMLElement {
+  return el("div", { className: `stat-chip${accent ? ` stat-chip--${accent}` : ""}` }, [
+    el("div", { className: "stat-chip__value" }, [value]),
+    el("div", { className: "stat-chip__label" }, [label]),
+  ]);
+}
+
 function mountSessionBar(stats: SessionStats | null): HTMLElement {
   const bar = el("div", { className: "session-bar" });
   if (!stats) {
     bar.append(el("span", { className: "session-bar__muted" }, ["Статистика недоступна"]));
     return bar;
   }
+  const enginesNote =
+    stats.engines_total != null
+      ? `${stats.engines_ok ?? 0}/${stats.engines_total} движков`
+      : "";
   bar.append(
-    el("span", {}, [`Раздач: ${stats.torrents} (${stats.torrents_active} актив.)`]),
-    el("span", {}, [`↓ ${fmtRate(stats.download_rate)}`]),
-    el("span", {}, [`↑ ${fmtRate(stats.upload_rate)}`]),
-    el("span", {}, [`Всего отдано: ${fmtBytes(stats.total_uploaded)}`]),
+    statChip(`${stats.torrents}`, `Раздач · ${stats.torrents_active} актив.`),
+    statChip(`↓ ${fmtRate(stats.download_rate)}`, "Скачивание", "dl"),
+    statChip(`↑ ${fmtRate(stats.upload_rate)}`, "Отдача", "ul"),
+    statChip(fmtBytes(stats.total_uploaded), "Всего отдано"),
   );
+  if (enginesNote) bar.append(statChip(enginesNote, "Онлайн"));
   return bar;
 }
 
@@ -1403,6 +1415,7 @@ function mountListShell(root: HTMLElement): void {
     listSearch = searchInput.value;
     lsSet("ui.search", listSearch);
     repaint();
+    syncReset();
   });
 
   const statusSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
@@ -1420,6 +1433,7 @@ function mountListShell(root: HTMLElement): void {
     listStatusFilter = statusSelect.value;
     lsSet("ui.status", listStatusFilter);
     repaint();
+    syncReset();
   });
 
   const labelSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
@@ -1443,6 +1457,7 @@ function mountListShell(root: HTMLElement): void {
     listLabelFilter = labelSelect.value;
     lsSet("ui.label", listLabelFilter);
     repaint();
+    syncReset();
   });
 
   const sortSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
@@ -1460,6 +1475,7 @@ function mountListShell(root: HTMLElement): void {
     listSort = sortSelect.value as ListSort;
     lsSet("ui.sort", listSort);
     repaint();
+    syncReset();
   });
 
   const densitySelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
@@ -1564,7 +1580,11 @@ function mountListShell(root: HTMLElement): void {
     el("div", { className: "app-header__actions" }, [addTorrentBtn, settingsLink, metaEl]),
   ]);
 
-  const resetFilters = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["Сброс фильтров"]);
+  const resetFilters = el("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm list-controls__reset",
+    title: "Сбросить фильтры",
+  }, ["Сброс"]);
   resetFilters.addEventListener("click", () => {
     listSearch = "";
     listStatusFilter = "";
@@ -1576,22 +1596,34 @@ function mountListShell(root: HTMLElement): void {
     labelSelect.value = "";
     sortSelect.value = "added";
     repaint();
+    syncReset();
   });
+  function syncReset(): void {
+    const active = Boolean(listSearch || listStatusFilter || listLabelFilter) || listSort !== "added";
+    resetFilters.hidden = !active;
+  }
 
-  const filters = el("div", { className: "list-filters" }, [
+  const refreshBtn = el("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm list-controls__refresh",
+    title: "Обновить",
+  }, ["⟳"]);
+  refreshBtn.addEventListener("click", () => void refresh());
+
+  // Один ряд: фильтры слева, справа — счётчик, сброс и обновление.
+  const filters = el("div", { className: "list-controls" }, [
     searchInput,
     statusSelect,
     labelSelect,
     sortSelect,
     densitySelect,
+    el("span", { className: "list-controls__spacer" }),
+    countEl,
     resetFilters,
+    refreshBtn,
+    labelSuggestions,
   ]);
   applyDensity();
-
-  // Обычная панель: только счётчик и обновление — без нагромождения кнопок.
-  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["Обновить"]);
-  refreshBtn.addEventListener("click", () => void refresh());
-  const toolbar = el("div", { className: "list-toolbar" }, [countEl, refreshBtn, labelSuggestions]);
 
   // Контекстная панель массовых действий: видна только когда что-то выбрано.
   const bulkCount = el("span", { className: "bulk-bar__count" });
@@ -1623,10 +1655,10 @@ function mountListShell(root: HTMLElement): void {
     header,
     sessionBarHost,
     filters,
-    toolbar,
     bulkBar,
     listHost,
   );
+  syncReset();
 
   void reloadLabels();
   void loadSessionStats().then((s) => {
