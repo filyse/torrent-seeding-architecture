@@ -1449,8 +1449,8 @@ function mountListShell(root: HTMLElement): void {
 
   const densitySelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
   for (const [val, label] of [
-    ["comfortable", "Вид: просторный"],
-    ["compact", "Вид: компактный"],
+    ["comfortable", "Вид: строки"],
+    ["compact", "Вид: плитки"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
     if (val === listDensity) o.selected = true;
