@@ -16,8 +16,9 @@
 
 ## Документы
 
-- [**`docs/BOARD.md`**](docs/BOARD.md) — **план-даска с чекбоксами по каждому агенту** (открывайте в IDE и отмечайте прогресс)
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — архитектура и потоки данных
+- [**`ARCHITECTURE.md`**](ARCHITECTURE.md) — **как всё работает**: компоненты, multi-engine, хранение, restore, API-контур, конфиг, деплой
+- [**`ROADMAP.md`**](ROADMAP.md) — что сделано (фазы 0–2) и куда движемся дальше
+- [`docs/BOARD.md`](docs/BOARD.md) — рабочая доска с чекбоксами по агентам
 - [`AGENTS.md`](AGENTS.md) — роли агентов и сдача работ координатору
 - [`docs/PLAN_BY_AGENT.md`](docs/PLAN_BY_AGENT.md) — пошаговые планы кода по ролям
 - [`docs/INTEGRATION.md`](docs/INTEGRATION.md) — границы модулей и контракты
