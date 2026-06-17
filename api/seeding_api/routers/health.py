@@ -54,13 +54,36 @@ async def _check_redis_and_queue(request: Request) -> list[dict]:
         return [redis, queue]
 
     health_key = os.getenv("SEEDING_ARQ_HEALTH_KEY", "arq:queue:health-check")
+    interval = int(os.getenv("SEEDING_ARQ_HEALTH_INTERVAL", "30"))
     try:
         raw = await arq.get(health_key)
         if raw is None:
-            queue.update(status="warn", detail="Воркер ещё не отчитывался")
-        else:
-            val = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
-            queue.update(status="ok", detail=val.strip())
+            queue.update(
+                status="warn",
+                detail=f"Воркер не отчитывался дольше {interval} с (остановлен?)",
+            )
+            return [redis, queue]
+        val = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        # Возраст отчёта по TTL ключа: arq ставит psetex на (interval + 1) с.
+        age = None
+        try:
+            pttl = await arq.pttl(health_key)
+            if pttl and pttl > 0:
+                age = max(0, (interval + 1) - round(pttl / 1000))
+        except Exception:  # noqa: BLE001
+            pass
+        bits = []
+        if age is not None:
+            bits.append(f"отчёт {age} с назад")
+        # Из строки arq вытащим счётчики задач для краткой сводки.
+        for token in val.split():
+            if token.startswith(("j_complete=", "j_failed=", "queued=", "j_ongoing=")):
+                bits.append(token)
+        stale = age is not None and age > interval * 3
+        queue.update(
+            status="warn" if stale else "ok",
+            detail=" · ".join(bits) if bits else val.strip(),
+        )
     except Exception as exc:  # noqa: BLE001
         queue.update(status="warn", detail=f"Не удалось прочитать статус воркера: {exc}")
     return [redis, queue]

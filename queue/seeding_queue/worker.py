@@ -12,7 +12,12 @@ from seeding_db.repository import TorrentRepository
 from seeding_db.status_from_runtime import status_from_runtime
 from seeding_db.session import create_engine, create_session_factory
 
-from seeding_queue.engine_util import check_all_engines_health, engine_url, fetch_all_runtime
+from seeding_queue.engine_util import (
+    check_all_engines_health,
+    engine_url,
+    fetch_all_runtime,
+    make_engine_client,
+)
 
 log = logging.getLogger(__name__)
 
@@ -140,7 +145,7 @@ async def bulk_register_engine(ctx, engine_id: str):
             if not rows:
                 return {"ok": True, "engine_id": engine_id, "registered": 0, "failed": 0}
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with make_engine_client(base, 30.0) as client:
                 async def one(row) -> None:
                     nonlocal registered, failed
                     async with sem:
@@ -176,7 +181,7 @@ async def restore_engine(ctx, engine_id: str):
     failed = 0
     sem = asyncio.Semaphore(_BULK_CONCURRENCY)
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with make_engine_client(base, 30.0) as client:
             hr = await client.get(f"{base}/health")
             hr.raise_for_status()
 
@@ -247,3 +252,6 @@ class WorkerSettings:
     cron_jobs = [cron(sync_runtime_to_db, minute=set(range(0, 60, 2)), run_at_startup=True)]
     redis_settings = _redis_settings()
     max_jobs = 8
+    # Чаще пишем health-key в Redis, чтобы дашборд видел свежую «живость» воркера
+    # (по умолчанию arq пишет раз в час — слишком грубо для мониторинга).
+    health_check_interval = int(os.getenv("SEEDING_ARQ_HEALTH_INTERVAL", "30"))

@@ -2134,15 +2134,14 @@ function healthCard(c: HealthComponent): HTMLElement {
   if (c.kind === "engine" && c.tls) {
     top.append(el("span", { className: "health-card__tag", title: "Шифрованное соединение" }, ["TLS"]));
   }
-  const latency =
-    typeof c.latency_ms === "number"
-      ? el("span", { className: "health-card__latency" }, [`${c.latency_ms} мс`])
-      : null;
-  if (latency) top.append(latency);
   card.append(top);
-  card.append(
-    el("div", { className: "health-card__status" }, [HEALTH_STATUS_LABEL[c.status]]),
-  );
+  const statusRow = el("div", { className: "health-card__status-row" }, [
+    el("span", { className: "health-card__status" }, [HEALTH_STATUS_LABEL[c.status]]),
+  ]);
+  if (typeof c.latency_ms === "number") {
+    statusRow.append(el("span", { className: "health-card__latency" }, [`${c.latency_ms} мс`]));
+  }
+  card.append(statusRow);
   if (c.detail) card.append(el("div", { className: "health-card__detail" }, [c.detail]));
   return card;
 }

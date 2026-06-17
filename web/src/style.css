@@ -1242,7 +1242,7 @@ body {
 
 .health-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
   gap: 0.6rem;
 }
 
@@ -1272,6 +1272,8 @@ body {
   gap: 0.4rem;
 }
 .health-card__name {
+  flex: 1;
+  min-width: 0;
   font-weight: 600;
   font-size: 0.9rem;
   overflow: hidden;
@@ -1279,6 +1281,7 @@ body {
   white-space: nowrap;
 }
 .health-card__tag {
+  flex-shrink: 0;
   font-size: 0.6rem;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -1287,8 +1290,16 @@ body {
   border-radius: 4px;
   padding: 0.05rem 0.25rem;
 }
+.health-card__status-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
 .health-card__latency {
   margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 0.72rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -1296,7 +1307,6 @@ body {
 .health-card__status {
   font-size: 0.78rem;
   color: var(--muted);
-  margin-top: 0.3rem;
 }
 .health-card--ok .health-card__status {
   color: var(--success);
