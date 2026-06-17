@@ -1,6 +1,8 @@
 import os
+import time
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 from seeding_db.repository import EngineRepository
 
@@ -83,6 +85,50 @@ async def engine_registry(session: DbSession, pool: EnginePoolDep):
             )
         )
     return out
+
+
+@router.get("/{engine_id}/connectivity")
+async def engine_connectivity(engine_id: str, pool: EnginePoolDep):
+    """Проверка связности с движком (онбординг/диагностика):
+    - reachable + api_latency_ms: достучался ли оркестратор до внутреннего API движка;
+    - bt: статус BitTorrent (слушает ли порт, был ли входящий коннект = порт открыт снаружи)."""
+    spec = pool.spec(engine_id)
+    if spec is None:
+        raise HTTPException(status_code=404, detail=f"unknown engine_id: {engine_id}")
+    try:
+        client = pool.client_for(engine_id)
+    except KeyError:
+        raise HTTPException(status_code=409, detail=f"engine {engine_id} not in active pool (stale?)")
+
+    result: dict = {
+        "id": engine_id,
+        "url": spec.url,
+        "tls": spec.url.startswith("https://"),
+        "reachable": False,
+        "api_latency_ms": None,
+        "bt": None,
+        "error": None,
+    }
+    t0 = time.perf_counter()
+    try:
+        await client.health()
+        result["reachable"] = True
+        result["api_latency_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+    except httpx.HTTPError as exc:
+        result["error"] = f"api unreachable: {exc}"
+        return result
+
+    try:
+        bt = await client.net_status()
+        result["bt"] = bt
+        port = (spec.listen_port or bt.get("configured_port"))
+        result["bt_listening"] = bool(bt.get("listening"))
+        # has_incoming=True — кто-то снаружи подключился к BT-порту: порт точно доступен.
+        result["bt_reachable_hint"] = bt.get("has_incoming")
+        result["bt_port"] = port
+    except httpx.HTTPError as exc:
+        result["bt"] = {"error": str(exc)}
+    return result
 
 
 @router.post("/register", response_model=EngineOut)

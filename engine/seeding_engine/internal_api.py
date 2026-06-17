@@ -206,6 +206,15 @@ async def fs_exists(request: Request, path: str = Query(..., min_length=1)):
     return {"path": path, "exists": exists, "is_dir": is_dir}
 
 
+@router.get("/net/status")
+async def net_status(request: Request):
+    """Сетевой статус движка (для проверки связности/NAT при онбординге)."""
+    rt = get_runtime(request)
+    fn = getattr(rt, "net_status", None)
+    data = await fn() if fn is not None else {}
+    return data or {}
+
+
 @router.get("/torrents/{db_id}/content")
 async def stream_content(request: Request, db_id: int):
     """Отдать контент раздачи tar-потоком (источник сетевого переноса между машинами)."""

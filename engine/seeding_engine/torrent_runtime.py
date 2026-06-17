@@ -195,6 +195,9 @@ class TorrentRuntime(ABC):
     async def session_stats(self) -> dict[str, object]:
         return {}
 
+    async def net_status(self) -> dict[str, object]:
+        return {}
+
     async def set_session_limits(
         self, download_limit: int | None, upload_limit: int | None
     ) -> dict[str, object]:
@@ -1467,6 +1470,51 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 "upload_limit": up_lim,
                 "dht_nodes": getattr(ss, "dht_nodes", None),
                 "listening_port": listening_port,
+            }
+
+        return await asyncio.to_thread(_collect)
+
+    async def net_status(self) -> dict[str, object]:
+        """Сетевой статус движка для проверки связности при онбординге:
+        слушает ли libtorrent порт, был ли хоть один входящий коннект (признак, что
+        BT-порт доступен снаружи / NAT проброшен), DHT-узлы и число пиров."""
+        async with self._lock:
+            ses = self._ses
+            handles = dict(self._handles)
+        configured: int | None = None
+        ifs = os.getenv("LT_LISTEN_INTERFACES", "").strip()
+        if ":" in ifs:
+            tail = ifs.split(",")[0].rsplit(":", 1)[-1]
+            if tail.isdigit():
+                configured = int(tail)
+        if configured is None:
+            configured = self._listen_low
+        if ses is None:
+            return {"configured_port": configured, "listening": False}
+
+        def _collect(ses_inner=ses, handles_inner=handles) -> dict[str, object]:
+            ss = ses_inner.status() if callable(getattr(ses_inner, "status", None)) else ses_inner.status
+            listening_port = getattr(ss, "listening_port", None)
+            if not listening_port and hasattr(ses_inner, "listen_port"):
+                try:
+                    lp = ses_inner.listen_port()
+                    listening_port = int(lp) if lp else None
+                except Exception:  # noqa: BLE001
+                    listening_port = None
+            peers = 0
+            for h in handles_inner.values():
+                try:
+                    st = h.status() if callable(getattr(h, "status", None)) else h.status
+                    peers += int(getattr(st, "num_peers", 0) or 0)
+                except Exception:  # noqa: BLE001
+                    continue
+            return {
+                "configured_port": configured,
+                "listening_port": listening_port,
+                "listening": bool(listening_port),
+                "has_incoming": getattr(ss, "has_incoming_connections", None),
+                "dht_nodes": getattr(ss, "dht_nodes", None),
+                "peers": peers,
             }
 
         return await asyncio.to_thread(_collect)
