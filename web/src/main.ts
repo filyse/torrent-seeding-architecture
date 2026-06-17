@@ -104,6 +104,26 @@ type TorrentPeerOut = {
   source: string | null;
 };
 
+type HealthStatus = "ok" | "warn" | "down";
+type HealthComponent = {
+  id: string;
+  name: string;
+  kind: "core" | "engine";
+  status: HealthStatus;
+  detail?: string | null;
+  latency_ms?: number | null;
+  engine_id?: string | null;
+  url?: string | null;
+  tls?: boolean;
+  meta?: Record<string, unknown> | null;
+};
+type HealthFull = {
+  status: HealthStatus;
+  generated_at: string;
+  summary: { engines_ok: number; engines_total: number };
+  components: HealthComponent[];
+};
+
 type TorrentDetailOut = TorrentOut & { runtime: RuntimeOut | null; peer_list?: TorrentPeerOut[] };
 type Route = { view: "list" } | { view: "detail"; id: number } | { view: "settings" };
 type DeleteTorrentChoice = "cancel" | "torrent_only" | "torrent_and_files";
@@ -111,6 +131,7 @@ type DeleteTorrentChoice = "cancel" | "torrent_only" | "torrent_and_files";
 let listPollTimer: ReturnType<typeof setTimeout> | null = null;
 let listStream: EventSource | null = null;
 let detailPollTimer: ReturnType<typeof setTimeout> | null = null;
+let settingsHealthTimer: ReturnType<typeof setTimeout> | null = null;
 let listAbort: AbortController | null = null;
 let detailAbort: AbortController | null = null;
 let listLoadGeneration = 0;
@@ -233,6 +254,10 @@ function clearViewPolls(): void {
   if (detailPollTimer !== null) {
     clearTimeout(detailPollTimer);
     detailPollTimer = null;
+  }
+  if (settingsHealthTimer !== null) {
+    clearTimeout(settingsHealthTimer);
+    settingsHealthTimer = null;
   }
   listAbort?.abort();
   listAbort = null;
@@ -2089,6 +2114,117 @@ function mountDetailShell(root: HTMLElement, id: number): void {
   void run();
 }
 
+const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = {
+  ok: "Норма",
+  warn: "Внимание",
+  down: "Сбой",
+};
+const HEALTH_OVERALL_LABEL: Record<HealthStatus, string> = {
+  ok: "Все системы в норме",
+  warn: "Есть предупреждения",
+  down: "Обнаружен сбой",
+};
+
+function healthCard(c: HealthComponent): HTMLElement {
+  const card = el("div", { className: `health-card health-card--${c.status}` });
+  const top = el("div", { className: "health-card__top" }, [
+    el("span", { className: `health-dot health-dot--${c.status}` }),
+    el("span", { className: "health-card__name" }, [c.name]),
+  ]);
+  if (c.kind === "engine" && c.tls) {
+    top.append(el("span", { className: "health-card__tag", title: "Шифрованное соединение" }, ["TLS"]));
+  }
+  const latency =
+    typeof c.latency_ms === "number"
+      ? el("span", { className: "health-card__latency" }, [`${c.latency_ms} мс`])
+      : null;
+  if (latency) top.append(latency);
+  card.append(top);
+  card.append(
+    el("div", { className: "health-card__status" }, [HEALTH_STATUS_LABEL[c.status]]),
+  );
+  if (c.detail) card.append(el("div", { className: "health-card__detail" }, [c.detail]));
+  return card;
+}
+
+function mountHealthPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  const head = el("div", { className: "panel__head panel__head--with-action" }, ["Состояние сервисов"]);
+  const refreshBtn = el(
+    "button",
+    { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" },
+    ["⟳"],
+  );
+  head.append(refreshBtn);
+  panel.append(head);
+
+  const body = el("div", { className: "panel__body" });
+  const banner = el("div", { className: "health-banner health-banner--loading" });
+  const meta = el("div", { className: "health-meta" }, ["Проверка…"]);
+  const grid = el("div", { className: "health-grid" });
+  body.append(banner, grid, meta);
+  panel.append(body);
+
+  let busy = false;
+
+  const paint = (data: HealthFull) => {
+    banner.className = `health-banner health-banner--${data.status}`;
+    banner.replaceChildren(
+      el("span", { className: `health-dot health-dot--${data.status}` }),
+      el("span", { className: "health-banner__text" }, [HEALTH_OVERALL_LABEL[data.status]]),
+      el("span", { className: "health-banner__count" }, [
+        `${data.summary.engines_ok}/${data.summary.engines_total} движков онлайн`,
+      ]),
+    );
+    const core = data.components.filter((c) => c.kind === "core");
+    const engines = data.components.filter((c) => c.kind === "engine");
+    grid.replaceChildren();
+    grid.append(el("div", { className: "health-grid__label" }, ["Ядро"]));
+    const coreRow = el("div", { className: "health-cards" });
+    for (const c of core) coreRow.append(healthCard(c));
+    grid.append(coreRow);
+    if (engines.length > 0) {
+      grid.append(el("div", { className: "health-grid__label" }, ["Движки"]));
+      const engRow = el("div", { className: "health-cards" });
+      for (const c of engines) engRow.append(healthCard(c));
+      grid.append(engRow);
+    }
+    meta.replaceChildren(
+      el("span", { className: "live-dot" }),
+      document.createTextNode(`Обновлено ${formatTime(new Date())}`),
+    );
+  };
+
+  const tick = async (manual = false) => {
+    if (busy) return;
+    busy = true;
+    if (manual) refreshBtn.classList.add("is-spinning");
+    try {
+      const data = await fetchJson<HealthFull>("/health/full");
+      if (parseRoute().view !== "settings") return;
+      paint(data);
+    } catch (e) {
+      banner.className = "health-banner health-banner--down";
+      banner.replaceChildren(
+        el("span", { className: "health-dot health-dot--down" }),
+        el("span", { className: "health-banner__text" }, ["Не удалось получить статус"]),
+      );
+      meta.textContent = e instanceof Error ? e.message : String(e);
+    } finally {
+      busy = false;
+      refreshBtn.classList.remove("is-spinning");
+      if (settingsHealthTimer !== null) clearTimeout(settingsHealthTimer);
+      if (parseRoute().view === "settings" && !document.hidden) {
+        settingsHealthTimer = setTimeout(() => void tick(), 5000);
+      }
+    }
+  };
+
+  refreshBtn.addEventListener("click", () => void tick(true));
+  void tick();
+  return panel;
+}
+
 function mountSettingsShell(root: HTMLElement): void {
   const back = navLink("← Назад к списку", () => setHashList());
 
@@ -2124,7 +2260,9 @@ function mountSettingsShell(root: HTMLElement): void {
   const limits = mountGlobalLimitsPanel();
   limits.setAttribute("open", "");
 
-  root.append(back, header, statsHost, themePanel, limits);
+  const health = mountHealthPanel();
+
+  root.append(back, header, statsHost, health, themePanel, limits);
 
   void loadSessionStats().then((s) => {
     statsHost.replaceChildren(mountSessionBar(s));

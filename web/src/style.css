@@ -1171,3 +1171,160 @@ body {
   background: var(--surface);
   color: inherit;
 }
+
+/* ---- Состояние сервисов (health-check) ---- */
+.health-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--muted);
+}
+.health-dot--ok {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+}
+.health-dot--warn {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent);
+}
+.health-dot--down {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+  animation: health-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes health-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.health-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  margin-bottom: 0.9rem;
+}
+.health-banner--ok {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  background: color-mix(in srgb, var(--success) 10%, var(--surface));
+}
+.health-banner--warn,
+.health-banner--degraded {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+}
+.health-banner--down {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
+.health-banner__text {
+  font-weight: 600;
+}
+.health-banner__count {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.health-grid__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0.7rem 0 0.4rem;
+}
+
+.health-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 0.6rem;
+}
+
+.health-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.6rem 0.7rem;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+.health-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+.health-card--ok {
+  border-left: 3px solid var(--success);
+}
+.health-card--warn {
+  border-left: 3px solid var(--warn);
+}
+.health-card--down {
+  border-left: 3px solid var(--danger);
+}
+.health-card__top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.health-card__name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.health-card__tag {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  border-radius: 4px;
+  padding: 0.05rem 0.25rem;
+}
+.health-card__latency {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.health-card__status {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+}
+.health-card--ok .health-card__status {
+  color: var(--success);
+}
+.health-card--warn .health-card__status {
+  color: var(--warn);
+}
+.health-card--down .health-card__status {
+  color: var(--danger);
+}
+.health-card__detail {
+  font-size: 0.74rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+  word-break: break-word;
+}
+.health-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.8rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.is-spinning {
+  animation: health-spin 0.7s linear infinite;
+}
+@keyframes health-spin {
+  to { transform: rotate(360deg); }
+}

@@ -16,6 +16,7 @@ from seeding_api.deps import require_api_key_if_configured
 from seeding_api.engine_pool import EnginePool
 from seeding_api.restore import maybe_restore_torrents_to_engine
 from seeding_api.routers import engines as engines_router
+from seeding_api.routers import health as health_router
 from seeding_api.routers import jobs as jobs_router
 from seeding_api.routers import session as session_router
 from seeding_api.routers import stream as stream_router
@@ -151,6 +152,11 @@ app.include_router(
 )
 app.include_router(
     jobs_router.router,
+    prefix="/api/v1",
+    dependencies=[Depends(require_api_key_if_configured)],
+)
+app.include_router(
+    health_router.router,
     prefix="/api/v1",
     dependencies=[Depends(require_api_key_if_configured)],
 )
