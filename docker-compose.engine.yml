@@ -1,0 +1,73 @@
+# Автономный движок для отдельной машины (Фаза 4.5 — быстрый онбординг).
+#
+# Поднимает ОДИН libtorrent-движок, который сам регистрируется в оркестраторе по API-ключу
+# и шлёт heartbeat. Контент между машинами переносится по сети (HTTP через оркестратор),
+# поэтому общий /media НЕ нужен и media_path не задаётся.
+#
+# Быстрый старт на чистой машине (нужны docker + docker compose):
+#   git clone https://github.com/filyse/torrent-seeding-architecture.git
+#   cd torrent-seeding-architecture
+#   cp .env.engine.example .env.engine && nano .env.engine   # заполнить значения
+#   ./scripts/deploy-engine.sh
+#
+# Либо напрямую:
+#   docker compose --env-file .env.engine -f docker-compose.engine.yml up -d --build
+
+# Отдельное имя проекта — чтобы движок не «цеплял» соседние стеки на той же машине
+# (иначе `down --remove-orphans` мог бы задеть control plane).
+name: seeding-engine
+
+services:
+  engine:
+    build:
+      context: ./engine
+      dockerfile: Dockerfile
+    container_name: ${SEEDING_ENGINE_ID:-engine}-seeding
+    restart: unless-stopped
+    # Запас на graceful shutdown: сохранить fastresume/session.state по SIGTERM.
+    stop_grace_period: 60s
+    environment:
+      ENGINE_HTTP_PORT: "8081"
+      SEEDING_ENGINE_BACKEND: libtorrent
+      SEEDING_DATA_ROOT: /data
+      SEEDING_LT_STATE_FILE: /data/.state/session.state
+      SEEDING_FASTRESUME_DIR: /data/.fastresume
+      SEEDING_FASTRESUME_SAVE_INTERVAL: "300"
+      LT_CONNECTIONS_LIMIT: "500"
+      LT_ENABLE_UPNP: "0"
+      LT_ENABLE_NATPMP: "0"
+      # Идентификатор и хранилище движка.
+      SEEDING_ENGINE_ID: ${SEEDING_ENGINE_ID}
+      ENGINE_STORAGE_SUBDIR: ${SEEDING_ENGINE_ID}
+      LT_LISTEN_INTERFACES: "0.0.0.0:${SEEDING_ENGINE_LISTEN_PORT},[::]:${SEEDING_ENGINE_LISTEN_PORT}"
+      SEEDING_ENGINE_LISTEN_PORT: ${SEEDING_ENGINE_LISTEN_PORT}
+      # Саморегистрация в оркестраторе.
+      SEEDING_ORCHESTRATOR_URL: ${SEEDING_ORCHESTRATOR_URL}
+      SEEDING_ENGINE_REGISTER_KEY: ${SEEDING_ENGINE_REGISTER_KEY}
+      # ВАЖНО: адрес, по которому ОРКЕСТРАТОР достучится до этого движка (внешний IP машины).
+      SEEDING_ENGINE_ADVERTISE_URL: ${SEEDING_ENGINE_ADVERTISE_URL}
+      SEEDING_ENGINE_HEARTBEAT_INTERVAL: ${SEEDING_ENGINE_HEARTBEAT_INTERVAL:-60}
+    ports:
+      # Внутренний API движка — нужен оркестратору (метаданные + tar-стрим контента).
+      # БЕЗОПАСНОСТЬ: закрой этот порт файрволом на IP оркестратора (аутентификации пока нет).
+      - "${SEEDING_ENGINE_API_PORT:-8081}:8081"
+      # BitTorrent — для пиров (TCP+UDP).
+      - "${SEEDING_ENGINE_LISTEN_PORT}:${SEEDING_ENGINE_LISTEN_PORT}"
+      - "${SEEDING_ENGINE_LISTEN_PORT}:${SEEDING_ENGINE_LISTEN_PORT}/udp"
+    volumes:
+      - engine_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,json; r=urllib.request.urlopen('http://127.0.0.1:8081/health',timeout=5); b=json.loads(r.read()); assert b.get('backend')=='libtorrent', b",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  engine_data:
