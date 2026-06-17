@@ -44,6 +44,8 @@ services:
       # Саморегистрация в оркестраторе.
       SEEDING_ORCHESTRATOR_URL: ${SEEDING_ORCHESTRATOR_URL}
       SEEDING_ENGINE_REGISTER_KEY: ${SEEDING_ENGINE_REGISTER_KEY}
+      # Токен внутреннего API (должен совпадать с оркестратором). Защищает API от чужих запросов.
+      SEEDING_ENGINE_API_TOKEN: ${SEEDING_ENGINE_API_TOKEN}
       # ВАЖНО: адрес, по которому ОРКЕСТРАТОР достучится до этого движка (внешний IP машины).
       SEEDING_ENGINE_ADVERTISE_URL: ${SEEDING_ENGINE_ADVERTISE_URL}
       SEEDING_ENGINE_HEARTBEAT_INTERVAL: ${SEEDING_ENGINE_HEARTBEAT_INTERVAL:-60}

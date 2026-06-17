@@ -23,6 +23,9 @@ x-engine-common: &engine-common
     # ENGINE_STORAGE_SUBDIR + LT_LISTEN_INTERFACES + SEEDING_DATA_ROOT.
     SEEDING_ORCHESTRATOR_URL: "http://api:8000"
     SEEDING_ENGINE_REGISTER_KEY: "ct400-engine-register"
+    # Аутентификация внутреннего API движка (оркестратор шлёт X-Engine-Token).
+    # Тот же токен должен быть у api и queue_worker. Поменяй на свой секрет в проде.
+    SEEDING_ENGINE_API_TOKEN: "ct400-engine-api-token"
   healthcheck:
     test:
       [
@@ -142,6 +145,8 @@ services:
       SEEDING_RESTORE_CONCURRENCY: "32"
       # Должен совпадать с SEEDING_ENGINE_REGISTER_KEY движков (Фаза 4.5).
       SEEDING_ENGINE_REGISTER_KEY: "ct400-engine-register"
+      # Токен для запросов к внутреннему API движков (должен совпадать с движками).
+      SEEDING_ENGINE_API_TOKEN: "ct400-engine-api-token"
     volumes:
       - ./config/engines.ct400.json:/config/engines.json:ro
     ports:
@@ -185,6 +190,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       ENGINES_CONFIG_FILE: /config/engines.json
       SEEDING_BULK_CONCURRENCY: "16"
+      SEEDING_ENGINE_API_TOKEN: "ct400-engine-api-token"
     volumes:
       - ./config/engines.ct400.json:/config/engines.json:ro
     depends_on:

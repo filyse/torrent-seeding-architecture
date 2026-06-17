@@ -13,6 +13,10 @@ def _retries() -> int:
         return 2
 
 
+def _api_token() -> str:
+    return os.getenv("SEEDING_ENGINE_API_TOKEN", "").strip()
+
+
 class EngineClient:
     """HTTP-клиент к внутреннему API движка.
 
@@ -23,8 +27,13 @@ class EngineClient:
     def __init__(self, base_url: str) -> None:
         self._base = base_url.rstrip("/")
         transport = httpx.AsyncHTTPTransport(retries=_retries())
+        token = _api_token()
+        headers = {"X-Engine-Token": token} if token else None
         self._client = httpx.AsyncClient(
-            base_url=self._base, timeout=httpx.Timeout(30.0), transport=transport
+            base_url=self._base,
+            timeout=httpx.Timeout(30.0),
+            transport=transport,
+            headers=headers,
         )
 
     @property

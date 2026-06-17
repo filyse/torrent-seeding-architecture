@@ -1,15 +1,37 @@
 import asyncio
 import base64
+import hmac
 import os
 import shutil
 import tarfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-router = APIRouter(prefix="/internal/v1", tags=["internal"])
+
+def _expected_token() -> str:
+    return os.getenv("SEEDING_ENGINE_API_TOKEN", "").strip()
+
+
+async def require_token(x_engine_token: str | None = Header(default=None)) -> None:
+    """Защита внутреннего API общим токеном (оркестратор ↔ движок).
+
+    Если SEEDING_ENGINE_API_TOKEN не задан — проверка отключена (обратная совместимость).
+    Сравнение постоянного времени, чтобы не утекал токен по таймингу."""
+    expected = _expected_token()
+    if not expected:
+        return
+    if not x_engine_token or not hmac.compare_digest(x_engine_token, expected):
+        raise HTTPException(status_code=401, detail="invalid or missing engine token")
+
+
+router = APIRouter(
+    prefix="/internal/v1",
+    tags=["internal"],
+    dependencies=[Depends(require_token)],
+)
 
 
 class TorrentRegisterIn(BaseModel):
