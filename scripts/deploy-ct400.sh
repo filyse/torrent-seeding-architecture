@@ -17,6 +17,7 @@ cd "$(dirname "$0")/.."
 
 BASE="docker-compose.multi-engine.yml"
 MEDIA="docker-compose.multi-engine.media.yml"
+TLS="docker-compose.multi-engine.tls.yml"
 
 for f in "$BASE" "$MEDIA"; do
   if [ ! -f "$f" ]; then
@@ -25,9 +26,16 @@ for f in "$BASE" "$MEDIA"; do
   fi
 done
 
+FILES=(-f "$BASE" -f "$MEDIA")
+# TLS-фронт (Caddy) подключается автоматически, если оверрей присутствует и не отключён
+# явно через DEPLOY_TLS=0.
+if [ -f "$TLS" ] && [ "${DEPLOY_TLS:-1}" != "0" ]; then
+  FILES+=(-f "$TLS")
+fi
+
 if [ "$#" -eq 0 ]; then
   set -- up -d
 fi
 
 set -x
-exec docker compose -f "$BASE" -f "$MEDIA" "$@"
+exec docker compose "${FILES[@]}" "$@"

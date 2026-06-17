@@ -35,6 +35,22 @@ class TorrentRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ApiKeyRecord(Base):
+    """Именованный API-ключ с ролью (Фаза 5). Сам ключ не хранится — только его SHA-256
+    и короткий префикс для отображения. Роли: viewer < operator < admin."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), default="")
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    prefix: Mapped[str] = mapped_column(String(16), default="")
+    role: Mapped[str] = mapped_column(String(16), default="operator")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class EngineRecord(Base):
     """Динамический реестр движков (Фаза 4.5): движок может зарегистрироваться сам по
     API-ключу, без правки статического `engines.json`. Статический конфиг остаётся базой —

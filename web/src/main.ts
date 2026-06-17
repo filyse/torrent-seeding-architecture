@@ -140,6 +140,25 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let selectedIds = new Set<number>();
 let selectionChanged: (() => void) | null = null;
 
+type Role = "viewer" | "operator" | "admin";
+type MeOut = { name: string; role: Role; source: string };
+let currentRole: Role | null = null;
+let currentMe: MeOut | null = null;
+
+function canWrite(): boolean {
+  return currentRole === "operator" || currentRole === "admin";
+}
+function isAdmin(): boolean {
+  return currentRole === "admin";
+}
+
+function getApiKey(): string {
+  return lsGet("seedingApiKey") ?? "";
+}
+function setApiKey(key: string): void {
+  lsSet("seedingApiKey", key);
+}
+
 function lsGet(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -280,7 +299,8 @@ function apiHeaders(json = true): HeadersInit {
 async function throwIfNotOk(res: Response): Promise<void> {
   if (!res.ok) {
     if (res.status === 401) {
-      throw new Error("Нужен API-ключ (localStorage.seedingApiKey)");
+      if (!document.querySelector(".login-overlay")) showLoginDialog();
+      throw new Error("Нужен API-ключ");
     }
     if (res.status === 403) {
       throw new Error("Доступ запрещён");
@@ -1092,12 +1112,9 @@ function renderTorrentCard(
   actions.append(pauseBtn, resumeBtn, delBtn);
   const topRight = el("div", { className: "torrent-card__badges" }, [badge]);
   if (labelBadge) topRight.append(labelBadge);
-  card.append(
-    el("div", { className: "torrent-card__top" }, [checkbox, title, topRight]),
-    bar,
-    stats,
-    actions,
-  );
+  const topChildren: (string | Node)[] = canWrite() ? [checkbox, title, topRight] : [title, topRight];
+  card.append(el("div", { className: "torrent-card__top" }, topChildren), bar, stats);
+  if (canWrite()) card.append(actions);
   return card;
 }
 
@@ -1727,9 +1744,12 @@ function mountListShell(root: HTMLElement): void {
     window.dispatchEvent(new HashChangeEvent("hashchange"));
   });
 
+  const headerActions = el("div", { className: "app-header__actions" });
+  if (canWrite()) headerActions.append(addTorrentBtn);
+  headerActions.append(settingsLink, metaEl);
   const header = el("header", { className: "app-header" }, [
     el("div", {}, [el("h1", {}, ["Раздача"]), el("p", { className: "field__hint" }, ["Управление торрентами"])]),
-    el("div", { className: "app-header__actions" }, [addTorrentBtn, settingsLink, metaEl]),
+    headerActions,
   ]);
 
   const resetFilters = el("button", {
@@ -2043,13 +2063,9 @@ async function loadDetail(
     const metaBlock = buildDetailsSpoiler("Подробности", detailsContent);
     applyDetailSpoilerState(metaBlock, id, "meta");
 
+    body.append(head, sub, progressWrap, chips);
+    if (canWrite()) body.append(toolbar, manage);
     body.append(
-      head,
-      sub,
-      progressWrap,
-      chips,
-      toolbar,
-      manage,
       buildFilesSpoiler(files, id, () => void backRefresh()),
       buildTrackersSpoiler(trackers, id, () => void backRefresh()),
       buildPeersSpoiler(data.peer_list ?? [], id),
@@ -2224,6 +2240,221 @@ function mountHealthPanel(): HTMLElement {
   return panel;
 }
 
+const ROLE_LABEL: Record<Role, string> = {
+  viewer: "Наблюдатель (только чтение)",
+  operator: "Оператор (управление раздачами)",
+  admin: "Администратор (полный доступ)",
+};
+
+async function loadMe(): Promise<void> {
+  try {
+    const me = await fetchJson<MeOut>("/auth/me");
+    currentMe = me;
+    currentRole = me.role;
+  } catch {
+    currentMe = null;
+    currentRole = null;
+  }
+}
+
+function showLoginDialog(): void {
+  document.querySelector(".modal-overlay.login-overlay")?.remove();
+  const overlay = el("div", { className: "modal-overlay login-overlay" });
+  const dialog = el("div", { className: "modal-dialog", role: "dialog", "aria-modal": "true" });
+  const keyInput = el("input", {
+    type: "password",
+    placeholder: "sk_…",
+    className: "login-input",
+    value: getApiKey(),
+  }) as HTMLInputElement;
+  const errLine = el("p", { className: "modal-text login-error", hidden: "" });
+  const submit = el("button", { type: "button", className: "btn btn--primary" }, ["Войти"]);
+  const doLogin = async () => {
+    const key = keyInput.value.trim();
+    submit.disabled = true;
+    errLine.hidden = true;
+    setApiKey(key);
+    await loadMe();
+    if (currentRole) {
+      overlay.remove();
+      render();
+    } else {
+      errLine.textContent = "Неверный ключ или нет доступа";
+      errLine.hidden = false;
+      submit.disabled = false;
+    }
+  };
+  submit.addEventListener("click", () => void doLogin());
+  keyInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") void doLogin();
+  });
+  dialog.append(
+    el("h2", { className: "modal-title" }, ["Вход"]),
+    el("p", { className: "modal-text" }, ["Введите API-ключ для доступа к платформе."]),
+    field("API-ключ", keyInput),
+    errLine,
+    el("div", { className: "modal-actions" }, [submit]),
+  );
+  overlay.append(dialog);
+  document.body.append(overlay);
+  keyInput.focus();
+}
+
+function mountAccountPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  panel.append(el("div", { className: "panel__head" }, ["Аккаунт"]));
+  const body = el("div", { className: "panel__body" });
+  const role = currentRole ?? "viewer";
+  body.append(
+    el("div", { className: "account-row" }, [
+      el("span", { className: "health-dot health-dot--ok" }),
+      el("span", {}, [currentMe ? `${ROLE_LABEL[role]}` : "Не авторизован"]),
+    ]),
+  );
+  if (currentMe?.source === "anonymous") {
+    body.append(
+      el("p", { className: "field__hint" }, [
+        "Ключей ещё нет — доступ открыт. Создайте admin-ключ ниже, чтобы включить защиту.",
+      ]),
+    );
+  }
+  const changeBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Сменить ключ"]);
+  changeBtn.addEventListener("click", () => showLoginDialog());
+  body.append(el("div", { className: "btn-row" }, [changeBtn]));
+  panel.append(body);
+  return panel;
+}
+
+function mountApiKeysPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  panel.append(el("div", { className: "panel__head" }, ["API-ключи и доступ"]));
+  const body = el("div", { className: "panel__body" });
+
+  const nameInput = el("input", { type: "text", placeholder: "Название (напр. «ноутбук»)" }) as HTMLInputElement;
+  const roleSelect = el("select", { className: "select" }) as HTMLSelectElement;
+  for (const [val, label] of [
+    ["admin", "admin — полный доступ"],
+    ["operator", "operator — управление раздачами"],
+    ["viewer", "viewer — только чтение"],
+  ]) {
+    roleSelect.append(el("option", { value: val }, [label]));
+  }
+  const createBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Создать ключ"]);
+  const list = el("div", { className: "keys-list" });
+
+  const reload = async () => {
+    try {
+      const keys = await fetchJson<
+        {
+          id: number;
+          name: string;
+          prefix: string;
+          role: Role;
+          enabled: boolean;
+          created_at: string | null;
+          last_used_at: string | null;
+        }[]
+      >("/auth/keys");
+      list.replaceChildren();
+      if (keys.length === 0) {
+        list.append(el("p", { className: "field__hint" }, ["Ключей пока нет"]));
+        return;
+      }
+      for (const k of keys) {
+        const row = el("div", { className: `key-row${k.enabled ? "" : " key-row--off"}` });
+        const meta = el("div", { className: "key-row__meta" }, [
+          el("span", { className: "key-row__name" }, [k.name || "(без названия)"]),
+          el("span", { className: "key-row__sub" }, [
+            `${k.prefix}… · ${k.role}${k.enabled ? "" : " · выключен"}${
+              k.last_used_at ? ` · использован ${new Date(k.last_used_at).toLocaleDateString("ru-RU")}` : ""
+            }`,
+          ]),
+        ]);
+        const toggle = el("button", { type: "button", className: "btn btn--sm" }, [
+          k.enabled ? "Выключить" : "Включить",
+        ]);
+        toggle.addEventListener("click", async () => {
+          try {
+            await fetchJson(`/auth/keys/${k.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ enabled: !k.enabled }),
+            });
+            await reload();
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : String(e), true);
+          }
+        });
+        const del = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["Удалить"]);
+        del.addEventListener("click", async () => {
+          if (!window.confirm(`Удалить ключ «${k.name || k.prefix}»?`)) return;
+          try {
+            await fetchDelete(`/auth/keys/${k.id}`);
+            await reload();
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : String(e), true);
+          }
+        });
+        row.append(meta, el("div", { className: "btn-row" }, [toggle, del]));
+        list.append(row);
+      }
+    } catch (e) {
+      list.replaceChildren(el("p", { className: "field__hint" }, [e instanceof Error ? e.message : String(e)]));
+    }
+  };
+
+  createBtn.addEventListener("click", async () => {
+    createBtn.disabled = true;
+    try {
+      const res = await fetchJson<{ key: string; item: { prefix: string } }>("/auth/keys", {
+        method: "POST",
+        body: JSON.stringify({ name: nameInput.value.trim(), role: roleSelect.value }),
+      });
+      nameInput.value = "";
+      showNewKeyDialog(res.key);
+      await reload();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      createBtn.disabled = false;
+    }
+  });
+
+  body.append(
+    el("p", { className: "field__hint" }, ["Ключ показывается один раз при создании — сохраните его."]),
+    el("div", { className: "keys-form" }, [nameInput, roleSelect, createBtn]),
+    list,
+  );
+  panel.append(body);
+  void reload();
+  return panel;
+}
+
+function showNewKeyDialog(key: string): void {
+  const overlay = el("div", { className: "modal-overlay" });
+  const dialog = el("div", { className: "modal-dialog", role: "dialog", "aria-modal": "true" });
+  const keyBox = el("pre", { className: "def-list__magnet new-key-box" });
+  keyBox.textContent = key;
+  const copyBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Скопировать"]);
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(key);
+      showToast("Скопировано");
+    } catch {
+      showToast("Не удалось скопировать", true);
+    }
+  });
+  const closeBtn = el("button", { type: "button", className: "btn btn--primary" }, ["Готово"]);
+  closeBtn.addEventListener("click", () => overlay.remove());
+  dialog.append(
+    el("h2", { className: "modal-title" }, ["Новый ключ создан"]),
+    el("p", { className: "modal-text" }, ["Сохраните ключ сейчас — позже он не отобразится."]),
+    keyBox,
+    el("div", { className: "modal-actions" }, [copyBtn, closeBtn]),
+  );
+  overlay.append(dialog);
+  document.body.append(overlay);
+}
+
 function mountSettingsShell(root: HTMLElement): void {
   const back = navLink("← Назад к списку", () => setHashList());
 
@@ -2256,12 +2487,17 @@ function mountSettingsShell(root: HTMLElement): void {
   themeBody.append(field("Тема оформления", themeSelect, "Сохраняется в этом браузере"));
   themePanel.append(themeBody);
 
-  const limits = mountGlobalLimitsPanel();
-  limits.setAttribute("open", "");
-
   const health = mountHealthPanel();
+  const account = mountAccountPanel();
 
-  root.append(back, header, statsHost, health, themePanel, limits);
+  root.append(back, header, statsHost, health, account);
+  if (isAdmin()) root.append(mountApiKeysPanel());
+  root.append(themePanel);
+  if (canWrite()) {
+    const limits = mountGlobalLimitsPanel();
+    limits.setAttribute("open", "");
+    root.append(limits);
+  }
 
   void loadSessionStats().then((s) => {
     statsHost.replaceChildren(mountSessionBar(s));
@@ -2279,7 +2515,16 @@ function render(): void {
   else mountDetailShell(root, route.id);
 }
 
+async function bootstrap(): Promise<void> {
+  await loadMe();
+  if (!currentRole) {
+    showLoginDialog();
+    return;
+  }
+  render();
+}
+
 document.title = "Раздача";
 applyTheme(getThemeMode());
 window.addEventListener("hashchange", () => render());
-render();
+void bootstrap();

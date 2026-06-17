@@ -1,0 +1,25 @@
+# CT400: публичный HTTPS-фронт (Caddy) перед web/api. Фаза 5.
+# Подключается автоматически через scripts/deploy-ct400.sh (DEPLOY_TLS=0 чтобы отключить).
+# Доступ: https://<SEEDING_SITE>/ (по умолчанию https://192.168.1.101/).
+# HTTP на :3000 остаётся как запасной вход на время перехода.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SEEDING_SITE: ${SEEDING_SITE:-192.168.1.101}
+    ports:
+      - "443:443"
+      - "443:443/udp"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  caddy_data:
+  caddy_config:

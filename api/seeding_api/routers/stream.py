@@ -7,28 +7,19 @@
 import asyncio
 import json
 import logging
-import os
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from seeding_db.repository import TorrentRepository
 
+from seeding_api.auth import resolve_principal
 from seeding_api.runtime_sync import merge_runtime_into_row
 from seeding_api.schemas import TorrentOut
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _check_api_key(api_key: str | None) -> None:
-    raw = os.getenv("SEEDING_API_KEYS", "").strip()
-    if not raw:
-        return
-    allowed = {k.strip() for k in raw.split(",") if k.strip()}
-    if not api_key or api_key not in allowed:
-        raise HTTPException(status_code=401, detail="invalid or missing API key")
 
 
 async def _build_snapshot(session_factory, pool) -> dict:
@@ -59,7 +50,10 @@ async def stream(
     api_key: str | None = Query(None),
     interval: float = Query(3.0),
 ):
-    _check_api_key(api_key)
+    # SSE — чтение, достаточно роли viewer; ключ приходит query-параметром.
+    principal = await resolve_principal(request, api_key)
+    if principal is None:
+        raise HTTPException(status_code=401, detail="invalid or missing API key")
     interval = min(max(interval, 1.0), 30.0)
     session_factory = request.app.state.session_factory
     pool = request.app.state.engine_pool

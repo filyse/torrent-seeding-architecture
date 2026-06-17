@@ -1338,3 +1338,73 @@ body {
 @keyframes health-spin {
   to { transform: rotate(360deg); }
 }
+
+/* ---- Аккаунт / API-ключи (Фаза 5) ---- */
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  font-weight: 600;
+}
+.login-input {
+  width: 100%;
+  font-family: ui-monospace, "Cascadia Code", monospace;
+}
+.login-error {
+  color: var(--danger);
+}
+.keys-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.6rem 0 0.9rem;
+}
+.keys-form input {
+  flex: 1;
+  min-width: 12rem;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+}
+.keys-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.key-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.key-row--off {
+  opacity: 0.55;
+}
+.key-row__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.key-row__name {
+  font-weight: 600;
+}
+.key-row__sub {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Code", monospace;
+}
+.new-key-box {
+  user-select: all;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

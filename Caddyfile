@@ -1,0 +1,18 @@
+# Caddy — публичный HTTPS-фронт для LAN (Фаза 5).
+# Терминирует TLS и проксирует всё на web (nginx), который уже отдаёт SPA и проксирует
+# /api на api (включая SSE). Сертификат выпускает локальный CA самого Caddy (local_certs) —
+# без интернета/ACME. Браузеру нужно один раз доверить корневой сертификат Caddy:
+#   docker compose ... cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
+# и импортировать caddy-root.crt в доверенные корневые ЦС.
+
+{
+	# Локальный CA вместо Let's Encrypt (подходит для доступа по IP в локальной сети).
+	local_certs
+}
+
+# Адрес сайта (IP или домен) задаётся переменной SEEDING_SITE (по умолчанию — IP CT400).
+{$SEEDING_SITE:192.168.1.101} {
+	encode gzip
+	# Один апстрим: web (nginx) сам разрулит SPA и /api (в т.ч. /api/v1/stream — SSE).
+	reverse_proxy web:80
+}

@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from seeding_db.models import EngineRecord, TorrentRecord, TorrentStatus
+from seeding_db.models import ApiKeyRecord, EngineRecord, TorrentRecord, TorrentStatus
 
 
 class TorrentRepository:
@@ -160,6 +160,77 @@ class TorrentRepository:
         await self._session.delete(row)
         await self._session.flush()
         return True
+
+
+class ApiKeyRepository:
+    """Именованные API-ключи с ролями (Фаза 5)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, *, name: str, key_hash: str, prefix: str, role: str) -> ApiKeyRecord:
+        row = ApiKeyRecord(name=name, key_hash=key_hash, prefix=prefix, role=role, enabled=True)
+        self._session.add(row)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def get_by_hash(self, key_hash: str) -> ApiKeyRecord | None:
+        result = await self._session.execute(
+            select(ApiKeyRecord).where(ApiKeyRecord.key_hash == key_hash)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_id(self, key_id: int) -> ApiKeyRecord | None:
+        return await self._session.get(ApiKeyRecord, key_id)
+
+    async def list_all(self) -> list[ApiKeyRecord]:
+        result = await self._session.execute(select(ApiKeyRecord).order_by(ApiKeyRecord.id))
+        return list(result.scalars())
+
+    async def count_enabled(self) -> int:
+        result = await self._session.execute(
+            select(func.count()).select_from(ApiKeyRecord).where(ApiKeyRecord.enabled.is_(True))
+        )
+        return int(result.scalar_one() or 0)
+
+    async def count_admins(self, *, exclude_id: int | None = None) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(ApiKeyRecord)
+            .where(ApiKeyRecord.enabled.is_(True), ApiKeyRecord.role == "admin")
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(ApiKeyRecord.id != exclude_id)
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one() or 0)
+
+    async def update(
+        self, key_id: int, *, role: str | None = None, enabled: bool | None = None
+    ) -> ApiKeyRecord | None:
+        row = await self.get_by_id(key_id)
+        if row is None:
+            return None
+        if role is not None:
+            row.role = role
+        if enabled is not None:
+            row.enabled = enabled
+        await self._session.flush()
+        return row
+
+    async def delete(self, key_id: int) -> bool:
+        row = await self.get_by_id(key_id)
+        if row is None:
+            return False
+        await self._session.delete(row)
+        await self._session.flush()
+        return True
+
+    async def touch(self, key_id: int) -> None:
+        row = await self.get_by_id(key_id)
+        if row is not None:
+            row.last_used_at = datetime.now(timezone.utc)
+            await self._session.flush()
 
 
 class EngineRepository:
