@@ -26,13 +26,18 @@ x-engine-common: &engine-common
     # Аутентификация внутреннего API движка (оркестратор шлёт X-Engine-Token).
     # Тот же токен должен быть у api и queue_worker. Поменяй на свой секрет в проде.
     SEEDING_ENGINE_API_TOKEN: "ct400-engine-api-token"
+    # Шифрование внутреннего API (TLS). Сертификаты в ./certs (см. scripts/gen-certs.sh).
+    SEEDING_ENGINE_TLS: "1"
+    SEEDING_ENGINE_TLS_CERT: /certs/engine.crt
+    SEEDING_ENGINE_TLS_KEY: /certs/engine.key
   healthcheck:
+    # Локальный health по https (самопроверка без верификации хоста).
     test:
       [
         "CMD",
         "python",
         "-c",
-        "import urllib.request,json; r=urllib.request.urlopen('http://127.0.0.1:8081/health',timeout=5); b=json.loads(r.read()); assert b.get('backend')=='libtorrent', b",
+        "import os,ssl,json,urllib.request; tls=os.getenv('SEEDING_ENGINE_TLS')=='1'; u=('https' if tls else 'http')+'://127.0.0.1:8081/health'; c=ssl._create_unverified_context() if tls else None; b=json.loads(urllib.request.urlopen(u,timeout=5,context=c).read()); assert b.get('backend')=='libtorrent', b",
       ]
     interval: 10s
     timeout: 5s
@@ -70,6 +75,7 @@ services:
       LT_LISTEN_INTERFACES: "0.0.0.0:50001,[::]:50001"
     volumes:
       - seeding_b1:/data
+      - ./certs:/certs:ro
     ports:
       - "50001:50001"
       - "50001:50001/udp"
@@ -82,6 +88,7 @@ services:
       LT_LISTEN_INTERFACES: "0.0.0.0:50002,[::]:50002"
     volumes:
       - seeding_b2:/data
+      - ./certs:/certs:ro
     ports:
       - "50002:50002"
       - "50002:50002/udp"
@@ -94,6 +101,7 @@ services:
       LT_LISTEN_INTERFACES: "0.0.0.0:50003,[::]:50003"
     volumes:
       - seeding_b3:/data
+      - ./certs:/certs:ro
     ports:
       - "50003:50003"
       - "50003:50003/udp"
@@ -106,6 +114,7 @@ services:
       LT_LISTEN_INTERFACES: "0.0.0.0:50004,[::]:50004"
     volumes:
       - seeding_b4:/data
+      - ./certs:/certs:ro
     ports:
       - "50004:50004"
       - "50004:50004/udp"
@@ -118,6 +127,7 @@ services:
       LT_LISTEN_INTERFACES: "0.0.0.0:50005,[::]:50005"
     volumes:
       - seeding_b5:/data
+      - ./certs:/certs:ro
     ports:
       - "50005:50005"
       - "50005:50005/udp"
@@ -130,6 +140,7 @@ services:
       LT_LISTEN_INTERFACES: "0.0.0.0:50006,[::]:50006"
     volumes:
       - seeding_b6:/data
+      - ./certs:/certs:ro
     ports:
       - "50006:50006"
       - "50006:50006/udp"
@@ -147,8 +158,11 @@ services:
       SEEDING_ENGINE_REGISTER_KEY: "ct400-engine-register"
       # Токен для запросов к внутреннему API движков (должен совпадать с движками).
       SEEDING_ENGINE_API_TOKEN: "ct400-engine-api-token"
+      # CA для проверки TLS-сертификатов движков (https URL в engines.json).
+      SEEDING_ENGINE_TLS_CA: /certs/ca.crt
     volumes:
       - ./config/engines.ct400.json:/config/engines.json:ro
+      - ./certs/ca.crt:/certs/ca.crt:ro
     ports:
       - "8000:8000"
     healthcheck:
@@ -191,8 +205,10 @@ services:
       ENGINES_CONFIG_FILE: /config/engines.json
       SEEDING_BULK_CONCURRENCY: "16"
       SEEDING_ENGINE_API_TOKEN: "ct400-engine-api-token"
+      SEEDING_ENGINE_TLS_CA: /certs/ca.crt
     volumes:
       - ./config/engines.ct400.json:/config/engines.json:ro
+      - ./certs/ca.crt:/certs/ca.crt:ro
     depends_on:
       db:
         condition: service_healthy

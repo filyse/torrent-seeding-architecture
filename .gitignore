@@ -14,3 +14,8 @@ node_modules/
 web/dist/
 desktop/dist/
 *.log
+# TLS-сертификаты канала оркестратор↔движок (генерируются локально, не коммитим)
+certs/
+*.key
+*.crt
+*.srl

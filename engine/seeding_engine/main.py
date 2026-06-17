@@ -26,7 +26,9 @@ def _self_register_payload() -> dict | None:
     if not (orch and key and eid):
         return None
     data_root = os.getenv("SEEDING_DATA_ROOT", "/data").rstrip("/")
-    url = os.getenv("SEEDING_ENGINE_ADVERTISE_URL", "").strip() or f"http://engine-{eid}:8081"
+    # Если включён TLS — движок отдаёт https, и оркестратор должен идти по https.
+    scheme = "https" if os.getenv("SEEDING_ENGINE_TLS", "0") == "1" else "http"
+    url = os.getenv("SEEDING_ENGINE_ADVERTISE_URL", "").strip() or f"{scheme}://engine-{eid}:8081"
     storage_prefix = os.getenv("SEEDING_ENGINE_STORAGE_PREFIX", "").strip() or f"{data_root}/{eid}"
     media_path = os.getenv("SEEDING_ENGINE_MEDIA_PATH", "").strip() or None
     listen_port: int | None = None

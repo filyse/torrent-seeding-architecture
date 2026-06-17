@@ -17,6 +17,28 @@ def _api_token() -> str:
     return os.getenv("SEEDING_ENGINE_API_TOKEN", "").strip()
 
 
+def _verify_for(base_url: str):
+    """Как проверять TLS-сертификат движка.
+
+    Для http — неважно. Для https: если задан SEEDING_ENGINE_TLS_CA (наш приватный CA) —
+    проверяем по нему; иначе проверяем по системным корневым (verify=True)."""
+    if not base_url.startswith("https://"):
+        return True
+    ca = os.getenv("SEEDING_ENGINE_TLS_CA", "").strip()
+    return ca if ca else True
+
+
+def _client_cert():
+    """Опциональный клиентский сертификат для mTLS (если оркестратор должен предъявлять cert)."""
+    crt = os.getenv("SEEDING_ENGINE_TLS_CLIENT_CERT", "").strip()
+    key = os.getenv("SEEDING_ENGINE_TLS_CLIENT_KEY", "").strip()
+    if crt and key:
+        return (crt, key)
+    if crt:
+        return crt
+    return None
+
+
 class EngineClient:
     """HTTP-клиент к внутреннему API движка.
 
@@ -26,7 +48,11 @@ class EngineClient:
 
     def __init__(self, base_url: str) -> None:
         self._base = base_url.rstrip("/")
-        transport = httpx.AsyncHTTPTransport(retries=_retries())
+        transport = httpx.AsyncHTTPTransport(
+            retries=_retries(),
+            verify=_verify_for(self._base),
+            cert=_client_cert(),
+        )
         token = _api_token()
         headers = {"X-Engine-Token": token} if token else None
         self._client = httpx.AsyncClient(
