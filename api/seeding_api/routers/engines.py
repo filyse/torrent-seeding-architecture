@@ -10,6 +10,9 @@ from seeding_api.deps import DbSession, EnginePoolDep
 from seeding_api.schemas import EngineOut, EngineRegisterIn, EngineRegistryItem
 
 router = APIRouter()
+# Публичный роутер для саморегистрации движков: защищён отдельным X-Register-Key,
+# поэтому НЕ должен попадать под общий require_auth (иначе движки получают 401).
+public_router = APIRouter()
 
 
 def _require_register_key(x_register_key: str | None) -> None:
@@ -131,7 +134,7 @@ async def engine_connectivity(engine_id: str, pool: EnginePoolDep):
     return result
 
 
-@router.post("/register", response_model=EngineOut)
+@public_router.post("/register", response_model=EngineOut)
 async def register_engine(
     body: EngineRegisterIn,
     request: Request,

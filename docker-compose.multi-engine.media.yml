@@ -31,3 +31,10 @@ services:
     volumes:
       - /mnt/media/seeding-test/b6:/data
       - /mnt/media:/media:ro
+
+  # Каталог бэкапов БД монтируем в api, чтобы UI мог листать и восстанавливать дампы.
+  api:
+    environment:
+      SEEDING_BACKUP_DIR: /backups
+    volumes:
+      - /mnt/media/seeding-test/_backups/db:/backups

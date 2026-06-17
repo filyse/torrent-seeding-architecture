@@ -2429,6 +2429,94 @@ function mountApiKeysPanel(): HTMLElement {
   return panel;
 }
 
+type BackupItem = { filename: string; size: number; created_at: string };
+type BackupsOut = { dir: string; available: boolean; items: BackupItem[] };
+
+function mountBackupsPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  const head = el("div", { className: "panel__head panel__head--with-action" }, ["Резервные копии БД"]);
+  const createBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Создать сейчас"]);
+  head.append(createBtn);
+  panel.append(head);
+
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, ["Загрузка…"]);
+  const list = el("div", { className: "keys-list" });
+  body.append(hint, list);
+  panel.append(body);
+
+  const reload = async () => {
+    try {
+      const data = await fetchJson<BackupsOut>("/backups");
+      if (!data.available) {
+        hint.textContent = `Каталог бэкапов недоступен (${data.dir}). Проверьте монтирование.`;
+        list.replaceChildren();
+        return;
+      }
+      hint.textContent = `Каталог: ${data.dir} · копий: ${data.items.length}`;
+      list.replaceChildren();
+      if (data.items.length === 0) {
+        list.append(el("p", { className: "field__hint" }, ["Пока нет ни одной копии"]));
+        return;
+      }
+      for (const b of data.items) {
+        const row = el("div", { className: "key-row" });
+        const when = new Date(b.created_at).toLocaleString("ru-RU");
+        row.append(
+          el("div", { className: "key-row__meta" }, [
+            el("span", { className: "key-row__name" }, [b.filename]),
+            el("span", { className: "key-row__sub" }, [`${when} · ${fmtBytes(b.size)}`]),
+          ]),
+        );
+        const restoreBtn = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["Восстановить"]);
+        restoreBtn.addEventListener("click", () => void doRestore(b, restoreBtn));
+        row.append(el("div", { className: "btn-row" }, [restoreBtn]));
+        list.append(row);
+      }
+    } catch (e) {
+      hint.textContent = e instanceof Error ? e.message : String(e);
+    }
+  };
+
+  const doRestore = async (b: BackupItem, btn: HTMLButtonElement) => {
+    if (
+      !window.confirm(
+        `Восстановить БД из «${b.filename}»?\n\nТекущие данные будут перезаписаны этим снимком. ` +
+          "Действие необратимо.",
+      )
+    )
+      return;
+    btn.disabled = true;
+    try {
+      await fetchJson("/backups/restore", {
+        method: "POST",
+        body: JSON.stringify({ filename: b.filename }),
+      });
+      showToast("БД восстановлена из копии");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  createBtn.addEventListener("click", async () => {
+    createBtn.disabled = true;
+    try {
+      const res = await fetchJson<{ filename: string; size: number }>("/backups", { method: "POST" });
+      showToast(`Копия создана: ${res.filename}`);
+      await reload();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      createBtn.disabled = false;
+    }
+  });
+
+  void reload();
+  return panel;
+}
+
 function showNewKeyDialog(key: string): void {
   const overlay = el("div", { className: "modal-overlay" });
   const dialog = el("div", { className: "modal-dialog", role: "dialog", "aria-modal": "true" });
@@ -2491,7 +2579,7 @@ function mountSettingsShell(root: HTMLElement): void {
   const account = mountAccountPanel();
 
   root.append(back, header, statsHost, health, account);
-  if (isAdmin()) root.append(mountApiKeysPanel());
+  if (isAdmin()) root.append(mountApiKeysPanel(), mountBackupsPanel());
   root.append(themePanel);
   if (canWrite()) {
     const limits = mountGlobalLimitsPanel();

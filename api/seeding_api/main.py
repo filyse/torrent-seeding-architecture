@@ -16,6 +16,7 @@ from seeding_api.auth import require_auth
 from seeding_api.engine_pool import EnginePool
 from seeding_api.restore import maybe_restore_torrents_to_engine
 from seeding_api.routers import auth as auth_router
+from seeding_api.routers import backups as backups_router
 from seeding_api.routers import engines as engines_router
 from seeding_api.routers import health as health_router
 from seeding_api.routers import jobs as jobs_router
@@ -141,6 +142,10 @@ app.include_router(
     prefix="/api/v1",
 )
 app.include_router(
+    backups_router.router,
+    prefix="/api/v1",
+)
+app.include_router(
     session_router.router,
     prefix="/api/v1",
     dependencies=[Depends(require_auth)],
@@ -149,6 +154,10 @@ app.include_router(
     torrents_router.router,
     prefix="/api/v1/torrents",
     dependencies=[Depends(require_auth)],
+)
+app.include_router(
+    engines_router.public_router,
+    prefix="/api/v1/engines",
 )
 app.include_router(
     engines_router.router,
