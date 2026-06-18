@@ -205,6 +205,7 @@ body {
   width: 100%;
   padding: 0.5rem 0.65rem;
   font: inherit;
+  line-height: 1.2;
   color: var(--text);
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -1889,6 +1890,8 @@ body {
   border-radius: var(--radius);
   background: var(--surface-2);
   color: var(--text);
+  font: inherit;
+  line-height: 1.2;
 }
 /* Селект в инлайн-форме должен совпадать по высоте/ширине с textbox-полями. */
 .keys-form .select {
