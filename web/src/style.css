@@ -312,6 +312,7 @@ body {
   padding: 0.45rem 0.85rem;
   font: inherit;
   font-size: 0.875rem;
+  line-height: 1;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--surface-2);
