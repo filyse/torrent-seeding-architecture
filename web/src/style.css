@@ -1374,8 +1374,61 @@ body {
 .login-input--mono {
   font-family: ui-monospace, "Cascadia Code", monospace;
 }
+
+/* ---- Окно входа ---- */
+.login-dialog {
+  max-width: 22rem;
+  padding: 1.5rem;
+}
+.login-head {
+  margin-bottom: 1.25rem;
+}
+.login-dialog .modal-title {
+  margin: 0 0 0.3rem;
+  font-size: 1.2rem;
+}
+.login-sub {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.login-form .field {
+  margin-bottom: 0;
+}
 .login-error {
+  margin: 0;
   color: var(--danger);
+  font-size: 0.85rem;
+}
+.login-submit {
+  width: 100%;
+  justify-content: center;
+  margin-top: 0.15rem;
+}
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 1.15rem 0 0.9rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.login-divider::before,
+.login-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.login-alt {
+  width: 100%;
+  justify-content: center;
 }
 .keys-form {
   display: flex;

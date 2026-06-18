@@ -2311,8 +2311,8 @@ function showLoginDialog(): void {
     className: "login-input login-input--mono",
     value: getApiKey(),
   }) as HTMLInputElement;
-  const keyWrap = el("div", { hidden: "" }, [field("API-ключ", keyInput)]);
-  const toggleKey = el("button", { type: "button", className: "btn btn--link btn--sm" }, [
+  const keyWrap = el("div", { className: "login-keywrap", hidden: "" }, [field("API-ключ", keyInput)]);
+  const toggleKey = el("button", { type: "button", className: "btn btn--ghost login-alt" }, [
     "Войти по API-ключу",
   ]);
   toggleKey.addEventListener("click", () => {
@@ -2320,10 +2320,11 @@ function showLoginDialog(): void {
     if (show) keyWrap.removeAttribute("hidden");
     else keyWrap.setAttribute("hidden", "");
     toggleKey.textContent = show ? "Скрыть API-ключ" : "Войти по API-ключу";
+    if (show) keyInput.focus();
   });
 
-  const errLine = el("p", { className: "modal-text login-error", hidden: "" });
-  const submit = el("button", { type: "button", className: "btn btn--primary" }, ["Войти"]);
+  const errLine = el("p", { className: "login-error", hidden: "" });
+  const submit = el("button", { type: "button", className: "btn btn--primary login-submit" }, ["Войти"]);
 
   const finish = async () => {
     await loadMe();
@@ -2364,15 +2365,22 @@ function showLoginDialog(): void {
     });
   }
 
+  dialog.classList.add("login-dialog");
+  const divider = el("div", { className: "login-divider" }, ["или"]);
   dialog.append(
-    el("h2", { className: "modal-title" }, ["Вход"]),
-    el("p", { className: "modal-text" }, ["Войдите по имени пользователя и паролю."]),
-    field("Пользователь", userInput),
-    field("Пароль", passInput),
-    keyWrap,
-    el("div", { className: "btn-row" }, [toggleKey]),
-    errLine,
-    el("div", { className: "modal-actions" }, [submit]),
+    el("div", { className: "login-head" }, [
+      el("h2", { className: "modal-title" }, ["Вход"]),
+      el("p", { className: "login-sub" }, ["Войдите по имени пользователя и паролю."]),
+    ]),
+    el("div", { className: "login-form" }, [
+      field("Пользователь", userInput),
+      field("Пароль", passInput),
+      keyWrap,
+      errLine,
+      submit,
+    ]),
+    divider,
+    toggleKey,
   );
   overlay.append(dialog);
   document.body.append(overlay);
