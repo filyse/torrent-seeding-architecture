@@ -85,8 +85,10 @@ def _key_out(row) -> dict:
 
 
 @router.post("/auth/login")
-async def login(body: LoginIn, session: DbSession):
+async def login(body: LoginIn, session: DbSession, request: Request):
     """Вход по логину/паролю. Возвращает токен сессии (хранить как обычный ключ)."""
+    # Для аудита: фиксируем, под каким именем пытались войти (даже при неуспехе).
+    request.state.audit_actor = body.username.strip()
     user = await UserRepository(session).get_by_username(body.username.strip())
     # Постоянная проверка пароля даже при отсутствии пользователя — против тайминг-атак.
     stored = user.password_hash if (user and user.enabled) else (

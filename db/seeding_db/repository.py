@@ -1,10 +1,12 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seeding_db.models import (
     ApiKeyRecord,
+    AuditRecord,
     EngineRecord,
     SessionRecord,
     TorrentRecord,
@@ -362,6 +364,55 @@ class SessionRepository:
         if row is not None:
             row.last_used_at = datetime.now(timezone.utc)
             await self._session.flush()
+
+
+class AuditRepository:
+    """Аудит-лог действий (Фаза 5)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(
+        self,
+        *,
+        actor: str,
+        role: str,
+        method: str,
+        path: str,
+        status: int,
+        ip: str,
+        summary: str,
+    ) -> None:
+        self._session.add(
+            AuditRecord(
+                actor=actor[:64],
+                role=role[:16],
+                method=method[:8],
+                path=path,
+                status=status,
+                ip=ip[:64],
+                summary=summary,
+            )
+        )
+        await self._session.flush()
+
+    async def list_recent(
+        self, *, limit: int = 200, actor: str | None = None
+    ) -> list[AuditRecord]:
+        stmt = select(AuditRecord).order_by(AuditRecord.id.desc())
+        if actor:
+            stmt = stmt.where(AuditRecord.actor == actor)
+        stmt = stmt.limit(max(1, min(limit, 1000)))
+        result = await self._session.execute(stmt)
+        return list(result.scalars())
+
+    async def trim_older_than(self, days: int) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+        result = await self._session.execute(
+            sa_delete(AuditRecord).where(AuditRecord.created_at < cutoff)
+        )
+        await self._session.flush()
+        return int(result.rowcount or 0)
 
 
 class EngineRepository:

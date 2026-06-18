@@ -82,6 +82,27 @@ class SessionRecord(Base):
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class AuditRecord(Base):
+    """Аудит-лог действий (Фаза 5): кто и какое изменяющее действие выполнил.
+
+    Заполняется middleware'ом для всех мутаций (POST/PUT/PATCH/DELETE) и для входа.
+    Хранит актора, метод/путь, статус ответа, IP и человекочитаемую сводку."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    actor: Mapped[str] = mapped_column(String(64), default="", index=True)
+    role: Mapped[str] = mapped_column(String(16), default="")
+    method: Mapped[str] = mapped_column(String(8), default="")
+    path: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[int] = mapped_column(Integer, default=0)
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+
+
 class EngineRecord(Base):
     """Динамический реестр движков (Фаза 4.5): движок может зарегистрироваться сам по
     API-ключу, без правки статического `engines.json`. Статический конфиг остаётся базой —

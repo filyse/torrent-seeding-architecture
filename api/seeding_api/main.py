@@ -11,11 +11,12 @@ from seeding_db.session import create_engine as make_async_engine
 from seeding_db.session import create_session_factory, init_models
 from sqlalchemy import text
 
-from seeding_api import maintenance
+from seeding_api import audit, maintenance
 from seeding_api.arq_util import redis_settings_from_url
 from seeding_api.auth import require_auth
 from seeding_api.engine_pool import EnginePool
 from seeding_api.restore import maybe_restore_torrents_to_engine
+from seeding_api.routers import audit as audit_router
 from seeding_api.routers import auth as auth_router
 from seeding_api.routers import backups as backups_router
 from seeding_api.routers import engines as engines_router
@@ -109,6 +110,16 @@ async def maintenance_gate(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def audit_log_mw(request: Request, call_next):
+    response = await call_next(request)
+    try:
+        await audit.record(request, response.status_code)
+    except Exception:
+        pass
+    return response
+
+
 @app.exception_handler(HTTPException)
 async def http_error_handler(_request: Request, exc: HTTPException):
     return JSONResponse(
@@ -161,6 +172,10 @@ app.include_router(
 )
 app.include_router(
     backups_router.router,
+    prefix="/api/v1",
+)
+app.include_router(
+    audit_router.router,
     prefix="/api/v1",
 )
 app.include_router(

@@ -2764,6 +2764,69 @@ function mountBackupsPanel(): HTMLElement {
   return panel;
 }
 
+type AuditItem = {
+  id: number;
+  created_at: string;
+  actor: string;
+  role: string;
+  method: string;
+  path: string;
+  status: number;
+  ip: string;
+  summary: string;
+};
+
+function auditStatusClass(status: number): string {
+  if (status >= 400) return "audit-status--err";
+  if (status >= 300) return "audit-status--warn";
+  return "audit-status--ok";
+}
+
+function mountAuditPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  const head = el("div", { className: "panel__head panel__head--with-action" }, ["Журнал действий"]);
+  const refreshBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Обновить"]);
+  head.append(refreshBtn);
+  panel.append(head);
+
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, ["Загрузка…"]);
+  const list = el("div", { className: "audit-list" });
+  body.append(hint, list);
+  panel.append(body);
+
+  const reload = async () => {
+    try {
+      const rows = await fetchJson<AuditItem[]>("/audit?limit=200");
+      hint.textContent = `Последние действия · записей: ${rows.length}`;
+      list.replaceChildren();
+      if (rows.length === 0) {
+        list.append(el("p", { className: "field__hint" }, ["Журнал пуст"]));
+        return;
+      }
+      for (const r of rows) {
+        const when = new Date(r.created_at).toLocaleString("ru-RU");
+        const row = el("div", { className: "audit-row" }, [
+          el("span", { className: `audit-status ${auditStatusClass(r.status)}` }, [String(r.status)]),
+          el("div", { className: "audit-row__meta" }, [
+            el("span", { className: "audit-row__summary" }, [r.summary]),
+            el("span", { className: "audit-row__sub" }, [
+              `${r.actor || "—"}${r.role ? ` (${r.role})` : ""} · ${when}${r.ip ? ` · ${r.ip}` : ""}`,
+            ]),
+          ]),
+        ]);
+        list.append(row);
+      }
+    } catch (e) {
+      hint.textContent = e instanceof Error ? e.message : String(e);
+    }
+  };
+
+  refreshBtn.addEventListener("click", () => void reload());
+  void reload();
+  return panel;
+}
+
 function showNewKeyDialog(key: string): void {
   const overlay = el("div", { className: "modal-overlay" });
   const dialog = el("div", { className: "modal-dialog", role: "dialog", "aria-modal": "true" });
@@ -2826,7 +2889,8 @@ function mountSettingsShell(root: HTMLElement): void {
   const account = mountAccountPanel();
 
   root.append(back, header, statsHost, health, account);
-  if (isAdmin()) root.append(mountUsersPanel(), mountApiKeysPanel(), mountBackupsPanel());
+  if (isAdmin())
+    root.append(mountUsersPanel(), mountApiKeysPanel(), mountBackupsPanel(), mountAuditPanel());
   root.append(themePanel);
   if (canWrite()) {
     const limits = mountGlobalLimitsPanel();

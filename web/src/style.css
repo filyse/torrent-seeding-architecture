@@ -1375,6 +1375,60 @@ body {
   font-family: ui-monospace, "Cascadia Code", monospace;
 }
 
+/* ---- Журнал действий (аудит) ---- */
+.audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 24rem;
+  overflow: auto;
+}
+.audit-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.audit-row__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.audit-row__summary {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.audit-row__sub {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.audit-status {
+  flex-shrink: 0;
+  min-width: 2.4rem;
+  text-align: center;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-family: ui-monospace, "Cascadia Code", monospace;
+}
+.audit-status--ok {
+  background: color-mix(in srgb, var(--ok, #16a34a) 18%, transparent);
+  color: var(--ok, #16a34a);
+}
+.audit-status--warn {
+  background: color-mix(in srgb, #d97706 18%, transparent);
+  color: #d97706;
+}
+.audit-status--err {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+
 /* ---- Окно входа ---- */
 .login-dialog {
   max-width: 22rem;
