@@ -379,6 +379,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
 }
 
 const ICON_PATHS: Record<string, string> = {
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   refresh:
     '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   settings:
@@ -2209,7 +2210,7 @@ function mountListShell(root: HTMLElement): void {
     }
   });
 
-  const addTorrentBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, ["+ Добавить торрент"]);
+  const addTorrentBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, [icon("plus"), "Добавить торрент"]);
   addTorrentBtn.addEventListener("click", () => showAddTorrentDialog("/data/b1", onAdded));
 
   const settingsLink = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, [icon("settings"), "Настройки"]);
