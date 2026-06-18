@@ -2308,7 +2308,7 @@ function showLoginDialog(): void {
   const keyInput = el("input", {
     type: "password",
     placeholder: "sk_…",
-    className: "login-input",
+    className: "login-input login-input--mono",
     value: getApiKey(),
   }) as HTMLInputElement;
   const keyWrap = el("div", { hidden: "" }, [field("API-ключ", keyInput)]);

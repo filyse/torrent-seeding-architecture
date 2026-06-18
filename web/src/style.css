@@ -200,6 +200,7 @@ body {
 .field input[type="text"],
 .field input[type="url"],
 .field input[type="search"],
+.field input[type="password"],
 .field input[type="file"],
 .field select.select {
   width: 100%;
@@ -1368,6 +1369,9 @@ body {
 }
 .login-input {
   width: 100%;
+}
+/* API-ключ — моноширинным (длинная случайная строка), логин/пароль — обычным шрифтом. */
+.login-input--mono {
   font-family: ui-monospace, "Cascadia Code", monospace;
 }
 .login-error {
