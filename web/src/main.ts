@@ -2429,6 +2429,7 @@ async function loadDetail(
         "aria-label": "Переименовать",
       }, [icon("edit")]);
       editBtn.addEventListener("click", () => {
+        if (titleWrap.querySelector(".detail-title-pop")) return;
         const input = el("input", {
           type: "text",
           className: "detail-title-input",
@@ -2436,10 +2437,15 @@ async function loadDetail(
         }) as HTMLInputElement;
         const save = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Сохранить"]);
         const cancel = el("button", { type: "button", className: "btn btn--sm" }, ["Отмена"]);
-        const editor = el("div", { className: "detail-title-editor" }, [input, save, cancel]);
-        titleWrap.replaceChildren(editor);
+        const editor = el("div", { className: "detail-title-editor detail-title-pop" }, [input, save, cancel]);
+        editBtn.disabled = true;
+        titleWrap.append(editor);
         input.focus();
         input.select();
+        const abort = () => {
+          editor.remove();
+          editBtn.disabled = false;
+        };
         const commit = async () => {
           const v = input.value.trim();
           if (!v) {
@@ -2460,7 +2466,6 @@ async function loadDetail(
             cancel.disabled = false;
           }
         };
-        const abort = () => titleWrap.replaceChildren(titleEl, editBtn);
         save.addEventListener("click", () => void commit());
         cancel.addEventListener("click", abort);
         input.addEventListener("keydown", (ev) => {

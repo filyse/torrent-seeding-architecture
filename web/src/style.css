@@ -682,11 +682,28 @@ body {
 }
 
 .detail-title-wrap {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Редактор названия всплывает под заголовком, не сдвигая строку. */
+.detail-title-pop {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 5;
+  flex-wrap: nowrap;
+  min-width: 22rem;
+  max-width: min(32rem, 90vw);
+  padding: 0.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
 
 /* Карандаш появляется приглушённым, ярчает при наведении на заголовок. */
