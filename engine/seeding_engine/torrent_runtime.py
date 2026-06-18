@@ -18,7 +18,8 @@ from seeding_engine.fastresume_io import (
     ensure_engine_dirs,
     fastresume_dir,
     fastresume_path,
-    save_fastresume,
+    resume_alert_mask,
+    save_resume_data_blocking,
     session_state_path,
     try_read_resume_params,
 )
@@ -206,6 +207,11 @@ def _apply_libtorrent_session_settings(lt, ses) -> None:
         "active_limit": _env_int("LT_ACTIVE_LIMIT", -1),
         "dont_count_slow_torrents": _env_bool("LT_DONT_COUNT_SLOW", True),
     }
+    # Включаем storage/error-категории алертов — без них не приходит
+    # save_resume_data_alert (libtorrent 2.0), и счётчики не сохраняются.
+    mask = resume_alert_mask(lt)
+    if mask is not None:
+        settings["alert_mask"] = mask
     if listen_ifs:
         settings["listen_interfaces"] = listen_ifs
     dl = os.getenv("LT_DOWNLOAD_RATE_LIMIT_BPS", "").strip()
@@ -537,6 +543,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         # Периодическое сохранение fastresume/session.state — устойчивость к падению/kill -9.
         self._save_interval = _env_int("SEEDING_FASTRESUME_SAVE_INTERVAL", 300)
         self._save_task: asyncio.Task | None = None
+        # Сериализует доступ к очереди алертов сессии (save_resume_data — async).
+        self._resume_lock = asyncio.Lock()
         # Глобальная политика поиска пиров (переопределяется оркестратором при регистрации).
         self._net = {
             "dht": _env_bool("LT_ENABLE_DHT", True),
@@ -580,6 +588,19 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             self._save_task = asyncio.create_task(self._periodic_save_loop())
             log.info("periodic fastresume save every %ss", max(self._save_interval, 30))
 
+    async def _persist_resume(self, handles_map: dict, *, ses=None) -> int:
+        """Сохранить fastresume для раздач через async-механизм libtorrent 2.0.
+
+        Сериализуем доступ к очереди алертов сессии — иначе параллельные сохранения
+        будут «воровать» друг у друга save_resume_data_alert."""
+        ses = ses if ses is not None else self._ses
+        if ses is None or not handles_map:
+            return 0
+        async with self._resume_lock:
+            return await asyncio.to_thread(
+                save_resume_data_blocking, self._lt, ses, handles_map
+            )
+
     async def _save_all_to_disk(self) -> int:
         """Сохранить fastresume всех раздач + session.state. Reused периодикой и stop()."""
         lt = self._lt
@@ -588,13 +609,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             handles = dict(self._handles)
         if ses is None:
             return 0
-        saved = 0
-        for db_id, h in handles.items():
-            try:
-                await asyncio.to_thread(save_fastresume, lt, h, db_id)
-                saved += 1
-            except Exception as exc:  # noqa: BLE001
-                log.warning("save_fastresume db_id=%s: %s", db_id, exc)
+        saved = await self._persist_resume(handles, ses=ses)
         if self._state_path:
             state_path = self._state_path
 
@@ -644,8 +659,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             if ses is None:
                 return
 
-        for db_id, h in handles.items():
-            await asyncio.to_thread(save_fastresume, lt, h, db_id)
+        await self._persist_resume(handles, ses=ses)
 
         def _shutdown(ses_inner=ses):
             if state_path:
@@ -740,7 +754,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         async with self._lock:
             self._handles[db_id] = h
             self._meta[db_id] = (magnet_uri, save_path)
-        await asyncio.to_thread(save_fastresume, lt, h, db_id)
+        await self._persist_resume({db_id: h})
         return await self._snapshot(db_id)
 
     async def _add_from_fastresume(
@@ -1423,7 +1437,10 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if not ih_hex or ih_hex == zero:
             ih_hex = None
 
-        uploaded = _total_bytes_from_status(st, "total_upload", "all_time_upload")
+        # all_time_upload — отдано за всё время (сохраняется в fastresume и переживает
+        # рестарт движка); total_upload — только текущая сессия. Для «отдано всего»
+        # нужен именно all_time_upload, иначе после рестарта счётчик обнуляется.
+        uploaded = _total_bytes_from_status(st, "all_time_upload", "total_upload")
         downloaded = _total_bytes_from_status(st, "all_time_download", "total_download")
         size = _total_bytes_from_status(st, "total_wanted", "total")
         done = _total_bytes_from_status(st, "total_wanted_done", "total_done")
@@ -1497,7 +1514,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if h is None:
             return None
         await asyncio.to_thread(self._manual_pause, h)
-        await asyncio.to_thread(save_fastresume, lt, h, db_id)
+        await self._persist_resume({db_id: h})
         return await self._snapshot(db_id)
 
     async def resume(self, db_id: int) -> RuntimeHandle | None:
@@ -1539,6 +1556,11 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 "upload_rate": int(getattr(st, "upload_payload_rate", 0) or 0),
                 "current_tracker": str(getattr(st, "current_tracker", "") or ""),
                 "message": str(getattr(st, "message", "") or ""),
+                "all_time_upload": int(getattr(st, "all_time_upload", 0) or 0),
+                "total_upload": int(getattr(st, "total_upload", 0) or 0),
+                "total_payload_upload": int(getattr(st, "total_payload_upload", 0) or 0),
+                "active_time": int(getattr(st, "active_time", 0) or 0),
+                "seeding_time": int(getattr(st, "seeding_time", 0) or 0),
             }
             errc = getattr(st, "errc", None)
             if errc is not None:
@@ -1654,7 +1676,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
 
         ok = await asyncio.to_thread(_apply)
         if ok:
-            await asyncio.to_thread(save_fastresume, lt, h, db_id)
+            await self._persist_resume({db_id: h})
         return ok
 
     async def list_trackers(self, db_id: int) -> list[dict[str, object]]:
@@ -1735,7 +1757,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 h.set_upload_limit(max(0, int(upload_limit)))
 
         await asyncio.to_thread(_apply)
-        await asyncio.to_thread(save_fastresume, lt, h, db_id)
+        await self._persist_resume({db_id: h})
         return await self._snapshot(db_id)
 
     async def set_private(
@@ -1770,7 +1792,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     h.force_reannounce()
 
         await asyncio.to_thread(_apply)
-        await asyncio.to_thread(save_fastresume, lt, h, db_id)
+        await self._persist_resume({db_id: h})
         return await self._snapshot(db_id)
 
     async def net_settings(self) -> dict[str, bool]:
@@ -1882,7 +1904,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             for h in handles_inner.values():
                 try:
                     st = h.status() if callable(getattr(h, "status", None)) else h.status
-                    total_up += int(getattr(st, "total_upload", 0) or getattr(st, "all_time_upload", 0) or 0)
+                    total_up += int(getattr(st, "all_time_upload", 0) or getattr(st, "total_upload", 0) or 0)
                     total_dl += int(getattr(st, "all_time_download", 0) or getattr(st, "total_download", 0) or 0)
                     if not getattr(st, "paused", False):
                         active += 1

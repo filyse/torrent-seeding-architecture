@@ -66,6 +66,10 @@ async def collect_system_stats() -> dict:
         "mem_avail": "node_memory_MemAvailable_bytes",
         # В LXC node_exporter недостоверно отдаёт MemAvailable (lxcfs), поэтому реальное
         # потребление берём из memory-cgroup корня (cAdvisor) — это и есть память всего CT.
+        # rss (анонимная память процессов) — реальная нагрузка приложений. working_set и
+        # usage включают page cache от torrent-I/O (десятки сотен МБ, вытесняемые ядром),
+        # из-за чего RAM в LXC выглядел завышенным (~72%). Берём rss, иначе фоллбэк.
+        "cg_mem_rss": 'container_memory_rss{id="/"}',
         "cg_mem_used": 'container_memory_working_set_bytes{id="/"}',
         "cg_mem_usage": 'container_memory_usage_bytes{id="/"}',
         "cg_mem_limit": 'container_spec_memory_limit_bytes{id="/"}',
@@ -104,7 +108,11 @@ async def collect_system_stats() -> dict:
     node_total = _scalar(res["mem_total"])
     node_avail = _scalar(res["mem_avail"])
     machine_mem = _scalar(res["machine_mem"])
-    cg_used = _scalar(res["cg_mem_used"]) or _scalar(res["cg_mem_usage"])
+    cg_used = (
+        _scalar(res["cg_mem_rss"])
+        or _scalar(res["cg_mem_used"])
+        or _scalar(res["cg_mem_usage"])
+    )
     cg_limit = _scalar(res["cg_mem_limit"])
     # Лимит cgroup валиден, если он положительный и не «безлимит» (≈ вся физ. память хоста).
     limit_ok = (
