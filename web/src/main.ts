@@ -52,6 +52,8 @@ type EngineOut = {
   disk_total?: number | null;
   disk_free?: number | null;
   online?: boolean;
+  download_limit?: number | null;
+  upload_limit?: number | null;
 };
 
 type RuntimeOut = {
@@ -554,6 +556,89 @@ function mountGlobalLimitsPanel(): HTMLElement {
     ]),
   );
   panel.append(el("summary", {}, ["Глобальные лимиты"]), body);
+  return panel;
+}
+
+function mountEngineLimitsPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  const head = el("div", { className: "panel__head panel__head--with-action" }, ["Лимиты движков"]);
+  const refreshBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Обновить"]);
+  head.append(refreshBtn);
+  panel.append(head);
+
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, [
+    "Постоянные лимиты сессии каждого движка (КБ/с, 0 = без ограничения). Сохраняются и переживают перезапуск движка.",
+  ]);
+  const list = el("div", { className: "keys-list" });
+  body.append(hint, list);
+  panel.append(body);
+
+  const toKb = (v?: number | null) => (v && v > 0 ? String(Math.round(v / 1024)) : "");
+
+  const reload = async () => {
+    try {
+      const engines = await fetchJson<EngineOut[]>("/engines");
+      list.replaceChildren();
+      if (engines.length === 0) {
+        list.append(el("p", { className: "field__hint" }, ["Движков нет"]));
+        return;
+      }
+      for (const e of engines) {
+        const row = el("div", { className: `key-row${e.online === false ? " key-row--off" : ""}` });
+        const free = e.disk_free != null ? `своб. ${fmtBytes(e.disk_free)}` : "место неизв.";
+        const off = e.online === false ? " · офлайн" : "";
+        const meta = el("div", { className: "key-row__meta" }, [
+          el("span", { className: "key-row__name" }, [e.id]),
+          el("span", { className: "key-row__sub" }, [`${free}${off}`]),
+        ]);
+        const dl = el("input", {
+          type: "number",
+          min: "0",
+          placeholder: "∞",
+          value: toKb(e.download_limit),
+        }) as HTMLInputElement;
+        const ul = el("input", {
+          type: "number",
+          min: "0",
+          placeholder: "∞",
+          value: toKb(e.upload_limit),
+        }) as HTMLInputElement;
+        const apply = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["ОК"]);
+        const parse = (s: string) => {
+          const n = Number(s.trim());
+          return Number.isFinite(n) && n > 0 ? Math.round(n * 1024) : 0;
+        };
+        apply.addEventListener("click", async () => {
+          apply.disabled = true;
+          try {
+            await fetchJson(`/engines/${encodeURIComponent(e.id)}/limits`, {
+              method: "POST",
+              body: JSON.stringify({ download_limit: parse(dl.value), upload_limit: parse(ul.value) }),
+            });
+            showToast(`Лимиты движка ${e.id} применены`);
+            await reload();
+          } catch (err) {
+            showToast(err instanceof Error ? err.message : String(err), true);
+          } finally {
+            apply.disabled = false;
+          }
+        });
+        const controls = el("div", { className: "engine-limits__controls" }, [
+          el("label", { className: "limits-form__field" }, ["↓ КБ/с", dl]),
+          el("label", { className: "limits-form__field" }, ["↑ КБ/с", ul]),
+          apply,
+        ]);
+        row.append(meta, controls);
+        list.append(row);
+      }
+    } catch (e) {
+      list.replaceChildren(el("p", { className: "field__hint" }, [e instanceof Error ? e.message : String(e)]));
+    }
+  };
+
+  refreshBtn.addEventListener("click", () => void reload());
+  void reload();
   return panel;
 }
 
@@ -2895,6 +2980,7 @@ function mountSettingsShell(root: HTMLElement): void {
   const account = mountAccountPanel();
 
   root.append(back, header, statsHost, health, account);
+  if (canWrite()) root.append(mountEngineLimitsPanel());
   if (isAdmin())
     root.append(mountUsersPanel(), mountApiKeysPanel(), mountBackupsPanel(), mountAuditPanel());
   root.append(themePanel);

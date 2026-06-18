@@ -1375,6 +1375,20 @@ body {
   font-family: ui-monospace, "Cascadia Code", monospace;
 }
 
+/* ---- Лимиты движков ---- */
+.engine-limits__controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.engine-limits__controls .limits-form__field {
+  width: 5.5rem;
+}
+.engine-limits__controls input {
+  width: 100%;
+}
+
 /* ---- Журнал действий (аудит) ---- */
 .audit-list {
   display: flex;

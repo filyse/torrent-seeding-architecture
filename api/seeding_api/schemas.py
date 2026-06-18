@@ -32,6 +32,13 @@ class EngineOut(BaseModel):
     disk_total: int | None = None
     disk_free: int | None = None
     online: bool = True
+    download_limit: int | None = None
+    upload_limit: int | None = None
+
+
+class EngineLimitsIn(BaseModel):
+    download_limit: int | None = Field(default=None, ge=0)
+    upload_limit: int | None = Field(default=None, ge=0)
 
 
 class EngineRegistryItem(BaseModel):

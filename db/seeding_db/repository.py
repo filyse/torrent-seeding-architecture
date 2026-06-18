@@ -463,6 +463,18 @@ class EngineRepository:
         await self._session.flush()
         return row
 
+    async def set_limits(
+        self, engine_id: str, download_limit: int | None, upload_limit: int | None
+    ) -> EngineRecord | None:
+        """Сохранить постоянные лимиты движка. Значение <= 0 трактуем как «без лимита» (NULL)."""
+        row = await self._session.get(EngineRecord, engine_id)
+        if row is None:
+            return None
+        row.download_limit = download_limit if (download_limit and download_limit > 0) else None
+        row.upload_limit = upload_limit if (upload_limit and upload_limit > 0) else None
+        await self._session.flush()
+        return row
+
     async def touch(self, engine_id: str) -> None:
         row = await self._session.get(EngineRecord, engine_id)
         if row is not None:

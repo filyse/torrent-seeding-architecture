@@ -116,5 +116,9 @@ class EngineRecord(Base):
     media_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     listen_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Постоянные лимиты сессии движка (байт/с); NULL = без ограничения. Переживают
+    # перезапуск движка — переприменяются при саморегистрации.
+    download_limit: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    upload_limit: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
