@@ -18,6 +18,7 @@ cd "$(dirname "$0")/.."
 BASE="docker-compose.multi-engine.yml"
 MEDIA="docker-compose.multi-engine.media.yml"
 TLS="docker-compose.multi-engine.tls.yml"
+OBS="docker-compose.observability.yml"
 
 for f in "$BASE" "$MEDIA"; do
   if [ ! -f "$f" ]; then
@@ -31,6 +32,11 @@ FILES=(-f "$BASE" -f "$MEDIA")
 # явно через DEPLOY_TLS=0.
 if [ -f "$TLS" ] && [ "${DEPLOY_TLS:-1}" != "0" ]; then
   FILES+=(-f "$TLS")
+fi
+# Стек наблюдаемости (Prometheus/Grafana/экспортёры) — часть канонического деплоя, иначе
+# `up -d --remove-orphans` снёс бы его контейнеры как «чужие». Отключить: DEPLOY_OBS=0.
+if [ -f "$OBS" ] && [ "${DEPLOY_OBS:-1}" != "0" ]; then
+  FILES+=(-f "$OBS")
 fi
 
 if [ "$#" -eq 0 ]; then
