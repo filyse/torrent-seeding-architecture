@@ -681,6 +681,53 @@ body {
   word-break: break-word;
 }
 
+.detail-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Карандаш появляется приглушённым, ярчает при наведении на заголовок. */
+.detail-title-edit {
+  color: var(--muted);
+  opacity: 0.6;
+  padding: 0.25rem;
+  flex: 0 0 auto;
+}
+
+.detail-title-wrap:hover .detail-title-edit {
+  opacity: 1;
+}
+
+.detail-title-editor {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.detail-title-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  font-size: 1.1rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.detail-title-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .detail-sub {
   color: var(--muted);
   font-size: 0.85rem;

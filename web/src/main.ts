@@ -405,6 +405,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
 }
 
 const ICON_PATHS: Record<string, string> = {
+  edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
   refresh:
     '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   settings:
@@ -2418,9 +2419,61 @@ async function loadDetail(
     let title = data.display_name || `Торрент #${data.id}`;
     if (title.toLowerCase().endsWith(".torrent")) title = title.slice(0, -".torrent".length);
 
+    const titleEl = el("h1", { className: "detail-title" }, [title]);
+    const titleWrap = el("div", { className: "detail-title-wrap" }, [titleEl]);
+    if (canWrite()) {
+      const editBtn = el("button", {
+        type: "button",
+        className: "btn btn--ghost btn--sm detail-title-edit",
+        title: "Переименовать",
+        "aria-label": "Переименовать",
+      }, [icon("edit")]);
+      editBtn.addEventListener("click", () => {
+        const input = el("input", {
+          type: "text",
+          className: "detail-title-input",
+          value: data.display_name || "",
+        }) as HTMLInputElement;
+        const save = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Сохранить"]);
+        const cancel = el("button", { type: "button", className: "btn btn--sm" }, ["Отмена"]);
+        const editor = el("div", { className: "detail-title-editor" }, [input, save, cancel]);
+        titleWrap.replaceChildren(editor);
+        input.focus();
+        input.select();
+        const commit = async () => {
+          const v = input.value.trim();
+          if (!v) {
+            showToast("Название не может быть пустым", true);
+            return;
+          }
+          save.disabled = true;
+          cancel.disabled = true;
+          try {
+            await fetchJson(`/torrents/${id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ display_name: v }),
+            });
+            await backRefresh();
+          } catch (err) {
+            showToast(err instanceof Error ? err.message : String(err), true);
+            save.disabled = false;
+            cancel.disabled = false;
+          }
+        };
+        const abort = () => titleWrap.replaceChildren(titleEl, editBtn);
+        save.addEventListener("click", () => void commit());
+        cancel.addEventListener("click", abort);
+        input.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") void commit();
+          else if (ev.key === "Escape") abort();
+        });
+      });
+      titleWrap.append(editBtn);
+    }
+
     const head = el("div", { className: "detail-head" }, [
       el("span", { className: badgeClass(st) }, [displayStatusLabel(data)]),
-      el("h1", {}, [title]),
+      titleWrap,
     ]);
 
     // Статичные факты — компактной подстрокой, без отдельных боксов.
@@ -2510,35 +2563,6 @@ async function loadDetail(
       delBtn,
     );
 
-    // Название (display_name) — редактируемое прямо в карточке управления.
-    const nameInput = el("input", {
-      type: "text",
-      placeholder: "Название раздачи",
-      value: data.display_name || "",
-    }) as HTMLInputElement;
-    const nameSave = el("button", { type: "button", className: "btn btn--sm" }, ["Сохранить"]);
-    nameSave.addEventListener("click", async () => {
-      const v = nameInput.value.trim();
-      if (!v) {
-        showToast("Название не может быть пустым", true);
-        return;
-      }
-      nameSave.disabled = true;
-      try {
-        await fetchJson(`/torrents/${id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ display_name: v }),
-        });
-        showToast("Название сохранено");
-        await backRefresh();
-      } catch (e) {
-        showToast(e instanceof Error ? e.message : String(e), true);
-      } finally {
-        nameSave.disabled = false;
-      }
-    });
-    const nameRow = el("div", { className: "manage-card__row" }, [nameInput, nameSave]);
-
     // Метка — редактируемая прямо в карточке управления.
     const labelInput = el("input", {
       type: "text",
@@ -2570,7 +2594,6 @@ async function loadDetail(
       ]);
 
     const manage = el("div", { className: "detail-manage" }, [
-      manageCard("Название", nameRow),
       manageCard("Метка", labelRow),
       manageCard("Лимиты скорости", buildLimitsForm(data, () => void backRefresh())),
       manageCard("Приватный режим", buildPrivateRow(data, () => void backRefresh())),
