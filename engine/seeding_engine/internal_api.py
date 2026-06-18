@@ -130,6 +130,12 @@ class SessionLimitsIn(BaseModel):
     upload_limit: int | None = None
 
 
+class ImportDirectIn(BaseModel):
+    source_url: str = Field(..., min_length=4)
+    save_path: str = Field(..., min_length=1)
+    torrent_b64: str = Field(..., min_length=1)
+
+
 def get_runtime(request: Request):
     return request.app.state.torrent_runtime
 
@@ -402,6 +408,34 @@ async def import_file(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"written": int(written)}
+
+
+@router.get("/peer-check")
+async def peer_check(request: Request, url: str = Query(..., min_length=4)):
+    """Видит ли ЭТОТ движок другой движок напрямую (для авто-выбора direct-переноса)."""
+    rt = get_runtime(request)
+    fn = getattr(rt, "peer_reachable", None)
+    if fn is None:
+        return {"reachable": False, "error": "not supported"}
+    return await fn(url)
+
+
+@router.post("/torrents/{db_id}/import-direct", response_model=RuntimeHandleOut)
+async def import_direct(request: Request, db_id: int, body: ImportDirectIn):
+    """Принять раздачу, скачав контент НАПРЯМУЮ у движка-источника (минуя оркестратор)."""
+    rt = get_runtime(request)
+    fn = getattr(rt, "import_direct", None)
+    if fn is None:
+        raise HTTPException(status_code=501, detail="direct import not supported for this backend")
+    try:
+        torrent_data = base64.b64decode(body.torrent_b64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail="invalid torrent_b64 payload") from exc
+    try:
+        h = await fn(db_id, body.save_path, torrent_data, body.source_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RuntimeHandleOut.model_validate(h)
 
 
 @router.post("/torrents/{db_id}/import-finalize", response_model=RuntimeHandleOut)

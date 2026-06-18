@@ -96,14 +96,11 @@ async def _wait_until_checked(
 
 
 async def _run_import_with_progress(
-    target, store: dict | None, torrent_id: int,
-    torrent_bytes: bytes, target_save_path: str, src_content_path: str,
-    on_progress,
+    target, store: dict | None, torrent_id: int, import_coro, on_progress,
 ) -> None:
-    """media-перенос: import_local (инкрементальная копия) + опрос прогресса у движка."""
-    task = asyncio.create_task(
-        target.import_local(torrent_id, torrent_bytes, target_save_path, src_content_path)
-    )
+    """Запустить импорт на приёмнике (media/direct — приёмник копирует сам) и параллельно
+    опрашивать его прогресс копирования (`migrate-progress`)."""
+    task = asyncio.create_task(import_coro)
     while not task.done():
         try:
             prog = await target.get_migrate_progress(torrent_id)
@@ -183,6 +180,7 @@ async def run_migration(
     src_content_path: str,
     display_name: str,
     transport: str = "media",
+    source_url: str = "",
     progress_store: dict | None = None,
     resume: bool = False,
 ) -> None:
@@ -262,9 +260,17 @@ async def run_migration(
             await _http_transfer_resumable(
                 source, target, store, torrent_id, torrent_bytes, target_save_path, _on_progress
             )
+        elif transport == "direct":
+            # Приёмник тянет контент напрямую у источника; оркестратор только опрашивает прогресс.
+            await _run_import_with_progress(
+                target, store, torrent_id,
+                target.import_direct(torrent_id, torrent_bytes, target_save_path, source_url),
+                _on_progress,
+            )
         else:
             await _run_import_with_progress(
-                target, store, torrent_id, torrent_bytes, target_save_path, src_content_path,
+                target, store, torrent_id,
+                target.import_local(torrent_id, torrent_bytes, target_save_path, src_content_path),
                 _on_progress,
             )
 

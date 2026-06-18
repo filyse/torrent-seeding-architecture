@@ -189,6 +189,30 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def peer_check(self, source_url: str) -> bool:
+        """Спросить движок, видит ли он другой движок напрямую (для авто-выбора direct)."""
+        r = await self._client.get("/internal/v1/peer-check", params={"url": source_url})
+        if r.status_code >= 400:
+            return False
+        data = r.json()
+        return bool(data.get("reachable")) if isinstance(data, dict) else False
+
+    async def import_direct(
+        self, db_id: int, torrent_bytes: bytes, save_path: str, source_url: str
+    ) -> dict:
+        """Импорт раздачи прямым pull у движка-источника (минуя оркестратор по данным)."""
+        r = await self._client.post(
+            f"/internal/v1/torrents/{db_id}/import-direct",
+            json={
+                "source_url": source_url,
+                "save_path": save_path,
+                "torrent_b64": base64.b64encode(torrent_bytes).decode("ascii"),
+            },
+            timeout=httpx.Timeout(connect=30.0, read=None, write=None, pool=None),
+        )
+        r.raise_for_status()
+        return r.json()
+
     async def content_manifest(self, db_id: int) -> dict | None:
         """Манифест контента источника (root + файлы) для возобновляемого переноса."""
         r = await self._client.get(f"/internal/v1/torrents/{db_id}/content-manifest")

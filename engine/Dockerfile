@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-libtorrent \
     python3-fastapi \
     python3-uvicorn \
+    python3-httpx \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY . /app/engine

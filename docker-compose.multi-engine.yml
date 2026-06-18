@@ -30,6 +30,8 @@ x-engine-common: &engine-common
     SEEDING_ENGINE_TLS: "1"
     SEEDING_ENGINE_TLS_CERT: /certs/engine.crt
     SEEDING_ENGINE_TLS_KEY: /certs/engine.key
+    # CA для проверки другого движка при прямом переносе движок→движок (transport=direct).
+    SEEDING_ENGINE_TLS_CA: /certs/ca.crt
   healthcheck:
     # Локальный health по https (самопроверка без верификации хоста).
     test:

@@ -358,9 +358,11 @@ async def migrate_torrent(
     if source_spec is None:
         raise HTTPException(status_code=422, detail=f"unknown source engine: {row.engine_id}")
     source_media = source_spec.normalized_media_path()
-    mode = transport.strip().lower()
-    if mode not in ("auto", "media", "http"):
-        raise HTTPException(status_code=422, detail="transport must be auto|media|http")
+    source_url = source_spec.url
+    requested = transport.strip().lower()
+    mode = requested
+    if mode not in ("auto", "media", "http", "direct"):
+        raise HTTPException(status_code=422, detail="transport must be auto|media|http|direct")
 
     # Имя контента нужно и для пути в /media, и для tar-стрима, и для факт-проверки видимости.
     try:
@@ -375,15 +377,22 @@ async def migrate_torrent(
         )
 
     probe_path = f"{source_media}/{name}" if source_media else ""
+    target_client = pool.client_for(target_id)
     if mode == "auto":
-        # Решаем по факту: реально ли приёмник видит контент источника через общий mount.
+        # Выбор по факту: общий /media (быстрее всего) → прямой pull движок→движок → проксируемый http.
         mode = "http"
         if probe_path:
             try:
-                if await pool.client_for(target_id).path_exists(probe_path):
+                if await target_client.path_exists(probe_path):
                     mode = "media"
             except httpx.HTTPError:
-                mode = "http"
+                pass
+        if mode != "media":
+            try:
+                if await target_client.peer_check(source_url):
+                    mode = "direct"
+            except httpx.HTTPError:
+                pass
     if mode == "media" and not source_media:
         raise HTTPException(
             status_code=422,
@@ -392,6 +401,17 @@ async def migrate_torrent(
                 "use transport=http for cross-machine migration"
             ),
         )
+    if requested == "direct":
+        # Явный direct: убедимся, что приёмник реально достучится до источника.
+        try:
+            reachable = await target_client.peer_check(source_url)
+        except httpx.HTTPError:
+            reachable = False
+        if not reachable:
+            raise HTTPException(
+                status_code=422,
+                detail="target engine cannot reach source engine directly; use transport=http",
+            )
 
     src_content_path = probe_path if mode == "media" else ""
     source_save_path = source_spec.normalized_prefix()
@@ -410,6 +430,7 @@ async def migrate_torrent(
         src_content_path=src_content_path,
         display_name=row.display_name,
         transport=mode,
+        source_url=source_url,
         resume=False,
     )
     return {
@@ -433,6 +454,7 @@ def _launch_migration(
     src_content_path: str,
     display_name: str,
     transport: str,
+    source_url: str,
     resume: bool,
 ) -> None:
     """Запустить фоновую задачу переноса и зарегистрировать её в app.state."""
@@ -456,6 +478,7 @@ def _launch_migration(
             src_content_path=src_content_path,
             display_name=display_name,
             transport=transport,
+            source_url=source_url,
             progress_store=progress_store,
             resume=resume,
         )
@@ -477,7 +500,8 @@ async def resume_migration(torrent_id: int, request: Request, session: DbSession
         raise HTTPException(status_code=404, detail="no migration job to resume")
     if job.state == "running":
         raise HTTPException(status_code=409, detail="migration already running")
-    if pool.spec(job.target_engine_id) is None or pool.spec(job.source_engine_id) is None:
+    src_spec = pool.spec(job.source_engine_id)
+    if pool.spec(job.target_engine_id) is None or src_spec is None:
         raise HTTPException(status_code=422, detail="engine of this migration is no longer known")
 
     repo = TorrentRepository(session)
@@ -494,6 +518,7 @@ async def resume_migration(torrent_id: int, request: Request, session: DbSession
         src_content_path=job.src_content_path,
         display_name=job.display_name,
         transport=job.transport,
+        source_url=src_spec.url,
         resume=True,
     )
     return {"id": torrent_id, "status": TorrentStatus.migrating.value, "resumed": True}
@@ -527,7 +552,8 @@ async def migrate_status(torrent_id: int, request: Request, session: DbSession):
         resumable = (not active) and bool(job) and job.state == "failed"
         return {
             "id": torrent_id, "active": active, "resumable": resumable,
-            "attempts": job.attempts if job else 0, **snap,
+            "attempts": job.attempts if job else 0,
+            "transport": job.transport if job else None, **snap,
         }
     # Прогресса в памяти нет (например, после перезапуска оркестратора) — берём из БД-джоба.
     if job is not None:
@@ -542,6 +568,7 @@ async def migrate_status(torrent_id: int, request: Request, session: DbSession):
             "copied": job.copied,
             "total": job.total,
             "attempts": job.attempts,
+            "transport": job.transport,
             "message": job.last_error or None,
         }
     repo = TorrentRepository(session)

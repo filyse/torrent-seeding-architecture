@@ -11,6 +11,8 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import httpx
+
 from seeding_engine.fastresume_io import (
     delete_fastresume,
     ensure_engine_dirs,
@@ -933,6 +935,100 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         )
         await self.recheck(db_id)
         return handle
+
+    # --- Прямой перенос движок→движок (приёмник тянет контент у источника сам) ---
+    @staticmethod
+    def _peer_client(base_url: str, timeout) -> httpx.AsyncClient:
+        """httpx-клиент к движку-источнику: общий токен X-Engine-Token + TLS-CA как у оркестратора."""
+        token = os.getenv("SEEDING_ENGINE_API_TOKEN", "").strip()
+        headers = {"X-Engine-Token": token} if token else None
+        verify: object = True
+        if base_url.startswith("https://"):
+            ca = os.getenv("SEEDING_ENGINE_TLS_CA", "").strip()
+            verify = ca if ca else True
+        transport = httpx.AsyncHTTPTransport(verify=verify)
+        return httpx.AsyncClient(
+            base_url=base_url.rstrip("/"), timeout=timeout, transport=transport, headers=headers
+        )
+
+    async def peer_reachable(self, source_url: str) -> dict:
+        """Проверить, видит ли этот движок источник напрямую (для авто-выбора direct)."""
+        import time as _t
+
+        timeout = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
+        t0 = _t.monotonic()
+        try:
+            async with self._peer_client(source_url, timeout) as client:
+                r = await client.get("/internal/v1/health")
+                r.raise_for_status()
+            return {"reachable": True, "latency_ms": round((_t.monotonic() - t0) * 1000, 1)}
+        except (httpx.HTTPError, OSError) as exc:
+            return {"reachable": False, "error": str(exc)[:200]}
+
+    async def import_direct(
+        self, db_id: int, save_path: str, torrent_data: bytes, source_url: str
+    ) -> RuntimeHandle:
+        """Принять раздачу, СКАЧАВ контент напрямую у движка-источника (минуя оркестратор).
+
+        Возобновляемо: пофайлово, уже принятые файлы/байты пропускаются (Range)."""
+        if not torrent_data:
+            raise ValueError("torrent_data is required for import")
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        timeout = httpx.Timeout(connect=30.0, read=None, write=None, pool=None)
+        loop = asyncio.get_running_loop()
+
+        async with self._peer_client(source_url, timeout) as client:
+            mr = await client.get(f"/internal/v1/torrents/{db_id}/content-manifest")
+            mr.raise_for_status()
+            manifest = mr.json()
+            root = str(manifest.get("root") or "")
+            files = manifest.get("files") or []
+            total = int(manifest.get("total") or sum(int(f.get("size") or 0) for f in files))
+            self._migrate_progress[db_id] = {"phase": "copying", "copied": 0, "total": total}
+            prog = self._migrate_progress[db_id]
+            base = Path(save_path) / root
+
+            for f in files:
+                rel = str(f.get("path") or "")
+                size = int(f.get("size") or 0)
+                if not rel:
+                    continue
+                target = self._safe_join(base, rel)
+                have = target.stat().st_size if target.is_file() else 0
+                have = min(have, size)
+                if size > 0 and have >= size:
+                    prog["copied"] = prog.get("copied", 0) + size
+                    continue
+                prog["copied"] = prog.get("copied", 0) + have  # уже принятая часть
+                target.parent.mkdir(parents=True, exist_ok=True)
+                headers = {"Range": f"bytes={have}-"} if have > 0 else {}
+                async with client.stream(
+                    "GET", f"/internal/v1/torrents/{db_id}/content-file",
+                    params={"path": rel}, headers=headers,
+                ) as resp:
+                    resp.raise_for_status()
+
+                    def _open():
+                        fobj = open(target, "r+b" if target.exists() else "wb")
+                        fobj.seek(have)
+                        fobj.truncate()
+                        return fobj
+
+                    fobj = await loop.run_in_executor(None, _open)
+                    try:
+                        async for chunk in resp.aiter_bytes():
+                            await loop.run_in_executor(None, fobj.write, chunk)
+                            prog["copied"] = prog.get("copied", 0) + len(chunk)
+                    finally:
+                        await loop.run_in_executor(None, fobj.close)
+
+        self._migrate_progress[db_id] = {"phase": "checking", "copied": total, "total": total}
+        try:
+            handle = await self.add_torrent(db_id, None, save_path, torrent_data=torrent_data)
+            await self.recheck(db_id)
+            return handle
+        finally:
+            self._migrate_progress.pop(db_id, None)
 
     def _persist_torrent_file(self, db_id: int, torrent_data: bytes) -> None:
         d = self._torrent_files_dir()
