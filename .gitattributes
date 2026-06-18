@@ -1,0 +1,4 @@
+# Shell scripts must use LF — CRLF breaks bash (`set -euo pipefail\r`) and
+# docker entrypoints. Force LF in the repo regardless of contributor OS.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
