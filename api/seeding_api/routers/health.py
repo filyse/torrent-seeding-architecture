@@ -179,3 +179,11 @@ async def alerts(request: Request):
         "critical": sum(1 for a in items if a.get("severity") == "critical"),
         "alerts": items,
     }
+
+
+@router.get("/system")
+async def system(request: Request):
+    from seeding_api.system_stats import collect_system_stats
+
+    data = await collect_system_stats()
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), **data}

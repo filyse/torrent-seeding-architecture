@@ -1078,6 +1078,148 @@ body {
   color: var(--muted);
 }
 
+.sys-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.sys-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.sys-empty code {
+  display: inline-block;
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  background: var(--surface-2, rgba(127, 127, 127, 0.12));
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+}
+
+.sys-empty__reason {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.6rem;
+}
+
+.sys-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.sys-stat__label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.sys-stat__value {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.sys-stat__sub {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.sys-subhead {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+
+.sys-fs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.sys-fs__row {
+  display: grid;
+  grid-template-columns: minmax(80px, 160px) 1fr minmax(160px, auto);
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.sys-fs__mount {
+  font-family: var(--mono, monospace);
+  font-size: 0.85rem;
+}
+
+.sys-fs__num {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.meter {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.2);
+  overflow: hidden;
+}
+
+.meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.meter__fill--ok {
+  background: #30a46c;
+}
+
+.meter__fill--warn {
+  background: #f5a524;
+}
+
+.meter__fill--crit {
+  background: #e5484d;
+}
+
+.sys-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.sys-table th,
+.sys-table td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.sys-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.sys-table td:not(:first-child),
+.sys-table th:not(:first-child) {
+  text-align: right;
+}
+
 .file-table__name {
   word-break: break-all;
   max-width: 28rem;

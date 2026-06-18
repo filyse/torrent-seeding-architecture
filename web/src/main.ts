@@ -2676,6 +2676,175 @@ function mountAlertsPanel(): HTMLElement {
   return panel;
 }
 
+type SysFs = { mount: string; total: number; used: number; free: number; pct: number | null };
+type SysContainer = {
+  name: string;
+  full: string;
+  cpu_pct?: number;
+  mem_bytes?: number;
+  io_read_bps?: number;
+  io_write_bps?: number;
+};
+type SystemOut = {
+  generated_at: string;
+  available: boolean;
+  reason?: string;
+  host?: {
+    cpu_pct: number | null;
+    cpu_cores: number | null;
+    load1: number | null;
+    load5: number | null;
+    load15: number | null;
+    mem_total: number | null;
+    mem_used: number | null;
+    mem_pct: number | null;
+    disk_read_bps: number;
+    disk_write_bps: number;
+    filesystems: SysFs[];
+  };
+  containers?: SysContainer[];
+};
+
+function sysStat(label: string, value: string, sub?: string): HTMLElement {
+  return el("div", { className: "sys-stat" }, [
+    el("span", { className: "sys-stat__label" }, [label]),
+    el("span", { className: "sys-stat__value" }, [value]),
+    ...(sub ? [el("span", { className: "sys-stat__sub" }, [sub])] : []),
+  ]);
+}
+
+function meterBar(pct: number | null): HTMLElement {
+  const p = Math.max(0, Math.min(100, pct ?? 0));
+  const tone = p >= 90 ? "crit" : p >= 75 ? "warn" : "ok";
+  const fill = el("span", { className: `meter__fill meter__fill--${tone}` });
+  fill.style.width = `${p}%`;
+  return el("span", { className: "meter" }, [fill]);
+}
+
+function mountSystemPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  const head = el("div", { className: "panel__head panel__head--with-action" }, ["Нагрузка системы"]);
+  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" }, ["⟳"]);
+  head.append(refreshBtn);
+  panel.append(head);
+
+  const body = el("div", { className: "panel__body" });
+  const content = el("div", { className: "sys-content" }, ["Загрузка…"]);
+  body.append(content);
+  panel.append(body);
+
+  let busy = false;
+  let timer: number | null = null;
+
+  const paint = (d: SystemOut) => {
+    content.replaceChildren();
+    if (!d.available || !d.host) {
+      content.append(
+        el("div", { className: "sys-empty" }, [
+          "Метрики недоступны. Подними стек наблюдаемости: ",
+          el("code", {}, ["docker compose … -f docker-compose.observability.yml up -d"]),
+          ...(d.reason ? [el("div", { className: "sys-empty__reason" }, [d.reason])] : []),
+        ]),
+      );
+      return;
+    }
+    const h = d.host;
+    const grid = el("div", { className: "sys-grid" });
+    grid.append(
+      sysStat(
+        "CPU",
+        fmtPercentRaw(h.cpu_pct),
+        h.cpu_cores ? `${h.cpu_cores} ядер` : undefined,
+      ),
+      sysStat(
+        "Load avg",
+        `${(h.load1 ?? 0).toFixed(2)}`,
+        `5м ${(h.load5 ?? 0).toFixed(2)} · 15м ${(h.load15 ?? 0).toFixed(2)}`,
+      ),
+      sysStat(
+        "RAM",
+        fmtPercentRaw(h.mem_pct),
+        `${fmtBytes(h.mem_used)} / ${fmtBytes(h.mem_total)}`,
+      ),
+      sysStat("Диск I/O", `↓ ${fmtRate(h.disk_read_bps)}`, `↑ ${fmtRate(h.disk_write_bps)}`),
+    );
+    content.append(grid);
+
+    if (h.filesystems.length > 0) {
+      content.append(el("div", { className: "sys-subhead" }, ["Файловые системы"]));
+      const fsWrap = el("div", { className: "sys-fs" });
+      for (const fs of h.filesystems) {
+        fsWrap.append(
+          el("div", { className: "sys-fs__row" }, [
+            el("span", { className: "sys-fs__mount" }, [fs.mount]),
+            meterBar(fs.pct),
+            el("span", { className: "sys-fs__num" }, [
+              `${fmtBytes(fs.used)} / ${fmtBytes(fs.total)} (${fs.pct ?? 0}%)`,
+            ]),
+          ]),
+        );
+      }
+      content.append(fsWrap);
+    }
+
+    if (d.containers && d.containers.length > 0) {
+      content.append(el("div", { className: "sys-subhead" }, ["Контейнеры"]));
+      const table = el("table", { className: "sys-table" });
+      table.append(
+        el("thead", {}, [
+          el("tr", {}, [
+            el("th", {}, ["Контейнер"]),
+            el("th", {}, ["CPU"]),
+            el("th", {}, ["RAM"]),
+            el("th", {}, ["I/O ↓"]),
+            el("th", {}, ["I/O ↑"]),
+          ]),
+        ]),
+      );
+      const tbody = el("tbody");
+      for (const c of d.containers) {
+        tbody.append(
+          el("tr", {}, [
+            el("td", {}, [c.name]),
+            el("td", {}, [c.cpu_pct != null ? `${c.cpu_pct}%` : "—"]),
+            el("td", {}, [fmtBytes(c.mem_bytes)]),
+            el("td", {}, [fmtRate(c.io_read_bps)]),
+            el("td", {}, [fmtRate(c.io_write_bps)]),
+          ]),
+        );
+      }
+      table.append(tbody);
+      content.append(table);
+    }
+  };
+
+  const load = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const data = await fetchJson<SystemOut>("/system");
+      if (parseRoute().view !== "settings") return;
+      paint(data);
+    } catch (e) {
+      content.replaceChildren(el("div", { className: "sys-empty" }, [e instanceof Error ? e.message : String(e)]));
+    } finally {
+      busy = false;
+      if (timer !== null) clearTimeout(timer);
+      if (parseRoute().view === "settings" && !document.hidden) {
+        timer = window.setTimeout(() => void load(), 10000);
+      }
+    }
+  };
+  refreshBtn.addEventListener("click", () => void load());
+  void load();
+  return panel;
+}
+
+function fmtPercentRaw(v: number | null | undefined): string {
+  if (typeof v !== "number" || Number.isNaN(v)) return "—";
+  return `${v.toFixed(1)}%`;
+}
+
 function mountHealthPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Состояние сервисов"]);
@@ -3398,7 +3567,7 @@ function mountSettingsShell(root: HTMLElement): void {
   const health = mountHealthPanel();
   const account = mountAccountPanel();
 
-  root.append(back, header, statsHost, mountAlertsPanel(), health, account);
+  root.append(back, header, statsHost, mountAlertsPanel(), mountSystemPanel(), health, account);
   if (canWrite()) root.append(mountEngineLimitsPanel(), mountQuotasPanel(), mountNetSettingsPanel(), mountPrivateMaintenancePanel());
   if (isAdmin())
     root.append(mountUsersPanel(), mountApiKeysPanel(), mountBackupsPanel(), mountAuditPanel());

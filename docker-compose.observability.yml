@@ -1,9 +1,12 @@
-# Наблюдаемость (Фаза 6): Prometheus + Grafana.
+# Наблюдаемость (Фаза 6): Prometheus + Grafana + системные экспортёры.
 # Опциональный оверлей — подключать вместе с основным compose:
 #   docker compose -f docker-compose.multi-engine.yml \
 #     -f docker-compose.multi-engine.media.yml \
-#     -f docker-compose.observability.yml up -d prometheus grafana
-# Prometheus скрапит api:8000/metrics, Grafana — преднастроенный дашборд и датасорс.
+#     -f docker-compose.observability.yml up -d
+# Prometheus скрапит api:8000/metrics (приложение), node-exporter (хост) и cadvisor
+# (контейнеры). API читает системные ряды из Prometheus и отдаёт их в «Нагрузку системы».
+# Доступ к Grafana/Prometheus закрыт из LAN — порты слушают только 127.0.0.1
+# (зайти можно по SSH-туннелю: ssh -L 3001:127.0.0.1:3001 ...).
 
 services:
   prometheus:
@@ -18,7 +21,7 @@ services:
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
 
   grafana:
     image: grafana/grafana:11.2.0
@@ -32,9 +35,45 @@ services:
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     depends_on:
       - prometheus
+
+  # Метрики хоста (CT400): CPU, RAM, load, диск, дисковый и сетевой I/O.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    expose:
+      - "9100"
+
+  # Метрики по каждому контейнеру (CPU/RAM/блочный и сетевой I/O).
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    privileged: true
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=10s
+      - --store_container_labels=false
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    expose:
+      - "8080"
 
 volumes:
   promdata:
