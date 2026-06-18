@@ -144,12 +144,13 @@ async def key_login(principal: Principal = Depends(require_auth)):
     return {"name": principal.name, "role": principal.role, "source": principal.source}
 
 
-def _user_out(row) -> dict:
+def _user_out(row, *, protected: bool = False) -> dict:
     return {
         "id": row.id,
         "username": row.username,
         "role": row.role,
         "enabled": row.enabled,
+        "protected": protected,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "last_login_at": row.last_login_at.isoformat() if row.last_login_at else None,
     }
@@ -157,8 +158,10 @@ def _user_out(row) -> dict:
 
 @router.get("/auth/users")
 async def list_users(session: DbSession, _: Principal = Depends(require_admin)):
-    rows = await UserRepository(session).list_all()
-    return [_user_out(r) for r in rows]
+    repo = UserRepository(session)
+    rows = await repo.list_all()
+    primary = await repo.primary_id()
+    return [_user_out(r, protected=(r.id == primary)) for r in rows]
 
 
 @router.post("/auth/users", status_code=201)
@@ -189,6 +192,13 @@ async def update_user(
         raise HTTPException(status_code=404, detail="пользователь не найден")
     if body.role is not None and body.role not in _VALID_ROLES:
         raise HTTPException(status_code=422, detail=f"роль должна быть одной из {sorted(_VALID_ROLES)}")
+    # Основной (первый) аккаунт защищён: его нельзя разжаловать или отключить,
+    # чтобы случайно не потерять доступ. Пароль менять можно.
+    if user_id == await repo.primary_id():
+        if body.role is not None and body.role != "admin":
+            raise HTTPException(status_code=400, detail="нельзя менять роль основного администратора")
+        if body.enabled is False:
+            raise HTTPException(status_code=400, detail="нельзя отключить основного администратора")
     demoting = body.role is not None and body.role != "admin" and row.role == "admin"
     disabling = body.enabled is False and row.enabled and row.role == "admin"
     if (demoting or disabling) and await _total_admins(session, exclude_user_id=user_id) == 0:
@@ -212,6 +222,8 @@ async def delete_user(user_id: int, session: DbSession, _: Principal = Depends(r
     row = await repo.get_by_id(user_id)
     if row is None:
         raise HTTPException(status_code=404, detail="пользователь не найден")
+    if user_id == await repo.primary_id():
+        raise HTTPException(status_code=400, detail="нельзя удалить основного администратора")
     if row.role == "admin" and row.enabled and await _total_admins(session, exclude_user_id=user_id) == 0:
         raise HTTPException(status_code=400, detail="нельзя удалить последнего администратора")
     await SessionRepository(session).delete_for_user(user_id)

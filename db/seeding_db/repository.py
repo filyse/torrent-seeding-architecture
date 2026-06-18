@@ -276,6 +276,11 @@ class UserRepository:
     async def get_by_id(self, user_id: int) -> UserRecord | None:
         return await self._session.get(UserRecord, user_id)
 
+    async def primary_id(self) -> int | None:
+        """ID самого первого (основного) аккаунта — его роль/доступ защищены."""
+        result = await self._session.execute(select(func.min(UserRecord.id)))
+        return result.scalar_one_or_none()
+
     async def list_all(self) -> list[UserRecord]:
         result = await self._session.execute(select(UserRecord).order_by(UserRecord.id))
         return list(result.scalars())

@@ -3223,6 +3223,7 @@ type UserItem = {
   username: string;
   role: Role;
   enabled: boolean;
+  protected?: boolean;
   created_at: string | null;
   last_login_at: string | null;
 };
@@ -3257,27 +3258,35 @@ function mountUsersPanel(): HTMLElement {
       for (const u of users) {
         const row = el("div", { className: `key-row${u.enabled ? "" : " key-row--off"}` });
         const meta = el("div", { className: "key-row__meta" }, [
-          el("span", { className: "key-row__name" }, [u.username]),
+          el("span", { className: "key-row__name" }, [
+            u.username,
+            u.protected ? el("span", { className: "key-row__tag" }, ["основной"]) : "",
+          ]),
           el("span", { className: "key-row__sub" }, [
             `${u.role}${u.enabled ? "" : " · выключен"}${
               u.last_login_at ? ` · вход ${new Date(u.last_login_at).toLocaleDateString("ru-RU")}` : ""
             }`,
           ]),
         ]);
-        const roleSel = el("select", { className: "select select--sm" }) as HTMLSelectElement;
-        for (const r of ["admin", "operator", "viewer"]) roleSel.append(el("option", { value: r }, [r]));
-        roleSel.value = u.role;
-        roleSel.addEventListener("change", async () => {
-          try {
-            await fetchJson(`/auth/users/${u.id}`, {
-              method: "PATCH",
-              body: JSON.stringify({ role: roleSel.value }),
-            });
-            await reload();
-          } catch (e) {
-            showToast(e instanceof Error ? e.message : String(e), true);
-          }
-        });
+        const roleControl: HTMLElement = u.protected
+          ? el("span", { className: "role-static" }, ["admin"])
+          : (() => {
+              const roleSel = el("select", { className: "select select--sm" }) as HTMLSelectElement;
+              for (const r of ["admin", "operator", "viewer"]) roleSel.append(el("option", { value: r }, [r]));
+              roleSel.value = u.role;
+              roleSel.addEventListener("change", async () => {
+                try {
+                  await fetchJson(`/auth/users/${u.id}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({ role: roleSel.value }),
+                  });
+                  await reload();
+                } catch (e) {
+                  showToast(e instanceof Error ? e.message : String(e), true);
+                }
+              });
+              return roleSel;
+            })();
         const pwBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Пароль"]);
         pwBtn.addEventListener("click", async () => {
           const np = window.prompt(`Новый пароль для «${u.username}» (мин. 6):`);
@@ -3316,7 +3325,8 @@ function mountUsersPanel(): HTMLElement {
             showToast(e instanceof Error ? e.message : String(e), true);
           }
         });
-        row.append(meta, el("div", { className: "btn-row" }, [roleSel, pwBtn, toggle, del]));
+        const actions = u.protected ? [roleControl, pwBtn] : [roleControl, pwBtn, toggle, del];
+        row.append(meta, el("div", { className: "btn-row" }, actions));
         list.append(row);
       }
     } catch (e) {
