@@ -1890,6 +1890,15 @@ body {
   background: var(--surface-2);
   color: var(--text);
 }
+/* Селект в инлайн-форме должен совпадать по высоте/ширине с textbox-полями. */
+.keys-form .select {
+  flex: 1;
+  min-width: 12rem;
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+  padding-left: 0.5rem;
+  border-radius: var(--radius);
+}
 .role-static {
   display: inline-flex;
   align-items: center;
