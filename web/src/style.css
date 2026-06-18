@@ -1401,6 +1401,11 @@ body {
 .login-form .field {
   margin-bottom: 0;
 }
+.login-form .field label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
 .login-error {
   margin: 0;
   color: var(--danger);
