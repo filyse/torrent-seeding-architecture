@@ -2057,6 +2057,14 @@ body {
   color: var(--danger, #dc2626);
 }
 
+.job-result {
+  margin-top: 0.6rem;
+  white-space: pre-wrap;
+}
+.job-result:empty {
+  display: none;
+}
+
 .role-static {
   display: inline-flex;
   align-items: center;

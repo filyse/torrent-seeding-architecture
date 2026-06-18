@@ -3518,6 +3518,53 @@ function mountUsersPanel(): HTMLElement {
 type BackupItem = { filename: string; size: number; created_at: string };
 type BackupsOut = { dir: string; available: boolean; items: BackupItem[] };
 
+type JobEnqueueOut = { enqueued: boolean; job: string; job_id?: string | null };
+type JobResultOut = { job_id: string; status: string; success?: boolean; result?: unknown };
+
+async function pollJobResult(jobId: string, timeoutMs = 30000): Promise<JobResultOut | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await fetchJson<JobResultOut>(`/jobs/result/${encodeURIComponent(jobId)}`);
+    if (r.status === "complete" || r.status === "not_found") return r;
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  return null;
+}
+
+function formatJobResult(job: string, res: JobResultOut): string {
+  if (res.status === "not_found") return "результат недоступен (устарел)";
+  if (res.success === false) {
+    return `ошибка: ${typeof res.result === "string" ? res.result : JSON.stringify(res.result)}`;
+  }
+  const r = res.result as Record<string, unknown> | undefined;
+  if (!r || typeof r !== "object") return "готово";
+  if (job === "check_engine_health") {
+    const ids = Object.keys((r.engines ?? {}) as Record<string, unknown>);
+    return ids.length ? `движки отвечают: ${ids.length} (${ids.join(", ")})` : "движки не ответили";
+  }
+  if (job === "sync_runtime_to_db") {
+    return (
+      `runtime ${r.runtime_total ?? "?"} · в БД ${r.db_total ?? "?"} · ` +
+      `обновлено статусов ${r.updated_status ?? 0}, infohash ${r.updated_info_hash ?? 0}; ` +
+      `в runtime без БД ${r.runtime_missing_db ?? 0}, в БД без runtime ${r.db_missing_runtime ?? 0}`
+    );
+  }
+  if (job === "restore_engine" || job === "bulk_register_engine") {
+    const parts: string[] = [];
+    if ("restored" in r) parts.push(`восстановлено ${r.restored}`);
+    if ("registered" in r) parts.push(`зарегистрировано ${r.registered}`);
+    if ("failed" in r) parts.push(`ошибок ${r.failed}`);
+    return parts.join(" · ") || "готово";
+  }
+  if (job === "restore_all_engines") {
+    const engines = (r.engines ?? []) as Array<Record<string, unknown>>;
+    const restored = engines.reduce((s, e) => s + (Number(e.restored) || 0), 0);
+    const failed = engines.reduce((s, e) => s + (Number(e.failed) || 0), 0);
+    return `движков ${engines.length} · восстановлено ${restored} · ошибок ${failed}`;
+  }
+  return "готово";
+}
+
 function mountComponentsPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, [
@@ -3618,12 +3665,30 @@ function mountMaintenancePanel(): HTMLElement {
     ]),
   );
 
+  const out = el("div", { className: "field__hint job-result" }, [""]);
+
   const run = async (path: string, label: string, btn: HTMLButtonElement) => {
     btn.disabled = true;
+    out.className = "field__hint job-result";
+    out.textContent = `${label}: выполняется…`;
     try {
-      await fetchJson(path, { method: "POST" });
-      showToast(`${label}: задача поставлена в очередь`);
+      const enq = await fetchJson<JobEnqueueOut>(path, { method: "POST" });
+      if (!enq.job_id) {
+        out.textContent = `${label}: задача поставлена в очередь`;
+        return;
+      }
+      const res = await pollJobResult(enq.job_id);
+      if (!res) {
+        out.textContent = `${label}: выполняется в фоне (результат не дождались)`;
+        return;
+      }
+      out.textContent = `${label}: ${formatJobResult(enq.job, res)}`;
+      out.className =
+        res.success === false || res.status === "not_found"
+          ? "field__hint job-result conn-bad"
+          : "field__hint job-result conn-ok";
     } catch (e) {
+      out.textContent = "";
       showToast(e instanceof Error ? e.message : String(e), true);
     } finally {
       btn.disabled = false;
@@ -3650,7 +3715,7 @@ function mountMaintenancePanel(): HTMLElement {
     void run("/jobs/engine-health-check", "Проверка движков", healthCheck),
   );
 
-  body.append(el("div", { className: "btn-row" }, [restoreAll, syncRuntime, healthCheck]));
+  body.append(el("div", { className: "btn-row" }, [restoreAll, syncRuntime, healthCheck]), out);
   panel.append(body);
   return panel;
 }
@@ -3708,8 +3773,14 @@ function mountEngineRegistryPanel(): HTMLElement {
       if (confirmMsg && !window.confirm(confirmMsg)) return;
       b.disabled = true;
       try {
-        await fetchJson(path, { method: "POST" });
-        showToast(`${label}: задача поставлена в очередь`);
+        const enq = await fetchJson<JobEnqueueOut>(path, { method: "POST" });
+        if (!enq.job_id) {
+          showToast(`${label}: уже выполняется`);
+          return;
+        }
+        const res = await pollJobResult(enq.job_id);
+        if (res) showToast(`${label}: ${formatJobResult(enq.job, res)}`, res.success === false);
+        else showToast(`${label}: выполняется в фоне`);
       } catch (e) {
         showToast(e instanceof Error ? e.message : String(e), true);
       } finally {
