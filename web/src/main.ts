@@ -2572,7 +2572,7 @@ async function loadDetail(
         { className: `detail-label-chip${text ? "" : " detail-label-chip--empty"}` },
         [text || "Без метки"],
       );
-      const children: (string | Node)[] = [el("span", { className: "detail-label-key" }, ["Метка"]), chip];
+      const children: (string | Node)[] = [chip];
       if (canWrite()) {
         const editBtn = el("button", {
           type: "button",
@@ -2620,6 +2620,7 @@ async function loadDetail(
       });
     };
     renderLabelView();
+    head.append(labelWrap);
 
     const manageCard = (heading: string, node: HTMLElement) =>
       el("div", { className: "manage-card" }, [
@@ -2649,7 +2650,7 @@ async function loadDetail(
     const metaBlock = buildDetailsSpoiler("Подробности", detailsContent);
     applyDetailSpoilerState(metaBlock, id, "meta");
 
-    body.append(head, sub, labelWrap, progressWrap, chips);
+    body.append(head, sub, progressWrap, chips);
     if (canWrite()) body.append(toolbar, manage);
     body.append(
       buildFilesSpoiler(files, id, () => void backRefresh()),
