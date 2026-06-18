@@ -201,8 +201,7 @@ body {
 .field input[type="url"],
 .field input[type="search"],
 .field input[type="password"],
-.field input[type="file"],
-.field select.select {
+.field input[type="file"] {
   width: 100%;
   padding: 0.5rem 0.65rem;
   font: inherit;
@@ -212,10 +211,45 @@ body {
   border-radius: 6px;
 }
 
-.field input:focus,
-.field select.select:focus {
+.field input:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.field .select {
+  width: 100%;
+}
+
+/* Единый стиль кастомного селекта (закрытый контрол). Список опций рисует ОС. */
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: var(--text);
+  background-color: var(--surface-2);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23808a99' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.55rem center;
+  background-size: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 2rem 0.5rem 0.65rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.select:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.select option {
+  color: var(--text);
+  background: var(--surface);
 }
 
 .advanced {
@@ -318,8 +352,10 @@ body {
 }
 
 .select--sm {
-  padding: 0.25rem 0.4rem;
+  padding: 0.25rem 1.7rem 0.25rem 0.5rem;
   font-size: 0.8rem;
+  background-position: right 0.4rem center;
+  background-size: 0.85rem;
 }
 
 .btn:disabled {
