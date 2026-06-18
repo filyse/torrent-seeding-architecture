@@ -148,6 +148,9 @@ type MeOut = { name: string; role: Role; source: string };
 let currentRole: Role | null = null;
 let currentMe: MeOut | null = null;
 
+type SettingsTab = "info" | "users" | "limits" | "logs";
+let activeSettingsTab: SettingsTab = "info";
+
 function canWrite(): boolean {
   return currentRole === "operator" || currentRole === "admin";
 }
@@ -3564,19 +3567,81 @@ function mountSettingsShell(root: HTMLElement): void {
   themeBody.append(field("Тема оформления", themeSelect, "Сохраняется в этом браузере"));
   themePanel.append(themeBody);
 
-  const health = mountHealthPanel();
-  const account = mountAccountPanel();
+  const globalLimits = canWrite() ? mountGlobalLimitsPanel() : null;
+  if (globalLimits) globalLimits.setAttribute("open", "");
 
-  root.append(back, header, statsHost, mountAlertsPanel(), mountSystemPanel(), health, account);
-  if (canWrite()) root.append(mountEngineLimitsPanel(), mountQuotasPanel(), mountNetSettingsPanel(), mountPrivateMaintenancePanel());
-  if (isAdmin())
-    root.append(mountUsersPanel(), mountApiKeysPanel(), mountBackupsPanel(), mountAuditPanel());
-  root.append(themePanel);
-  if (canWrite()) {
-    const limits = mountGlobalLimitsPanel();
-    limits.setAttribute("open", "");
-    root.append(limits);
+  const tabDefs: { id: SettingsTab; label: string; visible: boolean; panels: () => HTMLElement[] }[] = [
+    {
+      id: "info",
+      label: "Информация",
+      visible: true,
+      panels: () => [statsHost, mountAlertsPanel(), mountSystemPanel(), mountHealthPanel(), themePanel],
+    },
+    {
+      id: "users",
+      label: "Пользователи",
+      visible: true,
+      panels: () => {
+        const out = [mountAccountPanel()];
+        if (isAdmin()) out.push(mountUsersPanel(), mountApiKeysPanel());
+        return out;
+      },
+    },
+    {
+      id: "limits",
+      label: "Лимиты",
+      visible: canWrite(),
+      panels: () => {
+        const out: HTMLElement[] = [];
+        if (globalLimits) out.push(globalLimits);
+        out.push(mountEngineLimitsPanel(), mountQuotasPanel(), mountNetSettingsPanel(), mountPrivateMaintenancePanel());
+        return out;
+      },
+    },
+    {
+      id: "logs",
+      label: "Логи",
+      visible: isAdmin(),
+      panels: () => [mountAuditPanel(), mountBackupsPanel()],
+    },
+  ];
+
+  const visibleTabs = tabDefs.filter((t) => t.visible);
+  if (!visibleTabs.some((t) => t.id === activeSettingsTab)) {
+    activeSettingsTab = visibleTabs[0]?.id ?? "info";
   }
+
+  const tabBar = el("div", { className: "settings-tabs", role: "tablist" });
+  const panes: Partial<Record<SettingsTab, HTMLElement>> = {};
+  const buttons: Partial<Record<SettingsTab, HTMLButtonElement>> = {};
+
+  const selectTab = (id: SettingsTab) => {
+    activeSettingsTab = id;
+    for (const t of visibleTabs) {
+      const on = t.id === id;
+      const pane = panes[t.id];
+      const btn = buttons[t.id];
+      if (pane) pane.hidden = !on;
+      if (btn) {
+        btn.classList.toggle("is-active", on);
+        btn.setAttribute("aria-selected", on ? "true" : "false");
+      }
+    }
+  };
+
+  const paneWrap = el("div", { className: "settings-panes" });
+  for (const t of visibleTabs) {
+    const btn = el("button", { type: "button", className: "settings-tab", role: "tab" }, [t.label]) as HTMLButtonElement;
+    btn.addEventListener("click", () => selectTab(t.id));
+    buttons[t.id] = btn;
+    tabBar.append(btn);
+    const pane = el("div", { className: "settings-pane" }, t.panels());
+    panes[t.id] = pane;
+    paneWrap.append(pane);
+  }
+
+  root.append(back, header, tabBar, paneWrap);
+  selectTab(activeSettingsTab);
 
   void loadSessionStats().then((s) => {
     statsHost.replaceChildren(mountSessionBar(s));

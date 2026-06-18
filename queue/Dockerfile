@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-httpx \
     python3-redis \
     python3-click \
+    python3-pytest \
     git \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/* \

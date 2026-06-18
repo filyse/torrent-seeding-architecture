@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-fastapi \
     python3-uvicorn \
     python3-httpx \
+    python3-pytest \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY . /app/engine

@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-redis \
     python3-python-multipart \
     python3-click \
+    python3-pytest \
     postgresql-client \
     git \
     ca-certificates \
