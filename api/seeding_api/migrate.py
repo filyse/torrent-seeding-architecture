@@ -29,6 +29,33 @@ log = logging.getLogger(__name__)
 # Не чаще раза в N секунд пишем прогресс в БД (в память — каждый чанк).
 _DB_PROGRESS_INTERVAL = 3.0
 
+# Скорость переноса считаем по дельте скопированных байт на стороне оркестратора.
+_speed_anchor: dict[int, tuple[float, int]] = {}  # torrent_id -> (время, copied)
+_speed_last: dict[int, float] = {}  # torrent_id -> Б/с (последняя оценка)
+_SPEED_WINDOW = 1.0  # сек: окно усреднения скорости
+
+
+def _update_speed(torrent_id: int, copied: int | None, now: float) -> float | None:
+    """Оценка скорости (Б/с) по дельте copied за окно ≥1с; устойчива к сбросу счётчика."""
+    if copied is None:
+        return _speed_last.get(torrent_id)
+    anchor = _speed_anchor.get(torrent_id)
+    if anchor is None or copied < anchor[1]:
+        _speed_anchor[torrent_id] = (now, copied)
+        return _speed_last.get(torrent_id)
+    dt = now - anchor[0]
+    if dt >= _SPEED_WINDOW:
+        spd = max(0.0, (copied - anchor[1]) / dt)
+        _speed_last[torrent_id] = spd
+        _speed_anchor[torrent_id] = (now, copied)
+        return spd
+    return _speed_last.get(torrent_id)
+
+
+def _clear_speed(torrent_id: int) -> None:
+    _speed_anchor.pop(torrent_id, None)
+    _speed_last.pop(torrent_id, None)
+
 
 def set_progress(
     store: dict,
@@ -43,13 +70,24 @@ def set_progress(
     """Записать снимок прогресса переноса для опроса из UI (быстрый in-memory store)."""
     if store is None:
         return
+    now = time.time()
+    if phase in ("done", "error"):
+        _clear_speed(torrent_id)
+        speed = None
+    else:
+        speed = _update_speed(torrent_id, copied, now) if phase == "copying" else None
+    eta = None
+    if speed and speed > 0 and total and copied is not None and total > copied:
+        eta = round((total - copied) / speed)
     store[torrent_id] = {
         "phase": phase,
         "progress": progress,
         "copied": copied,
         "total": total,
+        "speed": round(speed) if speed else None,
+        "eta": eta,
         "message": message,
-        "updated_at": time.time(),
+        "updated_at": now,
     }
 
 

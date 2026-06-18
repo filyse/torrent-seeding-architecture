@@ -1054,6 +1054,8 @@ type MigrateStatusOut = {
   progress: number | null;
   copied?: number | null;
   total?: number | null;
+  speed?: number | null;
+  eta?: number | null;
   message?: string | null;
 };
 
@@ -1095,6 +1097,8 @@ function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLE
       if (s.transport && phase !== "error" && phase !== "done") text += ` · ${tname[s.transport] ?? s.transport}`;
       if (pct != null && (phase === "copying" || phase === "checking")) text += ` · ${pct}%`;
       if (phase === "copying" && s.total) text += `  (${fmtBytes(s.copied)} / ${fmtBytes(s.total)})`;
+      if (phase === "copying" && s.speed) text += ` · ${fmtBytes(s.speed)}/с`;
+      if (phase === "copying" && s.eta) text += ` · ост. ${fmtEta(s.eta)}`;
       if (phase === "error" && s.message) text += ` — ${s.message}`;
       label.textContent = text;
       const indeterminate = pct == null && phase !== "error" && phase !== "done";
