@@ -2128,26 +2128,35 @@ body {
   white-space: pre-wrap;
   word-break: break-all;
 }
-.key-row__meta--clickable {
+.health-card--clickable {
   cursor: pointer;
-  border-radius: var(--radius);
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
-.key-row__meta--clickable:hover .key-row__name,
-.key-row__meta--clickable:focus-visible .key-row__name {
+.health-card--clickable:hover,
+.health-card--clickable:focus-visible {
+  border-color: var(--accent, #2563eb);
+  box-shadow: 0 0 0 1px var(--accent, #2563eb);
+  outline: none;
+}
+.health-card__more {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
   color: var(--accent, #2563eb);
 }
-.engine-caret {
-  display: inline-block;
-  width: 1rem;
-  color: var(--muted);
-  font-size: 0.7rem;
+.modal-dialog--wide {
+  max-width: 760px;
+  width: min(92vw, 760px);
 }
-.engine-detail {
-  flex-basis: 100%;
-  width: 100%;
-  margin-top: 0.4rem;
-  padding-top: 0.6rem;
-  border-top: 1px dashed var(--border);
+.engine-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+.engine-modal__body {
+  max-height: 70vh;
+  overflow-y: auto;
 }
 .engine-detail__grid {
   display: grid;

@@ -2840,6 +2840,22 @@ function healthCard(c: HealthComponent): HTMLElement {
   }
   card.append(statusRow);
   if (c.detail) card.append(el("div", { className: "health-card__detail" }, [c.detail]));
+  if (c.kind === "engine") {
+    const eid = c.engine_id ?? c.id;
+    card.classList.add("health-card--clickable");
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.title = "Подробнее о движке";
+    card.append(el("span", { className: "health-card__more" }, ["Подробнее →"]));
+    const open = () => showEngineDetailModal(eid, c.name);
+    card.addEventListener("click", open);
+    card.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        open();
+      }
+    });
+  }
   return card;
 }
 
@@ -3882,6 +3898,56 @@ function buildEngineDetail(info: EngineInfoOut): HTMLElement {
   return wrap;
 }
 
+function showEngineDetailModal(engineId: string, engineName: string): void {
+  const overlay = el("div", { className: "modal-overlay" });
+  const dialog = el("div", {
+    className: "modal-dialog modal-dialog--wide",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-label": `Движок ${engineName}`,
+  });
+  const closeBtn = el(
+    "button",
+    { type: "button", className: "btn btn--ghost btn--sm", "aria-label": "Закрыть" },
+    ["✕"],
+  ) as HTMLButtonElement;
+  const head = el("div", { className: "engine-modal__head" }, [
+    el("h2", { className: "modal-title" }, [`Движок ${engineName}`]),
+    closeBtn,
+  ]);
+  const bodyEl = el("div", { className: "engine-modal__body" }, [
+    el("p", { className: "field__hint" }, ["Загрузка…"]),
+  ]);
+  dialog.append(head, bodyEl);
+  overlay.append(dialog);
+
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape") close();
+  };
+  closeBtn.addEventListener("click", close);
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) close();
+  });
+  document.addEventListener("keydown", onKey);
+  document.body.append(overlay);
+  closeBtn.focus();
+
+  void (async () => {
+    try {
+      const info = await fetchJson<EngineInfoOut>(`/engines/${encodeURIComponent(engineId)}/info`);
+      bodyEl.replaceChildren(buildEngineDetail(info));
+    } catch (e) {
+      bodyEl.replaceChildren(
+        el("p", { className: "field__hint conn-bad" }, [e instanceof Error ? e.message : String(e)]),
+      );
+    }
+  })();
+}
+
 function mountEngineRegistryPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Реестр движков"]);
@@ -3967,10 +4033,8 @@ function mountEngineRegistryPanel(): HTMLElement {
         if (e.in_pool) tags.push("в пуле");
         if (e.stale) tags.push("протух");
         if (!e.enabled) tags.push("выключен");
-        const caret = el("span", { className: "engine-caret" }, ["▸"]);
-        const meta = el("div", { className: "key-row__meta key-row__meta--clickable" }, [
+        const meta = el("div", { className: "key-row__meta" }, [
           el("span", { className: "key-row__name" }, [
-            caret,
             e.id,
             el("span", { className: "key-row__tag" }, [e.url.startsWith("https") ? "TLS" : "—"]),
           ]),
@@ -3978,36 +4042,6 @@ function mountEngineRegistryPanel(): HTMLElement {
             `${tags.join(" · ")} · отклик ${fmtAge(e.age_seconds)}`,
           ]),
         ]);
-        const detail = el("div", { className: "engine-detail" });
-        detail.style.display = "none";
-        let loaded = false;
-        const toggleDetail = async () => {
-          const open = detail.style.display === "none";
-          detail.style.display = open ? "" : "none";
-          caret.textContent = open ? "▾" : "▸";
-          if (open && !loaded) {
-            loaded = true;
-            detail.replaceChildren(el("p", { className: "field__hint" }, ["Загрузка…"]));
-            try {
-              const info = await fetchJson<EngineInfoOut>(`/engines/${encodeURIComponent(e.id)}/info`);
-              detail.replaceChildren(buildEngineDetail(info));
-            } catch (err) {
-              loaded = false;
-              detail.replaceChildren(
-                el("p", { className: "field__hint conn-bad" }, [err instanceof Error ? err.message : String(err)]),
-              );
-            }
-          }
-        };
-        meta.setAttribute("role", "button");
-        meta.setAttribute("tabindex", "0");
-        meta.addEventListener("click", () => void toggleDetail());
-        meta.addEventListener("keydown", (ev) => {
-          if (ev.key === "Enter" || ev.key === " ") {
-            ev.preventDefault();
-            void toggleDetail();
-          }
-        });
         const connOut = el("span", { className: "key-row__sub" }, [""]);
         const probeBtn = el("button", { type: "button", className: "btn btn--sm" }, [
           "Проверить связь",
@@ -4044,7 +4078,6 @@ function mountEngineRegistryPanel(): HTMLElement {
           meta,
           el("div", { className: "btn-row" }, [probeBtn, restoreBtn, registerBtn, restartBtn]),
           connOut,
-          detail,
         );
         list.append(row);
       }
