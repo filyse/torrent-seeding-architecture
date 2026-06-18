@@ -209,7 +209,7 @@ body {
   color: var(--text);
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 
 .field input:focus {
@@ -233,7 +233,7 @@ body {
   background-position: right 0.55rem center;
   background-size: 1rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 0.5rem 2rem 0.5rem 0.65rem;
   line-height: 1.2;
   cursor: pointer;
@@ -1885,7 +1885,7 @@ body {
 .keys-form input {
   flex: 1;
   min-width: 12rem;
-  padding: 0.45rem 0.5rem;
+  padding: 0.5rem 0.65rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-2);
@@ -1893,14 +1893,11 @@ body {
   font: inherit;
   line-height: 1.2;
 }
-/* Селект в инлайн-форме должен совпадать по высоте/ширине с textbox-полями. */
+/* Селект в инлайн-форме тянется на всю ширину, как textbox-поля; все остальные
+   метрики (паддинги, радиус, шрифт) наследуются от общего .select. */
 .keys-form .select {
   flex: 1;
   min-width: 12rem;
-  padding-top: 0.45rem;
-  padding-bottom: 0.45rem;
-  padding-left: 0.5rem;
-  border-radius: var(--radius);
 }
 .role-static {
   display: inline-flex;
