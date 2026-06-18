@@ -378,6 +378,22 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+const ICON_PATHS: Record<string, string> = {
+  refresh:
+    '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
+  settings:
+    '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+};
+
+/** Инлайновая SVG-иконка (Feather-стиль), наследует цвет текста кнопки. */
+function icon(name: keyof typeof ICON_PATHS): HTMLElement {
+  const span = el("span", { className: "icon", "aria-hidden": "true" });
+  span.innerHTML =
+    `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ` +
+    `stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name]}</svg>`;
+  return span;
+}
+
 function parseRoute(): Route {
   const hash = window.location.hash || "";
   const m = /^#\/torrent\/(\d+)$/.exec(hash);
@@ -2196,7 +2212,7 @@ function mountListShell(root: HTMLElement): void {
   const addTorrentBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, ["+ Добавить торрент"]);
   addTorrentBtn.addEventListener("click", () => showAddTorrentDialog("/data/b1", onAdded));
 
-  const settingsLink = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["⚙ Настройки"]);
+  const settingsLink = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, [icon("settings"), "Настройки"]);
   settingsLink.addEventListener("click", () => {
     setHashSettings();
     window.dispatchEvent(new HashChangeEvent("hashchange"));
@@ -2237,7 +2253,7 @@ function mountListShell(root: HTMLElement): void {
     type: "button",
     className: "btn btn--ghost btn--sm list-controls__refresh",
     title: "Обновить",
-  }, ["⟳"]);
+  }, [icon("refresh")]);
   refreshBtn.addEventListener("click", () => void refresh());
 
   // Один ряд: фильтры слева, справа — счётчик, сброс и обновление.
@@ -2628,7 +2644,7 @@ type AlertsOut = { generated_at: string; count: number; critical: number; alerts
 function mountAlertsPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Уведомления"]);
-  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" }, ["⟳"]);
+  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" }, [icon("refresh")]);
   head.append(refreshBtn);
   panel.append(head);
 
@@ -2727,7 +2743,7 @@ function meterBar(pct: number | null): HTMLElement {
 function mountSystemPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Нагрузка системы"]);
-  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" }, ["⟳"]);
+  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" }, [icon("refresh")]);
   head.append(refreshBtn);
   panel.append(head);
 
@@ -2854,7 +2870,7 @@ function mountHealthPanel(): HTMLElement {
   const refreshBtn = el(
     "button",
     { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" },
-    ["⟳"],
+    [icon("refresh")],
   );
   head.append(refreshBtn);
   panel.append(head);
