@@ -56,6 +56,12 @@ class TorrentRepository:
         result = await self._session.execute(select(TorrentRecord).order_by(TorrentRecord.id))
         return list(result.scalars())
 
+    async def count_by_status(self) -> dict[str, int]:
+        result = await self._session.execute(
+            select(TorrentRecord.status, func.count()).group_by(TorrentRecord.status)
+        )
+        return {str(status): int(count) for status, count in result.all()}
+
     async def list_by_engine(self, engine_id: str) -> list[TorrentRecord]:
         stmt = (
             select(TorrentRecord)

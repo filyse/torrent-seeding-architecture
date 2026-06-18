@@ -1,19 +1,23 @@
 import asyncio
 import os
+import time
 
 from arq import create_pool
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from seeding_db.config import get_database_url
 from seeding_db.session import create_engine as make_async_engine
 from seeding_db.session import create_session_factory, init_models
 from sqlalchemy import text
 
 from seeding_api import audit, maintenance
+from seeding_api.alerts import alert_notifier_loop
 from seeding_api.arq_util import redis_settings_from_url
 from seeding_api.auth import require_auth
+from seeding_api.logconf import setup_logging
+from seeding_api.metrics import render_metrics
 from seeding_api.engine_pool import EnginePool
 from seeding_api.restore import maybe_restore_torrents_to_engine
 from seeding_api.routers import audit as audit_router
@@ -53,32 +57,51 @@ async def _engine_refresh_loop(pool: EnginePool) -> None:
 
 @app.on_event("startup")
 async def startup() -> None:
+    setup_logging("api")
     url = get_database_url()
     engine = make_async_engine(url)
     app.state.db_engine = engine
     app.state.session_factory = create_session_factory(engine)
+    app.state.restore_stats = None
+    app.state.active_alerts = []
     if os.getenv("SEEDING_AUTO_SCHEMA", "").lower() in ("1", "true", "yes"):
         await init_models(engine)
     pool = EnginePool(session_factory=app.state.session_factory)
     await pool.refresh()
     app.state.engine_pool = pool
+    _t0 = time.perf_counter()
     await maybe_restore_torrents_to_engine(app.state.session_factory, pool)
+    try:
+        async with app.state.session_factory() as _s:
+            from seeding_db.repository import TorrentRepository
+
+            _counts = await TorrentRepository(_s).count_by_status()
+        _restored = sum(v for k, v in _counts.items() if k in ("seeding", "downloading", "paused"))
+    except Exception:  # noqa: BLE001
+        _restored = None
+    app.state.restore_stats = {
+        "duration": round(time.perf_counter() - _t0, 3),
+        "count": _restored,
+        "finished_at": time.time(),
+    }
     app.state.arq_pool = None
     redis_url = os.getenv("REDIS_URL")
     if redis_url:
         app.state.arq_pool = await create_pool(redis_settings_from_url(redis_url))
     app.state.engine_refresh_task = asyncio.create_task(_engine_refresh_loop(pool))
+    app.state.alert_task = asyncio.create_task(alert_notifier_loop(app))
 
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    task = getattr(app.state, "engine_refresh_task", None)
-    if task is not None:
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
+    for attr in ("engine_refresh_task", "alert_task"):
+        task = getattr(app.state, attr, None)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
     if getattr(app.state, "arq_pool", None) is not None:
         await app.state.arq_pool.close()
     if getattr(app.state, "engine_pool", None) is not None:
@@ -96,7 +119,7 @@ app.add_middleware(
 
 
 # Маршруты, доступные даже в режиме обслуживания (здоровье, вход, бэкапы).
-_MAINTENANCE_ALLOW = ("/api/v1/health", "/api/v1/auth", "/api/v1/backups")
+_MAINTENANCE_ALLOW = ("/api/v1/health", "/api/v1/auth", "/api/v1/backups", "/api/v1/metrics")
 
 
 @app.middleware("http")
@@ -166,6 +189,33 @@ async def health(request: Request):
 @app.get("/")
 async def root():
     return {"docs": "/docs", "health": "/api/v1/health"}
+
+
+def _metrics_authorized(request: Request) -> bool:
+    token = os.getenv("SEEDING_METRICS_TOKEN", "").strip()
+    if not token:
+        return True
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and auth[7:].strip() == token:
+        return True
+    return request.query_params.get("token", "") == token
+
+
+async def _metrics(request: Request):
+    if not _metrics_authorized(request):
+        return PlainTextResponse("unauthorized", status_code=401)
+    body = await render_metrics(request.app)
+    return PlainTextResponse(body, media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
+@app.get("/metrics")
+async def metrics_root(request: Request):
+    return await _metrics(request)
+
+
+@app.get("/api/v1/metrics")
+async def metrics_api(request: Request):
+    return await _metrics(request)
 
 
 app.include_router(

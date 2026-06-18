@@ -8,9 +8,10 @@ import urllib.request
 from fastapi import FastAPI, Request
 
 from seeding_engine.internal_api import router as internal_router
+from seeding_engine.logconf import setup_logging
 from seeding_engine.torrent_runtime import build_torrent_runtime
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+setup_logging("engine")
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="Seeding engine", version="0.1.0")
@@ -88,6 +89,7 @@ async def _self_register_loop() -> None:
 
 @app.on_event("startup")
 async def startup() -> None:
+    setup_logging("engine")  # повторно после конфигурации логгеров uvicorn
     rt = build_torrent_runtime()
     app.state.torrent_runtime = rt
     await rt.start()

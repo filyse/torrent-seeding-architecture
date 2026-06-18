@@ -166,3 +166,16 @@ async def health_full(request: Request):
         },
         "components": components,
     }
+
+
+@router.get("/alerts")
+async def alerts(request: Request):
+    from seeding_api.alerts import evaluate_alerts
+
+    items = await evaluate_alerts(request.app)
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "count": len(items),
+        "critical": sum(1 for a in items if a.get("severity") == "critical"),
+        "alerts": items,
+    }

@@ -2619,6 +2619,63 @@ function healthCard(c: HealthComponent): HTMLElement {
   return card;
 }
 
+type AlertItem = { id: string; severity: string; title: string; message: string };
+type AlertsOut = { generated_at: string; count: number; critical: number; alerts: AlertItem[] };
+
+function mountAlertsPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  const head = el("div", { className: "panel__head panel__head--with-action" }, ["Уведомления"]);
+  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" }, ["⟳"]);
+  head.append(refreshBtn);
+  panel.append(head);
+
+  const body = el("div", { className: "panel__body" });
+  const list = el("div", { className: "alerts-list" }, ["Проверка…"]);
+  body.append(list);
+  panel.append(body);
+
+  let busy = false;
+  let timer: number | null = null;
+  const load = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const data = await fetchJson<AlertsOut>("/alerts");
+      if (parseRoute().view !== "settings") return;
+      list.replaceChildren();
+      if (data.alerts.length === 0) {
+        list.append(el("div", { className: "alerts-empty" }, ["✓ Активных уведомлений нет"]));
+      } else {
+        for (const a of data.alerts) {
+          const sev = a.severity === "critical" ? "crit" : "warn";
+          list.append(
+            el("div", { className: `alert-row alert-row--${sev}` }, [
+              el("span", { className: `alert-badge alert-badge--${sev}` }, [
+                a.severity === "critical" ? "критично" : "внимание",
+              ]),
+              el("div", { className: "alert-text" }, [
+                el("span", { className: "alert-title" }, [a.title]),
+                el("span", { className: "alert-msg" }, [a.message]),
+              ]),
+            ]),
+          );
+        }
+      }
+    } catch (e) {
+      list.replaceChildren(el("div", { className: "alerts-empty" }, [e instanceof Error ? e.message : String(e)]));
+    } finally {
+      busy = false;
+      if (timer !== null) clearTimeout(timer);
+      if (parseRoute().view === "settings" && !document.hidden) {
+        timer = window.setTimeout(() => void load(), 30000);
+      }
+    }
+  };
+  refreshBtn.addEventListener("click", () => void load());
+  void load();
+  return panel;
+}
+
 function mountHealthPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Состояние сервисов"]);
@@ -3341,7 +3398,7 @@ function mountSettingsShell(root: HTMLElement): void {
   const health = mountHealthPanel();
   const account = mountAccountPanel();
 
-  root.append(back, header, statsHost, health, account);
+  root.append(back, header, statsHost, mountAlertsPanel(), health, account);
   if (canWrite()) root.append(mountEngineLimitsPanel(), mountQuotasPanel(), mountNetSettingsPanel(), mountPrivateMaintenancePanel());
   if (isAdmin())
     root.append(mountUsersPanel(), mountApiKeysPanel(), mountBackupsPanel(), mountAuditPanel());

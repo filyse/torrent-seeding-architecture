@@ -1876,6 +1876,9 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             total_up = 0
             total_dl = 0
             active = 0
+            peers = 0
+            seeds = 0
+            errors = 0
             for h in handles_inner.values():
                 try:
                     st = h.status() if callable(getattr(h, "status", None)) else h.status
@@ -1883,6 +1886,13 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     total_dl += int(getattr(st, "all_time_download", 0) or getattr(st, "total_download", 0) or 0)
                     if not getattr(st, "paused", False):
                         active += 1
+                    peers += int(getattr(st, "num_peers", 0) or 0)
+                    seeds += int(getattr(st, "num_seeds", 0) or 0)
+                    errc = getattr(st, "errc", None)
+                    if errc is not None and getattr(errc, "value", 0):
+                        errors += 1
+                    elif str(getattr(st, "error", "") or ""):
+                        errors += 1
                 except Exception:  # noqa: BLE001
                     continue
             dl_lim = int(ses_inner.download_rate_limit()) if hasattr(ses_inner, "download_rate_limit") else 0
@@ -1906,6 +1916,9 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 "upload_limit": up_lim,
                 "dht_nodes": getattr(ss, "dht_nodes", None),
                 "listening_port": listening_port,
+                "peers": peers,
+                "seeds": seeds,
+                "errors": errors,
             }
 
         return await asyncio.to_thread(_collect)

@@ -19,6 +19,7 @@ from seeding_queue.engine_util import (
     fetch_all_runtime,
     make_engine_client,
 )
+from seeding_queue.logconf import setup_logging
 
 log = logging.getLogger(__name__)
 
@@ -303,7 +304,12 @@ async def restore_all_engines(ctx):
     return {"ok": True, "engines": list(results)}
 
 
+async def _on_startup(ctx) -> None:
+    setup_logging("queue")
+
+
 class WorkerSettings:
+    on_startup = _on_startup
     functions = [
         noop_report,
         check_engine_health,

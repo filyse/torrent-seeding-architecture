@@ -1012,6 +1012,72 @@ body {
   color: var(--muted);
 }
 
+.alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.alerts-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.alert-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.alert-row--crit {
+  border-color: #e5484d;
+  background: color-mix(in srgb, #e5484d 12%, var(--surface));
+}
+
+.alert-row--warn {
+  border-color: #f5a524;
+  background: color-mix(in srgb, #f5a524 12%, var(--surface));
+}
+
+.alert-badge {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.alert-badge--crit {
+  background: #e5484d;
+  color: #fff;
+}
+
+.alert-badge--warn {
+  background: #f5a524;
+  color: #1a1a1a;
+}
+
+.alert-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.alert-title {
+  font-weight: 600;
+}
+
+.alert-msg {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .file-table__name {
   word-break: break-all;
   max-width: 28rem;

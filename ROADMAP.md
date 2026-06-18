@@ -5,7 +5,8 @@
 
 Связанные документы: [`ARCHITECTURE.md`](ARCHITECTURE.md),
 [`docs/BOARD.md`](docs/BOARD.md) (рабочая доска по агентам),
-[`docs/MULTI_ENGINE.md`](docs/MULTI_ENGINE.md).
+[`docs/MULTI_ENGINE.md`](docs/MULTI_ENGINE.md),
+[`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
 
 ---
 
@@ -280,9 +281,23 @@
   /api/v1/settings/net`, внутренний `GET/POST /session/net-settings` у движка. UI: панель
   «Поиск пиров (глобально)» в Настройках (operator+).
 
-### Фаза 6 — Наблюдаемость ⬜
-- ⬜ Метрики Prometheus (раздачи, ↓/↑, пиры, ошибки трекеров, restore-время) + дашборд.
-- ⬜ Структурные логи и алерты (движок упал / раздача в error / диск кончается).
+### Фаза 6 — Наблюдаемость ✅
+- ✅ Метрики Prometheus + дашборд. API отдаёт `/metrics` (и `/api/v1/metrics`) в текстовом
+  формате экспозиции (без внешних зависимостей, опц. токен `SEEDING_METRICS_TOKEN`):
+  раздачи по статусу из БД, по движкам — ↓/↑, активные, накопленные байты, диск (всего/
+  свободно), пиры/сиды, DHT-узлы, раздачи в ошибке; очередь ARQ (up, возраст отчёта,
+  счётчики задач), длительность/возраст restore при старте API. Стек наблюдаемости —
+  опциональный оверлей `docker-compose.observability.yml` (Prometheus + Grafana):
+  Prometheus скрапит `api:8000/metrics` и грузит правила алертов (`observability/alerts.yml`),
+  Grafana с преднастроенным датасорсом и дашбордом «Torrent Seeding» (`observability/grafana`).
+  Порты: Prometheus 9090, Grafana 3001 (admin/admin по умолчанию, env `GRAFANA_*`).
+- ✅ Структурные (JSON) логи и алерты. `SEEDING_LOG_JSON=1` (включён в compose) переводит
+  api/engine/queue на построчный JSON, включая логи доступа uvicorn. Встроенные алерты:
+  движок упал, БД недоступна, очередь зависла/отстаёт, раздачи в ошибке, мало места на диске
+  (порог `SEEDING_DISK_ALERT_PCT`/`SEEDING_DISK_ALERT_GB`). API: `GET /api/v1/alerts`
+  (operator+). UI: панель «Уведомления» в Настройках (автообновление). Опциональный фоновый
+  нотификатор шлёт изменения состава алертов на вебхук (`SEEDING_ALERT_WEBHOOK`). Дублирующие
+  правила алертов есть и в Prometheus (`observability/alerts.yml`).
 
 ### Финал — Нагрузочное тестирование ⬜ (намеренно отложено)
 Проводим **после** основных функциональных изменений, чтобы тестировать уже финальную систему,

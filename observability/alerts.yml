@@ -1,0 +1,56 @@
+groups:
+  - name: seeding
+    rules:
+      - alert: EngineDown
+        expr: seeding_engine_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Движок {{ $labels.engine }} недоступен"
+          description: "seeding_engine_up==0 дольше 2 минут для движка {{ $labels.engine }}."
+
+      - alert: DatabaseDown
+        expr: seeding_database_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL недоступна"
+          description: "API не может выполнить SELECT 1 дольше минуты."
+
+      - alert: QueueDown
+        expr: seeding_queue_up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Очередь ARQ недоступна"
+          description: "seeding_queue_up==0 дольше 2 минут."
+
+      - alert: TorrentsInError
+        expr: seeding_torrents{status="error"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Есть раздачи в ошибке"
+          description: "{{ $value }} раздач(и) в статусе error дольше 5 минут."
+
+      - alert: EngineDiskLow
+        expr: (seeding_engine_disk_free_bytes / seeding_engine_disk_total_bytes) * 100 < 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Мало места на движке {{ $labels.engine }}"
+          description: "Свободно меньше 10% на движке {{ $labels.engine }}."
+
+      - alert: QueueReportStale
+        expr: seeding_queue_report_age_seconds > 120
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Воркер отстаёт"
+          description: "Отчёт ARQ-воркера старше 120 c."

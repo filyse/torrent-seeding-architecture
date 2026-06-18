@@ -32,6 +32,8 @@ x-engine-common: &engine-common
     SEEDING_ENGINE_TLS_KEY: /certs/engine.key
     # CA для проверки другого движка при прямом переносе движок→движок (transport=direct).
     SEEDING_ENGINE_TLS_CA: /certs/ca.crt
+    # Структурные (JSON) логи (Фаза 6).
+    SEEDING_LOG_JSON: "1"
   healthcheck:
     # Локальный health по https (самопроверка без верификации хоста).
     test:
@@ -162,6 +164,8 @@ services:
       SEEDING_ENGINE_API_TOKEN: "ct400-engine-api-token"
       # CA для проверки TLS-сертификатов движков (https URL в engines.json).
       SEEDING_ENGINE_TLS_CA: /certs/ca.crt
+      # Наблюдаемость (Фаза 6): структурные логи.
+      SEEDING_LOG_JSON: "1"
     volumes:
       - ./config/engines.ct400.json:/config/engines.json:ro
       - ./certs/ca.crt:/certs/ca.crt:ro
@@ -208,6 +212,7 @@ services:
       SEEDING_BULK_CONCURRENCY: "16"
       SEEDING_ENGINE_API_TOKEN: "ct400-engine-api-token"
       SEEDING_ENGINE_TLS_CA: /certs/ca.crt
+      SEEDING_LOG_JSON: "1"
     volumes:
       - ./config/engines.ct400.json:/config/engines.json:ro
       - ./certs/ca.crt:/certs/ca.crt:ro
