@@ -357,6 +357,25 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def get_net_settings(self) -> dict | None:
+        r = await self._client.get("/internal/v1/session/net-settings")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
+    async def set_net_settings(
+        self, dht: bool | None, pex: bool | None, lsd: bool | None
+    ) -> dict | None:
+        r = await self._client.post(
+            "/internal/v1/session/net-settings",
+            json={"dht": dht, "pex": pex, "lsd": lsd},
+        )
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
     async def set_private(self, db_id: int, enabled: bool | None) -> dict | None:
         r = await self._client.post(
             f"/internal/v1/torrents/{db_id}/private",

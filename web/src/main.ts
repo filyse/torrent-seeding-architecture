@@ -656,6 +656,76 @@ type QuotaItem = {
 
 const GIB = 1024 * 1024 * 1024;
 
+type NetSettingsOut = { dht: boolean; pex: boolean; lsd: boolean; applied?: number; errors?: number };
+
+function mountNetSettingsPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  panel.append(el("div", { className: "panel__head" }, ["Поиск пиров (глобально)"]));
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, [
+    "Глобально включает/выключает источники пиров на всех движках. DHT и LSD — настройки сессии libtorrent; PEX управляется по каждой раздаче. Приватные раздачи остаются без DHT/PEX/LSD независимо от этих переключателей.",
+  ]);
+
+  const mkToggle = (key: "dht" | "pex" | "lsd", label: string, desc: string) => {
+    const input = el("input", { type: "checkbox" }) as HTMLInputElement;
+    input.dataset.key = key;
+    const row = el("label", { className: "net-toggle" }, [
+      input,
+      el("span", { className: "net-toggle__text" }, [
+        el("span", { className: "net-toggle__title" }, [label]),
+        el("span", { className: "net-toggle__desc" }, [desc]),
+      ]),
+    ]);
+    return { row, input };
+  };
+
+  const dht = mkToggle("dht", "DHT", "Распределённый поиск пиров (глобальная сеть).");
+  const pex = mkToggle("pex", "PEX", "Обмен списками пиров между подключёнными.");
+  const lsd = mkToggle("lsd", "LSD", "Поиск пиров в локальной сети (multicast).");
+  const toggles = el("div", { className: "net-toggles" }, [dht.row, pex.row, lsd.row]);
+
+  const saveBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Применить"]);
+  const result = el("p", { className: "field__hint" }, [""]);
+
+  const setAll = (s: NetSettingsOut) => {
+    dht.input.checked = s.dht;
+    pex.input.checked = s.pex;
+    lsd.input.checked = s.lsd;
+  };
+
+  const load = async () => {
+    try {
+      setAll(await fetchJson<NetSettingsOut>("/settings/net"));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  saveBtn.addEventListener("click", async () => {
+    saveBtn.disabled = true;
+    result.textContent = "Применяю…";
+    try {
+      const s = await fetchJson<NetSettingsOut>("/settings/net", {
+        method: "POST",
+        body: JSON.stringify({ dht: dht.input.checked, pex: pex.input.checked, lsd: lsd.input.checked }),
+      });
+      setAll(s);
+      result.textContent = `Применено на движках: ${s.applied ?? 0}${s.errors ? `, ошибок: ${s.errors}` : ""}.`;
+      showToast("Настройки поиска пиров применены");
+    } catch (e) {
+      result.textContent = e instanceof Error ? e.message : String(e);
+      showToast(result.textContent, true);
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  body.append(hint, toggles, el("div", { className: "btn-row" }, [saveBtn]), result);
+  panel.append(body);
+  void load();
+  return panel;
+}
+
 function mountPrivateMaintenancePanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   panel.append(el("div", { className: "panel__head" }, ["Приватные трекеры"]));
@@ -3272,7 +3342,7 @@ function mountSettingsShell(root: HTMLElement): void {
   const account = mountAccountPanel();
 
   root.append(back, header, statsHost, health, account);
-  if (canWrite()) root.append(mountEngineLimitsPanel(), mountQuotasPanel(), mountPrivateMaintenancePanel());
+  if (canWrite()) root.append(mountEngineLimitsPanel(), mountQuotasPanel(), mountNetSettingsPanel(), mountPrivateMaintenancePanel());
   if (isAdmin())
     root.append(mountUsersPanel(), mountApiKeysPanel(), mountBackupsPanel(), mountAuditPanel());
   root.append(themePanel);

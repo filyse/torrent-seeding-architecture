@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from seeding_db.models import (
     ApiKeyRecord,
+    AppSetting,
     AuditRecord,
     EngineRecord,
     LabelQuota,
@@ -633,3 +634,24 @@ class EngineRepository:
         if row is not None:
             row.last_seen = datetime.now(timezone.utc)
             await self._session.flush()
+
+
+class SettingsRepository:
+    """Глобальные настройки приложения (key-value)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, key: str) -> str | None:
+        row = await self._session.get(AppSetting, key)
+        return row.value if row is not None else None
+
+    async def set(self, key: str, value: str) -> None:
+        row = await self._session.get(AppSetting, key)
+        if row is None:
+            row = AppSetting(key=key, value=value, updated_at=datetime.now(timezone.utc))
+            self._session.add(row)
+        else:
+            row.value = value
+            row.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()

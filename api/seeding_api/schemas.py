@@ -160,6 +160,20 @@ class PrivateIn(BaseModel):
     enabled: bool | None = None  # None = автоопределение по флагу/passkey
 
 
+class NetSettingsIn(BaseModel):
+    dht: bool | None = None
+    pex: bool | None = None
+    lsd: bool | None = None
+
+
+class NetSettingsOut(BaseModel):
+    dht: bool
+    pex: bool
+    lsd: bool
+    applied: int | None = None
+    errors: int | None = None
+
+
 class BatchUploadItem(BaseModel):
     filename: str
     ok: bool

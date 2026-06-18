@@ -976,6 +976,42 @@ body {
   font-weight: 600;
 }
 
+.net-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0.75rem 0;
+}
+
+.net-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  cursor: pointer;
+}
+
+.net-toggle input {
+  margin-top: 0.2rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+}
+
+.net-toggle__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.net-toggle__title {
+  font-weight: 600;
+}
+
+.net-toggle__desc {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 .file-table__name {
   word-break: break-all;
   max-width: 28rem;

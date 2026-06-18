@@ -180,3 +180,13 @@ class EngineRecord(Base):
     upload_limit: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AppSetting(Base):
+    """Глобальные настройки приложения (key-value). Например, политика DHT/PEX/LSD."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

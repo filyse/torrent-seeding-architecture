@@ -104,6 +104,11 @@ def _ti_is_private(ti) -> bool:
     return _urls_look_private(urls)
 
 
+def _tflag(lt, name):
+    tf = getattr(lt, "torrent_flags", None)
+    return getattr(tf, name, None) if tf is not None else None
+
+
 def _private_flags_mask(lt) -> int:
     """Битовая маска disable_dht|disable_pex|disable_lsd (то, что есть в биндинге)."""
     tf = getattr(lt, "torrent_flags", None)
@@ -114,6 +119,27 @@ def _private_flags_mask(lt) -> int:
         flag = getattr(tf, name, None)
         if flag is not None:
             mask |= int(flag)
+    return mask
+
+
+def _effective_disable_mask(lt, private: bool, net: dict | None) -> int:
+    """Per-torrent маска отключений с учётом приватности и глобальной политики.
+
+    DHT/LSD глобально гасятся на уровне сессии (enable_dht/enable_lsd), поэтому в
+    per-torrent маску они попадают только для приватных раздач. У PEX глобального
+    переключателя сессии в libtorrent 2.0 нет — поэтому глобальное отключение PEX
+    эмулируем per-torrent флагом disable_pex."""
+    net = net or {}
+    mask = 0
+    d = _tflag(lt, "disable_dht")
+    if d is not None and private:
+        mask |= int(d)
+    ls = _tflag(lt, "disable_lsd")
+    if ls is not None and private:
+        mask |= int(ls)
+    px = _tflag(lt, "disable_pex")
+    if px is not None and (private or not net.get("pex", True)):
+        mask |= int(px)
     return mask
 
 
@@ -137,11 +163,7 @@ def _handle_is_private(lt, h) -> bool:
     return _urls_look_private(urls)
 
 
-def _apply_private_to_params(lt, p) -> bool:
-    """Если раздача приватная — выставляем disable_dht/pex/lsd на add_torrent_params."""
-    mask = _private_flags_mask(lt)
-    if not mask:
-        return False
+def _params_is_private(lt, p) -> bool:
     priv = _ti_is_private(getattr(p, "ti", None))
     if not priv:
         try:
@@ -149,14 +171,23 @@ def _apply_private_to_params(lt, p) -> bool:
         except Exception:  # noqa: BLE001
             urls = []
         priv = _urls_look_private(urls)
-    if not priv:
+    return priv
+
+
+def _apply_private_to_params(lt, p, net: dict | None = None) -> bool:
+    """Выставить per-torrent отключения на add_torrent_params с учётом приватности
+    раздачи и глобальной политики DHT/PEX/LSD."""
+    priv = _params_is_private(lt, p)
+    mask = _effective_disable_mask(lt, priv, net)
+    if not mask:
         return False
     try:
         p.flags |= mask
     except Exception as exc:  # noqa: BLE001
         log.warning("apply private flags on params failed: %s", exc)
         return False
-    log.info("private torrent detected -> DHT/PEX/LSD disabled")
+    if priv:
+        log.info("private torrent detected -> DHT/PEX/LSD disabled")
     return True
 
 
@@ -286,6 +317,14 @@ class TorrentRuntime(ABC):
         self, db_id: int, on: bool | None = None
     ) -> RuntimeHandle | None:
         return None
+
+    async def net_settings(self) -> dict[str, bool]:
+        return {"dht": True, "pex": True, "lsd": True}
+
+    async def set_net(
+        self, dht: bool | None = None, pex: bool | None = None, lsd: bool | None = None
+    ) -> dict[str, bool]:
+        return await self.net_settings()
 
     async def add_tracker(self, db_id: int, url: str) -> bool:
         return False
@@ -498,6 +537,12 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         # Периодическое сохранение fastresume/session.state — устойчивость к падению/kill -9.
         self._save_interval = _env_int("SEEDING_FASTRESUME_SAVE_INTERVAL", 300)
         self._save_task: asyncio.Task | None = None
+        # Глобальная политика поиска пиров (переопределяется оркестратором при регистрации).
+        self._net = {
+            "dht": _env_bool("LT_ENABLE_DHT", True),
+            "pex": _env_bool("LT_ENABLE_PEX", True),
+            "lsd": _env_bool("LT_ENABLE_LSD", True),
+        }
 
     async def start(self) -> None:
         lt = self._lt
@@ -670,7 +715,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     raise ValueError(f"invalid .torrent data: {exc}") from exc
             p.save_path = save_path
             _clear_auto_managed_params(lt, p)
-            _apply_private_to_params(lt, p)
+            _apply_private_to_params(lt, p, self._net)
             return ses.add_torrent(p)
 
         try:
@@ -1704,17 +1749,19 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             h = self._handles.get(db_id)
         if h is None:
             return None
-        mask = _private_flags_mask(lt)
+        full = _private_flags_mask(lt)
 
         def _apply():
-            want = on
-            if want is None:
-                want = _handle_is_private(lt, h)
-            if mask and hasattr(h, "set_flags") and hasattr(h, "unset_flags"):
-                if want:
-                    h.set_flags(mask)
-                else:
-                    h.unset_flags(mask)
+            priv = on
+            if priv is None:
+                priv = _handle_is_private(lt, h)
+            want_off = _effective_disable_mask(lt, bool(priv), self._net)
+            want_on = full & ~want_off  # биты, которые нужно снять
+            if full and hasattr(h, "set_flags") and hasattr(h, "unset_flags"):
+                if want_off:
+                    h.set_flags(want_off)
+                if want_on:
+                    h.unset_flags(want_on)
             # переаннонс, чтобы изменения подхватились трекером/сессией
             if hasattr(h, "force_reannounce"):
                 try:
@@ -1725,6 +1772,53 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         await asyncio.to_thread(_apply)
         await asyncio.to_thread(save_fastresume, lt, h, db_id)
         return await self._snapshot(db_id)
+
+    async def net_settings(self) -> dict[str, bool]:
+        return dict(self._net)
+
+    async def set_net(
+        self, dht: bool | None = None, pex: bool | None = None, lsd: bool | None = None
+    ) -> dict[str, bool]:
+        """Глобально включить/выключить DHT/PEX/LSD на этом движке.
+
+        DHT/LSD — настройки сессии libtorrent (применяются ко всем раздачам сразу).
+        PEX глобального переключателя сессии не имеет, поэтому проходим по всем
+        раздачам и ставим/снимаем per-torrent флаг disable_pex (приватные остаются
+        без PEX в любом случае)."""
+        lt = self._lt
+        if dht is not None:
+            self._net["dht"] = bool(dht)
+        if pex is not None:
+            self._net["pex"] = bool(pex)
+        if lsd is not None:
+            self._net["lsd"] = bool(lsd)
+        async with self._lock:
+            ses = self._ses
+            handles = list(self._handles.values())
+
+        def _apply():
+            if ses is not None and hasattr(ses, "apply_settings"):
+                try:
+                    ses.apply_settings(
+                        {"enable_dht": self._net["dht"], "enable_lsd": self._net["lsd"]}
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("apply net session settings failed: %s", exc)
+            px = _tflag(lt, "disable_pex")
+            if px is None:
+                return
+            for h in handles:
+                try:
+                    priv = _handle_is_private(lt, h)
+                    if (priv or not self._net["pex"]) and hasattr(h, "set_flags"):
+                        h.set_flags(int(px))
+                    elif hasattr(h, "unset_flags"):
+                        h.unset_flags(int(px))
+                except Exception:  # noqa: BLE001
+                    pass
+
+        await asyncio.to_thread(_apply)
+        return dict(self._net)
 
     async def add_tracker(self, db_id: int, url: str) -> bool:
         async with self._lock:

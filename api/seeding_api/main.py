@@ -24,6 +24,7 @@ from seeding_api.routers import health as health_router
 from seeding_api.routers import jobs as jobs_router
 from seeding_api.routers import quotas as quotas_router
 from seeding_api.routers import session as session_router
+from seeding_api.routers import settings as settings_router
 from seeding_api.routers import stream as stream_router
 from seeding_api.routers import torrents as torrents_router
 
@@ -205,6 +206,11 @@ app.include_router(
 )
 app.include_router(
     quotas_router.router,
+    prefix="/api/v1",
+    dependencies=[Depends(require_auth)],
+)
+app.include_router(
+    settings_router.router,
     prefix="/api/v1",
     dependencies=[Depends(require_auth)],
 )

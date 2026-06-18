@@ -135,6 +135,12 @@ class SessionLimitsIn(BaseModel):
     upload_limit: int | None = None
 
 
+class NetSettingsIn(BaseModel):
+    dht: bool | None = None
+    pex: bool | None = None
+    lsd: bool | None = None
+
+
 class ImportDirectIn(BaseModel):
     source_url: str = Field(..., min_length=4)
     save_path: str = Field(..., min_length=1)
@@ -577,6 +583,18 @@ async def session_stats(request: Request):
 async def set_session_limits(request: Request, body: SessionLimitsIn):
     rt = get_runtime(request)
     return await rt.set_session_limits(body.download_limit, body.upload_limit)
+
+
+@router.get("/session/net-settings")
+async def get_session_net(request: Request):
+    rt = get_runtime(request)
+    return await rt.net_settings()
+
+
+@router.post("/session/net-settings")
+async def set_session_net(request: Request, body: NetSettingsIn):
+    rt = get_runtime(request)
+    return await rt.set_net(body.dht, body.pex, body.lsd)
 
 
 @router.post("/torrents/{db_id}/trackers", response_model=list[TorrentTrackerOut])
