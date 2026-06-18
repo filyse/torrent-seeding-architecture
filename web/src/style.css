@@ -710,11 +710,27 @@ body {
 }
 
 .detail-label-wrap {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.3rem;
   margin-left: auto;
   flex: 0 0 auto;
+}
+
+/* Редактор метки всплывает поверх, не меняя высоту строки заголовка. */
+.detail-label-editor {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 5;
+  flex-wrap: nowrap;
+  padding: 0.35rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
 
 .detail-label-chip {

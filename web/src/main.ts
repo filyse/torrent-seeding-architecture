@@ -2594,7 +2594,9 @@ async function loadDetail(
       }) as HTMLInputElement;
       const save = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Сохранить"]);
       const cancel = el("button", { type: "button", className: "btn btn--sm" }, ["Отмена"]);
-      labelWrap.replaceChildren(el("div", { className: "detail-title-editor" }, [input, save, cancel]));
+      labelWrap.replaceChildren(
+        el("div", { className: "detail-title-editor detail-label-editor" }, [input, save, cancel]),
+      );
       input.focus();
       input.select();
       const commit = async () => {
