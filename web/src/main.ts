@@ -188,7 +188,20 @@ let currentRole: Role | null = null;
 let currentMe: MeOut | null = null;
 
 type SettingsTab = "info" | "users" | "limits" | "maint" | "logs";
-let activeSettingsTab: SettingsTab = "info";
+const SETTINGS_TABS: readonly SettingsTab[] = ["info", "users", "limits", "maint", "logs"];
+const SETTINGS_TAB_KEY = "seedingSettingsTab";
+
+function readActiveSettingsTab(): SettingsTab {
+  try {
+    const v = localStorage.getItem(SETTINGS_TAB_KEY);
+    if (v && (SETTINGS_TABS as readonly string[]).includes(v)) return v as SettingsTab;
+  } catch {
+    /* ignore */
+  }
+  return "info";
+}
+
+let activeSettingsTab: SettingsTab = readActiveSettingsTab();
 
 function canWrite(): boolean {
   return currentRole === "operator" || currentRole === "admin";
@@ -4168,6 +4181,11 @@ function mountSettingsShell(root: HTMLElement): void {
 
   const selectTab = (id: SettingsTab) => {
     activeSettingsTab = id;
+    try {
+      localStorage.setItem(SETTINGS_TAB_KEY, id);
+    } catch {
+      /* ignore */
+    }
     for (const t of visibleTabs) {
       const on = t.id === id;
       const pane = panes[t.id];
