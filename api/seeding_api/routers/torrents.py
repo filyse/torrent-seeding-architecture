@@ -6,10 +6,10 @@ import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from seeding_db.engine_registry import normalize_save_path
 from seeding_db.models import TorrentStatus
-from seeding_db.repository import TorrentRepository
+from seeding_db.repository import MigrationRepository, TorrentRepository
 
 from seeding_api.deps import DbSession, EnginePoolDep
-from seeding_api.migrate import run_migration, set_progress
+from seeding_api.migrate import cancel_migration, run_migration, set_progress
 from seeding_api.runtime_sync import merge_runtime_into_row
 from seeding_api.schemas import (
     BatchUploadItem,
@@ -400,34 +400,18 @@ async def migrate_torrent(
     await repo.update_status(torrent_id, TorrentStatus.migrating.value)
     await session.commit()
 
-    progress_store = getattr(request.app.state, "migrate_progress", None)
-    if progress_store is None:
-        progress_store = {}
-        request.app.state.migrate_progress = progress_store
-    set_progress(progress_store, torrent_id, "preparing", message=f"→ {target_id}")
-
-    task = asyncio.create_task(
-        run_migration(
-            request.app.state.session_factory,
-            pool,
-            torrent_id=torrent_id,
-            source_engine_id=row.engine_id,
-            target_engine_id=target_id,
-            source_save_path=source_save_path,
-            target_save_path=target_save_path,
-            src_content_path=src_content_path,
-            display_name=row.display_name,
-            transport=mode,
-            progress_store=progress_store,
-        )
+    _launch_migration(
+        request, pool,
+        torrent_id=torrent_id,
+        source_engine_id=row.engine_id,
+        target_engine_id=target_id,
+        source_save_path=source_save_path,
+        target_save_path=target_save_path,
+        src_content_path=src_content_path,
+        display_name=row.display_name,
+        transport=mode,
+        resume=False,
     )
-    tasks = getattr(request.app.state, "migrate_tasks", None)
-    if tasks is None:
-        tasks = set()
-        request.app.state.migrate_tasks = tasks
-    tasks.add(task)
-    task.add_done_callback(tasks.discard)
-
     return {
         "id": torrent_id,
         "status": TorrentStatus.migrating.value,
@@ -437,20 +421,136 @@ async def migrate_torrent(
     }
 
 
+def _launch_migration(
+    request: Request,
+    pool,
+    *,
+    torrent_id: int,
+    source_engine_id,
+    target_engine_id: str,
+    source_save_path: str,
+    target_save_path: str,
+    src_content_path: str,
+    display_name: str,
+    transport: str,
+    resume: bool,
+) -> None:
+    """Запустить фоновую задачу переноса и зарегистрировать её в app.state."""
+    progress_store = getattr(request.app.state, "migrate_progress", None)
+    if progress_store is None:
+        progress_store = {}
+        request.app.state.migrate_progress = progress_store
+    set_progress(
+        progress_store, torrent_id, "preparing",
+        message=f"{'resume' if resume else 'start'} → {target_engine_id}",
+    )
+    task = asyncio.create_task(
+        run_migration(
+            request.app.state.session_factory,
+            pool,
+            torrent_id=torrent_id,
+            source_engine_id=source_engine_id,
+            target_engine_id=target_engine_id,
+            source_save_path=source_save_path,
+            target_save_path=target_save_path,
+            src_content_path=src_content_path,
+            display_name=display_name,
+            transport=transport,
+            progress_store=progress_store,
+            resume=resume,
+        )
+    )
+    tasks = getattr(request.app.state, "migrate_tasks", None)
+    if tasks is None:
+        tasks = set()
+        request.app.state.migrate_tasks = tasks
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+
+
+@router.post("/{torrent_id}/migrate/resume")
+async def resume_migration(torrent_id: int, request: Request, session: DbSession, pool: EnginePoolDep):
+    """Возобновить прерванный/неуспешный перенос с места обрыва (без копии с нуля)."""
+    mrepo = MigrationRepository(session)
+    job = await mrepo.get(torrent_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="no migration job to resume")
+    if job.state == "running":
+        raise HTTPException(status_code=409, detail="migration already running")
+    if pool.spec(job.target_engine_id) is None or pool.spec(job.source_engine_id) is None:
+        raise HTTPException(status_code=422, detail="engine of this migration is no longer known")
+
+    repo = TorrentRepository(session)
+    await repo.update_status(torrent_id, TorrentStatus.migrating.value)
+    await session.commit()
+
+    _launch_migration(
+        request, pool,
+        torrent_id=torrent_id,
+        source_engine_id=job.source_engine_id,
+        target_engine_id=job.target_engine_id,
+        source_save_path=job.source_save_path,
+        target_save_path=job.target_save_path,
+        src_content_path=job.src_content_path,
+        display_name=job.display_name,
+        transport=job.transport,
+        resume=True,
+    )
+    return {"id": torrent_id, "status": TorrentStatus.migrating.value, "resumed": True}
+
+
+@router.post("/{torrent_id}/migrate/cancel")
+async def cancel_migration_endpoint(
+    torrent_id: int, request: Request, session: DbSession, pool: EnginePoolDep
+):
+    """Полностью отменить перенос: удалить частичную копию на цели, вернуть источник."""
+    ok = await cancel_migration(
+        request.app.state.session_factory, pool, torrent_id=torrent_id
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="no migration job to cancel")
+    store = getattr(request.app.state, "migrate_progress", None)
+    if store is not None:
+        store.pop(torrent_id, None)
+    return {"id": torrent_id, "cancelled": True}
+
+
 @router.get("/{torrent_id}/migrate-status")
 async def migrate_status(torrent_id: int, request: Request, session: DbSession):
-    """Текущий прогресс переноса для опроса из UI (фаза + проценты)."""
+    """Текущий прогресс переноса для опроса из UI (фаза + проценты + возобновляемость)."""
+    mrepo = MigrationRepository(session)
+    job = await mrepo.get(torrent_id)
     store = getattr(request.app.state, "migrate_progress", None)
     snap = store.get(torrent_id) if store else None
     if snap is not None:
-        return {"id": torrent_id, "active": snap.get("phase") not in ("done", "error"), **snap}
-    # Прогресса нет: либо перенос не запускался, либо движок перезапустился во время него.
+        active = snap.get("phase") not in ("done", "error")
+        resumable = (not active) and bool(job) and job.state == "failed"
+        return {
+            "id": torrent_id, "active": active, "resumable": resumable,
+            "attempts": job.attempts if job else 0, **snap,
+        }
+    # Прогресса в памяти нет (например, после перезапуска оркестратора) — берём из БД-джоба.
+    if job is not None:
+        active = job.state == "running"
+        pct = (job.copied / job.total) if job.total else None
+        return {
+            "id": torrent_id,
+            "active": active,
+            "resumable": job.state == "failed",
+            "phase": job.phase,
+            "progress": pct,
+            "copied": job.copied,
+            "total": job.total,
+            "attempts": job.attempts,
+            "message": job.last_error or None,
+        }
     repo = TorrentRepository(session)
     row = await repo.get_by_id(torrent_id)
     migrating = bool(row and row.status == TorrentStatus.migrating.value)
     return {
         "id": torrent_id,
         "active": migrating,
+        "resumable": False,
         "phase": "migrating" if migrating else "idle",
         "progress": None,
         "message": None,

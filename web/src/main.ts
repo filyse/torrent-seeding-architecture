@@ -1047,6 +1047,8 @@ function buildTrackersSpoiler(
 type MigrateStatusOut = {
   id: number;
   active: boolean;
+  resumable?: boolean;
+  attempts?: number;
   phase: string;
   progress: number | null;
   copied?: number | null;
@@ -1109,8 +1111,67 @@ function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLE
   return wrap;
 }
 
+function buildResumableRow(
+  data: TorrentDetailOut,
+  status: MigrateStatusOut,
+  onChanged: () => void,
+): HTMLElement {
+  const wrap = el("div", { className: "migrate-row migrate-row--resumable" });
+  const pct = typeof status.progress === "number" ? ` (${Math.round(status.progress * 100)}%)` : "";
+  const attempts = status.attempts ? ` · попыток: ${status.attempts}` : "";
+  const msg = status.message ? `: ${status.message}` : "";
+  const resumeBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Возобновить"]);
+  const cancelBtn = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["Отменить"]);
+  resumeBtn.addEventListener("click", async () => {
+    resumeBtn.disabled = true;
+    cancelBtn.disabled = true;
+    try {
+      await postAction(`/torrents/${data.id}/migrate/resume`);
+      showToast("Перенос возобновлён");
+      onChanged();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+      resumeBtn.disabled = false;
+      cancelBtn.disabled = false;
+    }
+  });
+  cancelBtn.addEventListener("click", async () => {
+    if (!window.confirm("Отменить перенос и удалить частичную копию на целевом движке?")) return;
+    resumeBtn.disabled = true;
+    cancelBtn.disabled = true;
+    try {
+      await postAction(`/torrents/${data.id}/migrate/cancel`);
+      showToast("Перенос отменён");
+      onChanged();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+      resumeBtn.disabled = false;
+      cancelBtn.disabled = false;
+    }
+  });
+  wrap.append(
+    el("span", { className: "migrate-row__label migrate-row__label--warn" }, [
+      `Перенос прерван${pct}${attempts}${msg}`,
+    ]),
+    el("div", { className: "btn-row" }, [resumeBtn, cancelBtn]),
+  );
+  return wrap;
+}
+
 function buildMigrateRow(data: TorrentDetailOut, onStarted: () => void): HTMLElement {
   if (data.status === "migrating") return buildMigrateProgress(data, onStarted);
+  const host = el("div", { className: "migrate-host" });
+  // Если есть прерванный перенос — предложить возобновить/отменить вместо выбора движка.
+  void (async () => {
+    try {
+      const s = await fetchJson<MigrateStatusOut>(`/torrents/${data.id}/migrate-status`);
+      if (s.resumable && document.body.contains(host)) {
+        host.replaceChildren(buildResumableRow(data, s, onStarted));
+      }
+    } catch {
+      // нет джоба/ошибка — оставляем обычный выбор движка
+    }
+  })();
   const wrap = el("div", { className: "migrate-row" });
   const select = el("select", { className: "select" }) as HTMLSelectElement;
   select.append(el("option", { value: "" }, ["Загрузка движков…"]));
@@ -1170,7 +1231,8 @@ function buildMigrateRow(data: TorrentDetailOut, onStarted: () => void): HTMLEle
     select,
     btn,
   );
-  return wrap;
+  host.append(wrap);
+  return host;
 }
 
 function buildLimitsForm(data: TorrentDetailOut, onApplied: () => void): HTMLElement {

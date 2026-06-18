@@ -671,20 +671,10 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self._migrate_progress[db_id] = {"phase": "copying", "copied": 0, "total": total}
 
         def _copy() -> None:
+            # Инкрементально (по файлам): уже скопированные файлы с совпадающим размером
+            # пропускаются — это делает перенос возобновляемым после сбоя без копии с нуля.
             prog = self._migrate_progress.get(db_id)
-            if dst.exists():
-                # Уже на месте (повторный запуск/частичный перенос) — recheck разберётся.
-                if prog is not None:
-                    prog["copied"] = prog.get("total", 0)
-                return
-            tmp = dst.with_name(dst.name + ".part")
-            if tmp.exists():
-                if tmp.is_dir():
-                    shutil.rmtree(tmp, ignore_errors=True)
-                else:
-                    tmp.unlink(missing_ok=True)
-            self._copy_tracked(src, tmp, prog)
-            os.replace(tmp, dst)
+            self._copy_incremental(src, dst, prog)
 
         try:
             await asyncio.to_thread(_copy)
@@ -800,24 +790,42 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         return total
 
     @staticmethod
-    def _copy_tracked(src: Path, dst: Path, prog: dict | None) -> None:
-        """Копирование с обновлением счётчика байтов (для отображения прогресса переноса)."""
+    def _copy_incremental(src: Path, dst: Path, prog: dict | None) -> None:
+        """Возобновляемое копирование по файлам: файл с совпадающим размером пропускается,
+        остальные пишутся через `<имя>.part` + атомарный rename — частичная копия переживает
+        обрыв, повтор докопирует недостающее (для отображения прогресса считаем байты)."""
         chunk = 4 * 1024 * 1024
 
+        def _bump(n: int) -> None:
+            if prog is not None:
+                prog["copied"] = prog.get("copied", 0) + n
+
         def _copy_file(s: Path, d: Path) -> None:
+            try:
+                s_size = s.stat().st_size
+            except OSError:
+                s_size = 0
+            if d.exists():
+                try:
+                    if d.stat().st_size == s_size:
+                        _bump(s_size)  # уже на месте — пропускаем, но учитываем в прогрессе
+                        return
+                except OSError:
+                    pass
             d.parent.mkdir(parents=True, exist_ok=True)
-            with open(s, "rb") as fin, open(d, "wb") as fout:
+            part = d.with_name(d.name + ".part")
+            with open(s, "rb") as fin, open(part, "wb") as fout:
                 while True:
                     buf = fin.read(chunk)
                     if not buf:
                         break
                     fout.write(buf)
-                    if prog is not None:
-                        prog["copied"] = prog.get("copied", 0) + len(buf)
+                    _bump(len(buf))
             try:
-                shutil.copystat(s, d)
+                shutil.copystat(s, part)
             except OSError:
                 pass
+            os.replace(part, d)
 
         if src.is_file():
             _copy_file(src, dst)
@@ -829,6 +837,102 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             target_dir.mkdir(parents=True, exist_ok=True)
             for fn in files:
                 _copy_file(Path(root) / fn, target_dir / fn)
+
+    # --- Возобновляемый сетевой перенос (per-file pull через оркестратор) ---
+    @staticmethod
+    def _safe_join(base: Path, rel: str) -> Path:
+        """Склеить base + rel, не дав выйти за пределы base (защита от path traversal)."""
+        target = (base / rel).resolve()
+        base_r = base.resolve()
+        if base_r != target and base_r not in target.parents:
+            raise ValueError(f"unsafe path: {rel}")
+        return target
+
+    async def content_manifest(self, db_id: int) -> dict | None:
+        """Список файлов контента раздачи (root + относительные пути и размеры)."""
+        loc = await self.content_location(db_id)
+        if loc is None:
+            return None
+        path, total = loc
+        p = Path(path)
+
+        def _scan() -> dict:
+            files: list[dict] = []
+            if p.is_file():
+                files.append({"path": p.name, "size": p.stat().st_size})
+                return {"root": p.name, "files": files, "total": total}
+            for root, _dirs, fnames in os.walk(p):
+                for fn in fnames:
+                    fp = Path(root) / fn
+                    try:
+                        size = fp.stat().st_size
+                    except OSError:
+                        continue
+                    files.append({"path": str(fp.relative_to(p)), "size": size})
+            return {"root": p.name, "files": files, "total": total}
+
+        return await asyncio.to_thread(_scan)
+
+    async def content_file_path(self, db_id: int, rel: str) -> Path | None:
+        """Абсолютный путь к файлу контента (для отдачи с поддержкой Range)."""
+        loc = await self.content_location(db_id)
+        if loc is None:
+            return None
+        base = Path(loc[0])
+        if base.is_file():
+            return base if rel in ("", base.name) else None
+        return self._safe_join(base, rel)
+
+    @staticmethod
+    def import_file_size(save_path: str, root: str, rel: str) -> int:
+        """Сколько байт файла уже лежит у приёмника (для возобновления с этого смещения)."""
+        base = Path(save_path) / root
+        try:
+            target = LibtorrentTorrentRuntime._safe_join(base, rel)
+        except ValueError:
+            return 0
+        try:
+            return target.stat().st_size if target.is_file() else 0
+        except OSError:
+            return 0
+
+    async def import_file_write(
+        self, save_path: str, root: str, rel: str, offset: int, src_iter: AsyncIterator[bytes]
+    ) -> int:
+        """Дописать файл приёмника с указанного смещения (возобновляемый сетевой приём)."""
+        base = Path(save_path) / root
+        target = self._safe_join(base, rel)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        loop = asyncio.get_running_loop()
+
+        def _open():
+            f = open(target, "r+b" if target.exists() else "wb")
+            f.seek(int(offset))
+            f.truncate()
+            return f
+
+        f = await loop.run_in_executor(None, _open)
+        written = 0
+        try:
+            async for chunk in src_iter:
+                if not chunk:
+                    continue
+                await loop.run_in_executor(None, f.write, chunk)
+                written += len(chunk)
+        finally:
+            await loop.run_in_executor(None, f.close)
+        return written
+
+    async def import_finalize(self, db_id: int) -> RuntimeHandle | None:
+        """Завершить возобновляемый импорт: add + recheck по уже собранному на диске контенту."""
+        staged = self._staged_imports.pop(db_id, None)
+        if staged is None:
+            return None
+        handle = await self.add_torrent(
+            db_id, None, staged["save_path"], torrent_data=staged["torrent_data"]
+        )
+        await self.recheck(db_id)
+        return handle
 
     def _persist_torrent_file(self, db_id: int, torrent_data: bytes) -> None:
         d = self._torrent_files_dir()

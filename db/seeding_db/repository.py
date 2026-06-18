@@ -9,6 +9,7 @@ from seeding_db.models import (
     AuditRecord,
     EngineRecord,
     LabelQuota,
+    MigrationJob,
     SessionRecord,
     TorrentMeter,
     TorrentRecord,
@@ -415,6 +416,76 @@ class AuditRepository:
         )
         await self._session.flush()
         return int(result.rowcount or 0)
+
+
+class MigrationRepository:
+    """Состояние переносов между движками (Фаза 4, возобновляемость)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, torrent_id: int) -> MigrationJob | None:
+        return await self._session.get(MigrationJob, torrent_id)
+
+    async def list_active(self) -> list[MigrationJob]:
+        result = await self._session.execute(
+            select(MigrationJob).where(MigrationJob.state.in_(["running", "failed"]))
+        )
+        return list(result.scalars())
+
+    async def upsert(self, torrent_id: int, **fields) -> MigrationJob:
+        row = await self._session.get(MigrationJob, torrent_id)
+        if row is None:
+            row = MigrationJob(torrent_id=torrent_id)
+            self._session.add(row)
+        for k, v in fields.items():
+            setattr(row, k, v)
+        row.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def set_progress(
+        self, torrent_id: int, *, phase: str, copied: int, total: int
+    ) -> None:
+        row = await self._session.get(MigrationJob, torrent_id)
+        if row is None:
+            return
+        row.phase = phase
+        row.copied = int(copied)
+        row.total = int(total)
+        row.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
+
+    async def set_state(
+        self, torrent_id: int, state: str, *, phase: str | None = None, error: str | None = None
+    ) -> None:
+        row = await self._session.get(MigrationJob, torrent_id)
+        if row is None:
+            return
+        row.state = state
+        if phase is not None:
+            row.phase = phase
+        if error is not None:
+            row.last_error = error[:500]
+        row.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
+
+    async def bump_attempts(self, torrent_id: int) -> None:
+        row = await self._session.get(MigrationJob, torrent_id)
+        if row is None:
+            return
+        row.attempts = int(row.attempts or 0) + 1
+        row.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
+
+    async def delete(self, torrent_id: int) -> bool:
+        row = await self._session.get(MigrationJob, torrent_id)
+        if row is None:
+            return False
+        await self._session.delete(row)
+        await self._session.flush()
+        return True
 
 
 class QuotaRepository:

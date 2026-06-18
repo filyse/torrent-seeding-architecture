@@ -189,6 +189,66 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def content_manifest(self, db_id: int) -> dict | None:
+        """Манифест контента источника (root + файлы) для возобновляемого переноса."""
+        r = await self._client.get(f"/internal/v1/torrents/{db_id}/content-manifest")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
+    @contextlib.asynccontextmanager
+    async def stream_content_file(self, db_id: int, path: str, offset: int = 0):
+        """Открыть потоковую выгрузку одного файла контента с движка-источника (с Range)."""
+        timeout = httpx.Timeout(connect=30.0, read=None, write=None, pool=None)
+        headers = {"Range": f"bytes={int(offset)}-"} if offset > 0 else {}
+        async with self._client.stream(
+            "GET",
+            f"/internal/v1/torrents/{db_id}/content-file",
+            params={"path": path},
+            headers=headers,
+            timeout=timeout,
+        ) as resp:
+            resp.raise_for_status()
+            yield resp
+
+    async def import_file_size(self, db_id: int, save_path: str, root: str, path: str) -> int:
+        r = await self._client.get(
+            f"/internal/v1/torrents/{db_id}/import-file-size",
+            params={"save_path": save_path, "root": root, "path": path},
+        )
+        r.raise_for_status()
+        data = r.json()
+        return int(data.get("size", 0)) if isinstance(data, dict) else 0
+
+    async def import_file_append(
+        self,
+        db_id: int,
+        save_path: str,
+        root: str,
+        path: str,
+        offset: int,
+        content_iter: AsyncIterator[bytes],
+    ) -> int:
+        r = await self._client.post(
+            f"/internal/v1/torrents/{db_id}/import-file",
+            params={"save_path": save_path, "root": root, "path": path, "offset": int(offset)},
+            content=content_iter,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=httpx.Timeout(connect=30.0, read=None, write=None, pool=None),
+        )
+        r.raise_for_status()
+        data = r.json()
+        return int(data.get("written", 0)) if isinstance(data, dict) else 0
+
+    async def import_finalize(self, db_id: int) -> dict:
+        r = await self._client.post(
+            f"/internal/v1/torrents/{db_id}/import-finalize",
+            timeout=httpx.Timeout(connect=30.0, read=None, write=None, pool=None),
+        )
+        r.raise_for_status()
+        return r.json()
+
     async def restore_from_disk(self, db_id: int, save_path: str) -> dict | None:
         r = await self._client.post(
             f"/internal/v1/torrents/{db_id}/restore-from-disk",

@@ -1,11 +1,16 @@
-"""Перенос раздачи между движками одной машины (Фаза 4).
+"""Перенос раздачи между движками (Фаза 4) — возобновляемый.
 
-Стратегия «pull через /media»: целевой движок читает контент исходного движка через общий
-read-only mount (`/media`), копирует к себе, перепроверяет хэш и поднимает раздачу. Источник
-удаляется только после того, как цель подтвердила полную копию — данные не теряются при сбое.
+Стратегии передачи контента:
+  • `media` — на одной машине: приёмник копирует контент источника через общий read-only
+    mount (`/media`). Копирование инкрементальное (по файлам), поэтому повтор после сбоя
+    докопирует только недостающее.
+  • `http` — между машинами: оркестратор тянет контент пофайлово (с Range) и проксирует в
+    приёмник; уже принятые файлы/байты пропускаются. Повтор продолжает с места обрыва.
 
-Перенос идёт фоном (может занять минуты на копировании): пока он идёт, в БД держится статус
-`migrating` (см. `merge_runtime_into_row`), а по завершении/ошибке статус возвращается к реальному.
+Источник всё время остаётся нетронутым (только на паузе) и удаляется лишь после того, как
+цель подтвердила полную копию. При сбое частичная копия на цели НЕ удаляется — состояние
+переноса фиксируется в БД (`migration_jobs`, state=failed), и перенос можно возобновить;
+полная отмена (с удалением частичной копии) — отдельным действием.
 """
 
 from __future__ import annotations
@@ -17,9 +22,12 @@ import time
 
 import httpx
 from seeding_db.models import TorrentStatus
-from seeding_db.repository import TorrentRepository
+from seeding_db.repository import MigrationRepository, TorrentRepository
 
 log = logging.getLogger(__name__)
+
+# Не чаще раза в N секунд пишем прогресс в БД (в память — каждый чанк).
+_DB_PROGRESS_INTERVAL = 3.0
 
 
 def set_progress(
@@ -32,7 +40,7 @@ def set_progress(
     total: int | None = None,
     message: str | None = None,
 ) -> None:
-    """Записать снимок прогресса переноса для опроса из UI."""
+    """Записать снимок прогресса переноса для опроса из UI (быстрый in-memory store)."""
     if store is None:
         return
     store[torrent_id] = {
@@ -43,6 +51,7 @@ def set_progress(
         "message": message,
         "updated_at": time.time(),
     }
+
 
 _CHECKING_STATES = {
     "checking_files",
@@ -89,8 +98,9 @@ async def _wait_until_checked(
 async def _run_import_with_progress(
     target, store: dict | None, torrent_id: int,
     torrent_bytes: bytes, target_save_path: str, src_content_path: str,
+    on_progress,
 ) -> None:
-    """Запустить import_local и параллельно опрашивать прогресс копирования у движка."""
+    """media-перенос: import_local (инкрементальная копия) + опрос прогресса у движка."""
     task = asyncio.create_task(
         target.import_local(torrent_id, torrent_bytes, target_save_path, src_content_path)
     )
@@ -105,6 +115,7 @@ async def _run_import_with_progress(
             phase = str(prog.get("phase") or "copying")
             pct = (copied / total) if total > 0 else None
             set_progress(store, torrent_id, phase, progress=pct, copied=copied, total=total)
+            await on_progress(phase, copied, total)
         try:
             await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
         except asyncio.TimeoutError:
@@ -114,25 +125,50 @@ async def _run_import_with_progress(
     await task
 
 
-async def _http_transfer(
+async def _http_transfer_resumable(
     source, target, store: dict | None, torrent_id: int,
-    torrent_bytes: bytes, target_save_path: str,
+    torrent_bytes: bytes, target_save_path: str, on_progress,
 ) -> None:
-    """Сетевой перенос между машинами: оркестратор стримит контент из источника tar-потоком
-    и проксирует его в приёмник, попутно считая прогресс по переданным байтам."""
-    async with source.stream_content(torrent_id) as (resp, total):
-        await target.stage_remote(torrent_id, torrent_bytes, target_save_path, total)
-        copied = 0
+    """Сетевой перенос пофайлово с докачкой: оркестратор тянет каждый файл с источника
+    (с Range от уже принятого размера) и дописывает его на приёмнике."""
+    manifest = await source.content_manifest(torrent_id)
+    if not manifest:
+        raise RuntimeError("source content manifest unavailable")
+    root = str(manifest.get("root") or "")
+    files = manifest.get("files") or []
+    total = int(manifest.get("total") or sum(int(f.get("size") or 0) for f in files))
+    await target.stage_remote(torrent_id, torrent_bytes, target_save_path, total)
 
-        async def gen():
-            nonlocal copied
-            async for chunk in resp.aiter_bytes():
-                copied += len(chunk)
-                pct = (copied / total) if total > 0 else None
-                set_progress(store, torrent_id, "copying", progress=pct, copied=copied, total=total)
-                yield chunk
+    copied = 0
+    for f in files:
+        rel = str(f.get("path") or "")
+        size = int(f.get("size") or 0)
+        if not rel:
+            continue
+        have = min(await target.import_file_size(torrent_id, target_save_path, root, rel), size)
+        if size > 0 and have >= size:
+            copied += size
+            pct = (copied / total) if total > 0 else None
+            set_progress(store, torrent_id, "copying", progress=pct, copied=copied, total=total)
+            await on_progress("copying", copied, total)
+            continue
 
-        await target.import_remote(torrent_id, gen())
+        copied += have  # уже принятая часть файла
+        async with source.stream_content_file(torrent_id, rel, have) as resp:
+            async def gen():
+                nonlocal copied
+                async for chunk in resp.aiter_bytes():
+                    copied += len(chunk)
+                    pct = (copied / total) if total > 0 else None
+                    set_progress(store, torrent_id, "copying", progress=pct, copied=copied, total=total)
+                    await on_progress("copying", copied, total)
+                    yield chunk
+
+            await target.import_file_append(torrent_id, target_save_path, root, rel, have, gen())
+
+    set_progress(store, torrent_id, "checking", progress=None, copied=copied, total=total)
+    await on_progress("checking", copied, total)
+    await target.import_finalize(torrent_id)
 
 
 async def run_migration(
@@ -148,16 +184,40 @@ async def run_migration(
     display_name: str,
     transport: str = "media",
     progress_store: dict | None = None,
+    resume: bool = False,
 ) -> None:
-    """Выполнить перенос. Любой сбой откатывает изменения и не трогает источник."""
+    """Выполнить (или возобновить) перенос. При сбое частичная копия сохраняется для повтора."""
     source = pool.client_for(str(source_engine_id))
     target = pool.client_for(target_engine_id)
     store = progress_store
+    last_db_write = 0.0
 
     async def _set_status(status: str) -> None:
         async with session_factory() as session:
             repo = TorrentRepository(session)
             await repo.update_status(torrent_id, status)
+            await session.commit()
+
+    async def _job(**fields) -> None:
+        async with session_factory() as session:
+            await MigrationRepository(session).upsert(torrent_id, **fields)
+            await session.commit()
+
+    async def _job_state(state: str, *, phase: str | None = None, error: str | None = None) -> None:
+        async with session_factory() as session:
+            await MigrationRepository(session).set_state(torrent_id, state, phase=phase, error=error)
+            await session.commit()
+
+    async def _on_progress(phase: str, copied: int, total: int) -> None:
+        nonlocal last_db_write
+        now = time.monotonic()
+        if now - last_db_write < _DB_PROGRESS_INTERVAL:
+            return
+        last_db_write = now
+        async with session_factory() as session:
+            await MigrationRepository(session).set_progress(
+                torrent_id, phase=phase, copied=copied, total=total
+            )
             await session.commit()
 
     async def _commit_switch() -> None:
@@ -167,46 +227,61 @@ async def run_migration(
             await repo.update_status(torrent_id, TorrentStatus.seeding.value)
             await session.commit()
 
+    await _job(
+        source_engine_id=str(source_engine_id),
+        target_engine_id=target_engine_id,
+        source_save_path=source_save_path,
+        target_save_path=target_save_path,
+        src_content_path=src_content_path,
+        display_name=display_name,
+        transport=transport,
+        state="running",
+        phase="preparing",
+        last_error="",
+    )
+    async with session_factory() as session:
+        await MigrationRepository(session).bump_attempts(torrent_id)
+        await session.commit()
+
     try:
-        set_progress(store, torrent_id, "preparing", message=f"→ {target_engine_id}")
+        verb = "resume" if resume else "start"
+        set_progress(store, torrent_id, "preparing", message=f"{verb} → {target_engine_id}")
         torrent_bytes = await source.get_torrent_file(torrent_id)
         if not torrent_bytes:
             raise RuntimeError("source engine has no .torrent file (magnet-only torrents not supported)")
 
-        # Источник на паузу, но НЕ удаляем — данные нужны для копии и для отката.
+        # Источник на паузу, но НЕ удаляем — данные нужны для копии и для возобновления.
         try:
             await source.pause(torrent_id)
         except httpx.HTTPError as exc:
             log.warning("migrate %s: pause source failed (continuing): %s", torrent_id, exc)
 
-        # Копирование контента + add + recheck на целевом движке.
         set_progress(store, torrent_id, "copying", progress=0.0)
+        await _job_state("running", phase="copying")
         if transport == "http":
-            # Между машинами: контент идёт по сети через оркестратор (общего /media нет).
-            await _http_transfer(source, target, store, torrent_id, torrent_bytes, target_save_path)
+            await _http_transfer_resumable(
+                source, target, store, torrent_id, torrent_bytes, target_save_path, _on_progress
+            )
         else:
-            # На одной машине: приёмник копирует контент из общего read-only /media.
             await _run_import_with_progress(
-                target, store, torrent_id, torrent_bytes, target_save_path, src_content_path
+                target, store, torrent_id, torrent_bytes, target_save_path, src_content_path,
+                _on_progress,
             )
 
         snap = await _wait_until_checked(target, torrent_id, _verify_timeout(), store)
         progress = float(snap.get("progress") or 0.0) if snap else 0.0
         if progress < 0.999:
-            # Копия неполная/битая — откат: убрать частичную копию с цели, источник оставить.
-            log.error("migrate %s: target incomplete after copy (progress=%.4f), rolling back",
+            # Копия неполная — НЕ удаляем частичные данные: оставляем для возобновления.
+            log.error("migrate %s: target incomplete (progress=%.4f), keeping partial for resume",
                       torrent_id, progress)
-            try:
-                await target.remove_from_runtime(
-                    torrent_id, delete_files=True,
-                    save_path=target_save_path, display_name=display_name,
-                )
-            except httpx.HTTPError as exc:
-                log.warning("migrate %s: cleanup target after failed copy: %s", torrent_id, exc)
             await _resume_source(source, torrent_id)
             await _set_status(TorrentStatus.seeding.value)
-            set_progress(store, torrent_id, "error",
-                         message=f"копия неполная (progress={progress:.2%})")
+            await _job_state(
+                "failed", phase="error",
+                error=f"копия неполная (progress={progress:.2%}) — можно возобновить",
+            )
+            set_progress(store, torrent_id, "error", progress=progress,
+                         message=f"копия неполная ({progress:.2%}) — возобновляемо")
             return
 
         # Цель подтвердила полную копию — переключаем БД и чистим источник.
@@ -219,6 +294,9 @@ async def run_migration(
             )
         except httpx.HTTPError as exc:
             log.warning("migrate %s: source cleanup failed (content may linger): %s", torrent_id, exc)
+        async with session_factory() as session:
+            await MigrationRepository(session).delete(torrent_id)
+            await session.commit()
         set_progress(store, torrent_id, "done", progress=1.0,
                      message=f"{source_engine_id} → {target_engine_id}")
         log.info("migrate %s: %s -> %s done", torrent_id, source_engine_id, target_engine_id)
@@ -229,7 +307,46 @@ async def run_migration(
             await _set_status(TorrentStatus.seeding.value)
         except Exception:  # noqa: BLE001
             log.exception("migrate %s: failed to reset status", torrent_id)
-        set_progress(store, torrent_id, "error", message=str(exc)[:200])
+        try:
+            await _job_state("failed", phase="error", error=str(exc)[:400])
+        except Exception:  # noqa: BLE001
+            log.exception("migrate %s: failed to persist job error", torrent_id)
+        set_progress(store, torrent_id, "error",
+                     message=f"{str(exc)[:180]} — возобновляемо")
+
+
+async def cancel_migration(
+    session_factory,
+    pool,
+    *,
+    torrent_id: int,
+) -> bool:
+    """Полная отмена переноса: удалить частичную копию на цели, вернуть источник в работу."""
+    async with session_factory() as session:
+        job = await MigrationRepository(session).get(torrent_id)
+        if job is None:
+            return False
+        target_engine_id = job.target_engine_id
+        target_save_path = job.target_save_path
+        source_engine_id = job.source_engine_id
+        display_name = job.display_name
+
+    target = pool.client_for(target_engine_id)
+    try:
+        await target.remove_from_runtime(
+            torrent_id, delete_files=True,
+            save_path=target_save_path, display_name=display_name,
+        )
+    except httpx.HTTPError as exc:
+        log.warning("cancel migrate %s: target cleanup failed: %s", torrent_id, exc)
+
+    await _resume_source(pool.client_for(str(source_engine_id)), torrent_id)
+    async with session_factory() as session:
+        repo = TorrentRepository(session)
+        await repo.update_status(torrent_id, TorrentStatus.seeding.value)
+        await MigrationRepository(session).delete(torrent_id)
+        await session.commit()
+    return True
 
 
 async def _resume_source(source, torrent_id: int) -> None:

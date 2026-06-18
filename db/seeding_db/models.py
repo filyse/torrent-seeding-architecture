@@ -103,6 +103,34 @@ class AuditRecord(Base):
     summary: Mapped[str] = mapped_column(Text, default="")
 
 
+class MigrationJob(Base):
+    """Состояние переноса раздачи между движками (Фаза 4, возобновляемость).
+
+    Хранится в БД, чтобы перенос переживал перезапуск оркестратора и мог быть
+    возобновлён после сбоя без полного отката: частичная копия на цели сохраняется,
+    повтор докачивает недостающие файлы (см. `migrate.run_migration`)."""
+
+    __tablename__ = "migration_jobs"
+
+    torrent_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    source_engine_id: Mapped[str] = mapped_column(String(64))
+    target_engine_id: Mapped[str] = mapped_column(String(64))
+    source_save_path: Mapped[str] = mapped_column(Text, default="")
+    target_save_path: Mapped[str] = mapped_column(Text, default="")
+    src_content_path: Mapped[str] = mapped_column(Text, default="")
+    display_name: Mapped[str] = mapped_column(String(512), default="")
+    transport: Mapped[str] = mapped_column(String(16), default="media")
+    # running | failed | done | cancelled
+    state: Mapped[str] = mapped_column(String(16), default="running")
+    phase: Mapped[str] = mapped_column(String(32), default="preparing")
+    copied: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    total: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class LabelQuota(Base):
     """Кумулятивная квота по объёму отдачи на метку (Фаза 5).
 

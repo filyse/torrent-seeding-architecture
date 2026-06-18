@@ -1389,6 +1389,20 @@ body {
   width: 100%;
 }
 
+/* ---- Возобновляемый перенос ---- */
+.migrate-row--resumable {
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+.migrate-row__label--warn {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 /* ---- Квоты по меткам ---- */
 .quota-meta {
   flex: 1;

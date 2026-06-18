@@ -301,6 +301,122 @@ async def import_remote_torrent(request: Request, db_id: int):
     return RuntimeHandleOut.model_validate(h)
 
 
+@router.get("/torrents/{db_id}/content-manifest")
+async def content_manifest(request: Request, db_id: int):
+    """Манифест контента (root + файлы и размеры) для возобновляемого сетевого переноса."""
+    rt = get_runtime(request)
+    fn = getattr(rt, "content_manifest", None)
+    data = await fn(db_id) if fn is not None else None
+    if data is None:
+        raise HTTPException(status_code=404, detail="torrent not in runtime")
+    return data
+
+
+@router.get("/torrents/{db_id}/content-file")
+async def content_file(
+    request: Request,
+    db_id: int,
+    path: str = Query(..., min_length=1),
+    range: str | None = Header(default=None),
+):
+    """Отдать один файл контента с поддержкой Range (докачка с нужного смещения)."""
+    rt = get_runtime(request)
+    fn = getattr(rt, "content_file_path", None)
+    fp = await fn(db_id, path) if fn is not None else None
+    if fp is None or not Path(fp).is_file():
+        raise HTTPException(status_code=404, detail="content file not found")
+    fp = Path(fp)
+    size = fp.stat().st_size
+    start = 0
+    end = size - 1
+    status = 200
+    if range and range.startswith("bytes="):
+        spec = range[len("bytes="):].split(",")[0].strip()
+        lo, _, hi = spec.partition("-")
+        try:
+            if lo:
+                start = int(lo)
+            if hi:
+                end = int(hi)
+        except ValueError:
+            start, end = 0, size - 1
+        start = max(0, min(start, size))
+        end = min(end, size - 1)
+        status = 206
+    length = max(0, end - start + 1)
+
+    async def gen():
+        loop = asyncio.get_running_loop()
+        remaining = length
+        with open(fp, "rb") as f:
+            f.seek(start)
+            while remaining > 0:
+                chunk = await loop.run_in_executor(None, f.read, min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    headers = {"Content-Length": str(length), "Accept-Ranges": "bytes"}
+    if status == 206:
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    return StreamingResponse(gen(), status_code=status, media_type="application/octet-stream", headers=headers)
+
+
+@router.get("/torrents/{db_id}/import-file-size")
+async def import_file_size(
+    request: Request,
+    db_id: int,
+    save_path: str = Query(..., min_length=1),
+    root: str = Query(..., min_length=1),
+    path: str = Query(..., min_length=1),
+):
+    """Сколько байт файла уже принято (offset для возобновления приёма)."""
+    rt = get_runtime(request)
+    fn = getattr(rt, "import_file_size", None)
+    size = fn(save_path, root, path) if fn is not None else 0
+    return {"size": int(size)}
+
+
+@router.post("/torrents/{db_id}/import-file")
+async def import_file(
+    request: Request,
+    db_id: int,
+    save_path: str = Query(..., min_length=1),
+    root: str = Query(..., min_length=1),
+    path: str = Query(..., min_length=1),
+    offset: int = Query(0, ge=0),
+):
+    """Дописать файл приёмника с offset (тело запроса — байты, возобновляемый приём)."""
+    rt = get_runtime(request)
+    fn = getattr(rt, "import_file_write", None)
+    if fn is None:
+        raise HTTPException(status_code=501, detail="resumable import not supported")
+
+    async def src_iter():
+        async for chunk in request.stream():
+            yield chunk
+
+    try:
+        written = await fn(save_path, root, path, offset, src_iter())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"written": int(written)}
+
+
+@router.post("/torrents/{db_id}/import-finalize", response_model=RuntimeHandleOut)
+async def import_finalize(request: Request, db_id: int):
+    """Завершить возобновляемый импорт: add + recheck по собранному на диске контенту."""
+    rt = get_runtime(request)
+    fn = getattr(rt, "import_finalize", None)
+    if fn is None:
+        raise HTTPException(status_code=501, detail="resumable import not supported")
+    h = await fn(db_id)
+    if h is None:
+        raise HTTPException(status_code=409, detail="import not staged; call stage-remote first")
+    return RuntimeHandleOut.model_validate(h)
+
+
 @router.get("/torrents/{db_id}/migrate-progress")
 async def get_migrate_progress(request: Request, db_id: int):
     """Прогресс копирования контента при импорте раздачи (перенос с другого движка)."""
