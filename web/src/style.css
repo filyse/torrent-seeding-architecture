@@ -1925,6 +1925,13 @@ body {
   flex: 1;
   min-width: 12rem;
 }
+.conn-ok {
+  color: var(--ok, #16a34a);
+}
+.conn-bad {
+  color: var(--danger, #dc2626);
+}
+
 .role-static {
   display: inline-flex;
   align-items: center;

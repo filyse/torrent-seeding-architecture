@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from urllib.parse import unquote, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from seeding_api import maintenance
@@ -111,6 +112,30 @@ async def create_backup(_: Principal = Depends(require_admin)):
         raise HTTPException(status_code=500, detail=f"pg_dump завершился с ошибкой: {log[-500:]}")
     size = os.path.getsize(path) if os.path.exists(path) else 0
     return {"filename": name, "size": size}
+
+
+@router.get("/backups/{filename}/download")
+async def download_backup(filename: str, _: Principal = Depends(require_admin)):
+    path = _safe_path(filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="файл бэкапа не найден")
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=os.path.basename(path),
+    )
+
+
+@router.delete("/backups/{filename}")
+async def delete_backup(filename: str, _: Principal = Depends(require_admin)):
+    path = _safe_path(filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="файл бэкапа не найден")
+    try:
+        os.remove(path)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"не удалось удалить: {exc}") from exc
+    return {"deleted": os.path.basename(path)}
 
 
 @router.post("/backups/restore")

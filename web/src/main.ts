@@ -56,6 +56,32 @@ type EngineOut = {
   upload_limit?: number | null;
 };
 
+type EngineRegistryItem = {
+  id: string;
+  url: string;
+  storage_prefix: string;
+  media_path?: string | null;
+  listen_port: number | null;
+  enabled: boolean;
+  last_seen: string | null;
+  age_seconds: number | null;
+  stale: boolean;
+  in_pool: boolean;
+  source: string;
+};
+
+type ConnectivityOut = {
+  id: string;
+  url: string;
+  tls: boolean;
+  reachable: boolean;
+  api_latency_ms: number | null;
+  bt_listening?: boolean;
+  bt_reachable_hint?: boolean | null;
+  bt_port?: number | null;
+  error?: string | null;
+};
+
 type RuntimeOut = {
   db_id: number;
   magnet_uri: string | null;
@@ -148,7 +174,7 @@ type MeOut = { name: string; role: Role; source: string };
 let currentRole: Role | null = null;
 let currentMe: MeOut | null = null;
 
-type SettingsTab = "info" | "users" | "limits" | "logs";
+type SettingsTab = "info" | "users" | "limits" | "maint" | "logs";
 let activeSettingsTab: SettingsTab = "info";
 
 function canWrite(): boolean {
@@ -2484,6 +2510,35 @@ async function loadDetail(
       delBtn,
     );
 
+    // Название (display_name) — редактируемое прямо в карточке управления.
+    const nameInput = el("input", {
+      type: "text",
+      placeholder: "Название раздачи",
+      value: data.display_name || "",
+    }) as HTMLInputElement;
+    const nameSave = el("button", { type: "button", className: "btn btn--sm" }, ["Сохранить"]);
+    nameSave.addEventListener("click", async () => {
+      const v = nameInput.value.trim();
+      if (!v) {
+        showToast("Название не может быть пустым", true);
+        return;
+      }
+      nameSave.disabled = true;
+      try {
+        await fetchJson(`/torrents/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ display_name: v }),
+        });
+        showToast("Название сохранено");
+        await backRefresh();
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : String(e), true);
+      } finally {
+        nameSave.disabled = false;
+      }
+    });
+    const nameRow = el("div", { className: "manage-card__row" }, [nameInput, nameSave]);
+
     // Метка — редактируемая прямо в карточке управления.
     const labelInput = el("input", {
       type: "text",
@@ -2515,6 +2570,7 @@ async function loadDetail(
       ]);
 
     const manage = el("div", { className: "detail-manage" }, [
+      manageCard("Название", nameRow),
       manageCard("Метка", labelRow),
       manageCard("Лимиты скорости", buildLimitsForm(data, () => void backRefresh())),
       manageCard("Приватный режим", buildPrivateRow(data, () => void backRefresh())),
@@ -3385,6 +3441,173 @@ function mountUsersPanel(): HTMLElement {
 type BackupItem = { filename: string; size: number; created_at: string };
 type BackupsOut = { dir: string; available: boolean; items: BackupItem[] };
 
+function mountMaintenancePanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  panel.append(el("div", { className: "panel__head" }, ["Очередь задач"]));
+  const body = el("div", { className: "panel__body" });
+  body.append(
+    el("p", { className: "field__hint" }, [
+      "Ручной запуск фоновых задач (очередь ARQ). Восстановление перечитывает раздачи из БД " +
+        "и заново заводит их на движках — полезно после сбоя или потери сессии движка.",
+    ]),
+  );
+
+  const run = async (path: string, label: string, btn: HTMLButtonElement) => {
+    btn.disabled = true;
+    try {
+      await fetchJson(path, { method: "POST" });
+      showToast(`${label}: задача поставлена в очередь`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  const restoreAll = el("button", { type: "button", className: "btn btn--sm btn--primary" }, [
+    "Восстановить все движки",
+  ]);
+  restoreAll.addEventListener("click", () => {
+    if (!window.confirm("Запустить восстановление всех раздач из БД на всех движках?")) return;
+    void run("/jobs/restore-all", "Восстановление всех движков", restoreAll);
+  });
+
+  const syncRuntime = el("button", { type: "button", className: "btn btn--sm" }, [
+    "Сверить runtime с БД",
+  ]);
+  syncRuntime.addEventListener("click", () => void run("/jobs/sync-runtime", "Сверка runtime", syncRuntime));
+
+  const healthCheck = el("button", { type: "button", className: "btn btn--sm" }, [
+    "Проверить здоровье движков",
+  ]);
+  healthCheck.addEventListener("click", () =>
+    void run("/jobs/engine-health-check", "Проверка движков", healthCheck),
+  );
+
+  body.append(el("div", { className: "btn-row" }, [restoreAll, syncRuntime, healthCheck]));
+  panel.append(body);
+  return panel;
+}
+
+function mountEngineRegistryPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  const head = el("div", { className: "panel__head panel__head--with-action" }, ["Реестр движков"]);
+  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" }, [
+    icon("refresh"),
+  ]);
+  head.append(refreshBtn);
+  panel.append(head);
+
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, [
+    "Все известные движки (статические + саморегистрирующиеся), их доступность и время последнего отклика.",
+  ]);
+  const list = el("div", { className: "keys-list" });
+  body.append(hint, list);
+  panel.append(body);
+
+  const fmtAge = (s: number | null) => {
+    if (s == null) return "никогда";
+    if (s < 60) return `${s} с назад`;
+    if (s < 3600) return `${Math.floor(s / 60)} мин назад`;
+    if (s < 86400) return `${Math.floor(s / 3600)} ч назад`;
+    return `${Math.floor(s / 86400)} дн назад`;
+  };
+
+  const probe = async (id: string, btn: HTMLButtonElement, out: HTMLElement) => {
+    btn.disabled = true;
+    out.textContent = "проверка…";
+    try {
+      const r = await fetchJson<ConnectivityOut>(`/engines/${encodeURIComponent(id)}/connectivity`);
+      if (!r.reachable) {
+        out.textContent = `API недоступен: ${r.error ?? "нет ответа"}`;
+        out.className = "key-row__sub conn-bad";
+      } else {
+        const bt = r.bt_listening ? `BT ${r.bt_port ?? "?"} слушает` : "BT не слушает";
+        const inc = r.bt_reachable_hint ? " · входящие ✓" : "";
+        out.textContent = `API ✓ ${r.api_latency_ms} мс · ${bt}${inc}`;
+        out.className = "key-row__sub conn-ok";
+      }
+    } catch (e) {
+      out.textContent = e instanceof Error ? e.message : String(e);
+      out.className = "key-row__sub conn-bad";
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  const jobBtn = (label: string, path: string, confirmMsg?: string) => {
+    const b = el("button", { type: "button", className: "btn btn--sm" }, [label]) as HTMLButtonElement;
+    b.addEventListener("click", async () => {
+      if (confirmMsg && !window.confirm(confirmMsg)) return;
+      b.disabled = true;
+      try {
+        await fetchJson(path, { method: "POST" });
+        showToast(`${label}: задача поставлена в очередь`);
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : String(e), true);
+      } finally {
+        b.disabled = false;
+      }
+    });
+    return b;
+  };
+
+  const reload = async () => {
+    try {
+      const rows = await fetchJson<EngineRegistryItem[]>("/engines/registry");
+      list.replaceChildren();
+      if (rows.length === 0) {
+        list.append(el("p", { className: "field__hint" }, ["Движков нет"]));
+        return;
+      }
+      for (const e of rows) {
+        const offline = e.stale || !e.in_pool;
+        const row = el("div", { className: `key-row${offline ? " key-row--off" : ""}` });
+        const tags: string[] = [e.source];
+        if (e.in_pool) tags.push("в пуле");
+        if (e.stale) tags.push("протух");
+        if (!e.enabled) tags.push("выключен");
+        const meta = el("div", { className: "key-row__meta" }, [
+          el("span", { className: "key-row__name" }, [
+            e.id,
+            el("span", { className: "key-row__tag" }, [e.url.startsWith("https") ? "TLS" : "—"]),
+          ]),
+          el("span", { className: "key-row__sub" }, [
+            `${tags.join(" · ")} · отклик ${fmtAge(e.age_seconds)}`,
+          ]),
+        ]);
+        const connOut = el("span", { className: "key-row__sub" }, [""]);
+        const probeBtn = el("button", { type: "button", className: "btn btn--sm" }, [
+          "Проверить связь",
+        ]) as HTMLButtonElement;
+        probeBtn.addEventListener("click", () => void probe(e.id, probeBtn, connOut));
+        const restoreBtn = jobBtn(
+          "Восстановить",
+          `/jobs/restore-engine/${encodeURIComponent(e.id)}`,
+          `Восстановить раздачи движка «${e.id}» из БД?`,
+        );
+        const registerBtn = jobBtn(
+          "Дорегистрировать",
+          `/jobs/bulk-register/${encodeURIComponent(e.id)}`,
+        );
+        row.append(
+          meta,
+          el("div", { className: "btn-row" }, [probeBtn, restoreBtn, registerBtn]),
+          connOut,
+        );
+        list.append(row);
+      }
+    } catch (e) {
+      list.replaceChildren(el("p", { className: "field__hint" }, [e instanceof Error ? e.message : String(e)]));
+    }
+  };
+
+  refreshBtn.addEventListener("click", () => void reload());
+  void reload();
+  return panel;
+}
+
 function mountBackupsPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Резервные копии БД"]);
@@ -3421,13 +3644,51 @@ function mountBackupsPanel(): HTMLElement {
             el("span", { className: "key-row__sub" }, [`${when} · ${fmtBytes(b.size)}`]),
           ]),
         );
+        const dlBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Скачать"]);
+        dlBtn.addEventListener("click", () => void doDownload(b, dlBtn));
         const restoreBtn = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["Восстановить"]);
         restoreBtn.addEventListener("click", () => void doRestore(b, restoreBtn));
-        row.append(el("div", { className: "btn-row" }, [restoreBtn]));
+        const delBtn = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["Удалить"]);
+        delBtn.addEventListener("click", () => void doDelete(b, delBtn));
+        row.append(el("div", { className: "btn-row" }, [dlBtn, restoreBtn, delBtn]));
         list.append(row);
       }
     } catch (e) {
       hint.textContent = e instanceof Error ? e.message : String(e);
+    }
+  };
+
+  const doDownload = async (b: BackupItem, btn: HTMLButtonElement) => {
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${API}/backups/${encodeURIComponent(b.filename)}/download`, {
+        headers: apiHeaders(false),
+      });
+      await throwIfNotOk(res);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = el("a", { href: url, download: b.filename }) as HTMLAnchorElement;
+      document.body.append(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  const doDelete = async (b: BackupItem, btn: HTMLButtonElement) => {
+    if (!window.confirm(`Удалить копию «${b.filename}»? Действие необратимо.`)) return;
+    btn.disabled = true;
+    try {
+      await fetchDelete(`/backups/${encodeURIComponent(b.filename)}`);
+      showToast("Копия удалена");
+      await reload();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+      btn.disabled = false;
     }
   };
 
@@ -3623,10 +3884,16 @@ function mountSettingsShell(root: HTMLElement): void {
       },
     },
     {
+      id: "maint",
+      label: "Обслуживание",
+      visible: isAdmin(),
+      panels: () => [mountMaintenancePanel(), mountEngineRegistryPanel(), mountBackupsPanel()],
+    },
+    {
       id: "logs",
       label: "Логи",
       visible: isAdmin(),
-      panels: () => [mountAuditPanel(), mountBackupsPanel()],
+      panels: () => [mountAuditPanel()],
     },
   ];
 
