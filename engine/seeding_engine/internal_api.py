@@ -232,6 +232,15 @@ async def net_status(request: Request):
     return data or {}
 
 
+@router.get("/sysinfo")
+async def sysinfo(request: Request):
+    """Информация о хосте/рантайме движка (расположение, IP, нагрузка) для UI-карточки."""
+    from seeding_engine import sysinfo as _sysinfo
+
+    rt = get_runtime(request)
+    return await asyncio.to_thread(_sysinfo.collect, rt)
+
+
 @router.get("/torrents/{db_id}/content")
 async def stream_content(request: Request, db_id: int):
     """Отдать контент раздачи tar-потоком (источник сетевого переноса между машинами)."""

@@ -1,6 +1,7 @@
 import os
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -143,6 +144,105 @@ async def engine_registry(session: DbSession, pool: EnginePoolDep):
             )
         )
     return out
+
+
+@router.get("/{engine_id}/info")
+async def engine_info(engine_id: str, session: DbSession, pool: EnginePoolDep):
+    """Подробная карточка движка: расположение/сеть/нагрузка/раздачи.
+
+    Объединяет реестр (url/last_seen/staleness), связность (API + BT), агрегаты сессии
+    и self-репорт движка (`/internal/v1/sysinfo`: hostname/IP/WAN/CPU/RAM/диск). Все блоки
+    собираются best-effort — если движок частично недоступен, вернётся то, что удалось."""
+    spec = pool.spec(engine_id)
+    rows = await EngineRepository(session).list_all()
+    row = next((r for r in rows if r.id == engine_id), None)
+    if spec is None and row is None:
+        raise HTTPException(status_code=404, detail=f"unknown engine_id: {engine_id}")
+
+    ttl = pool.ttl_seconds()
+    now = datetime.now(timezone.utc)
+    static_ids = pool.static_ids
+    last_seen = row.last_seen if row else None
+    age: int | None = None
+    stale = False
+    if last_seen is not None:
+        ls = last_seen if last_seen.tzinfo else last_seen.replace(tzinfo=timezone.utc)
+        age = int((now - ls).total_seconds())
+        stale = age > ttl and engine_id not in static_ids
+    elif engine_id not in static_ids:
+        stale = True
+    in_static, in_db = engine_id in static_ids, row is not None
+    source = "static+dynamic" if (in_static and in_db) else ("static" if in_static else "dynamic")
+
+    url = spec.url if spec else (row.url if row else "")
+    host = ""
+    if url:
+        try:
+            host = urlsplit(url).hostname or ""
+        except ValueError:
+            host = ""
+
+    info: dict = {
+        "id": engine_id,
+        "registry": {
+            "url": url,
+            "advertise_host": host,
+            "tls": url.startswith("https://"),
+            "storage_prefix": (spec.storage_prefix if spec else (row.storage_prefix if row else "")),
+            "media_path": (spec.media_path if spec else (row.media_path if row else None)),
+            "listen_port": (spec.listen_port if spec else (row.listen_port if row else None)),
+            "enabled": (row.enabled if row else True),
+            "in_pool": engine_id in {s.id for s in pool.specs},
+            "source": source,
+            "last_seen": last_seen.isoformat() if last_seen else None,
+            "age_seconds": age,
+            "stale": stale,
+        },
+        "connectivity": None,
+        "session": None,
+        "sysinfo": None,
+        "errors": {},
+    }
+
+    try:
+        client = pool.client_for(engine_id)
+    except KeyError:
+        info["errors"]["pool"] = "engine not in active pool (stale?)"
+        return info
+
+    t0 = time.perf_counter()
+    conn: dict = {"reachable": False, "api_latency_ms": None, "bt": None}
+    try:
+        await client.health()
+        conn["reachable"] = True
+        conn["api_latency_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+    except httpx.HTTPError as exc:
+        conn["error"] = f"api unreachable: {exc}"
+        info["connectivity"] = conn
+        info["errors"]["connectivity"] = str(exc)
+        return info
+
+    try:
+        bt = await client.net_status()
+        conn["bt"] = bt
+        conn["bt_listening"] = bool(bt.get("listening"))
+        conn["bt_reachable_hint"] = bt.get("has_incoming")
+        conn["bt_port"] = spec.listen_port if spec else bt.get("configured_port")
+    except httpx.HTTPError as exc:
+        info["errors"]["bt"] = str(exc)
+    info["connectivity"] = conn
+
+    try:
+        info["session"] = await client.session_stats()
+    except httpx.HTTPError as exc:
+        info["errors"]["session"] = str(exc)
+
+    try:
+        info["sysinfo"] = await client.sysinfo()
+    except httpx.HTTPError as exc:
+        info["errors"]["sysinfo"] = str(exc)
+
+    return info
 
 
 @router.get("/{engine_id}/connectivity")

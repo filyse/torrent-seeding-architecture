@@ -2098,6 +2098,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.6rem;
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--border);
@@ -2126,4 +2127,54 @@ body {
   font-size: 0.85rem;
   white-space: pre-wrap;
   word-break: break-all;
+}
+.key-row__meta--clickable {
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+.key-row__meta--clickable:hover .key-row__name,
+.key-row__meta--clickable:focus-visible .key-row__name {
+  color: var(--accent, #2563eb);
+}
+.engine-caret {
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.engine-detail {
+  flex-basis: 100%;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed var(--border);
+}
+.engine-detail__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.75rem 1.25rem;
+}
+.engine-detail__title {
+  font-weight: 600;
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+  color: var(--accent, #2563eb);
+}
+.engine-detail__kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.78rem;
+  padding: 0.12rem 0;
+}
+.engine-detail__k {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.engine-detail__v {
+  text-align: right;
+  word-break: break-word;
+}
+.engine-detail__v--mono {
+  font-family: ui-monospace, "Cascadia Code", monospace;
 }

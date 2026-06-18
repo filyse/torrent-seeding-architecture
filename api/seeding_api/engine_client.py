@@ -414,6 +414,11 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def sysinfo(self) -> dict:
+        r = await self._client.get("/internal/v1/sysinfo", timeout=httpx.Timeout(12.0))
+        r.raise_for_status()
+        return r.json()
+
     async def set_session_limits(
         self, download_limit: int | None, upload_limit: int | None
     ) -> dict:

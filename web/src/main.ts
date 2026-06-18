@@ -95,6 +95,67 @@ type ConnectivityOut = {
   error?: string | null;
 };
 
+type EngineInfoOut = {
+  id: string;
+  registry: {
+    url: string;
+    advertise_host: string;
+    tls: boolean;
+    storage_prefix: string;
+    media_path?: string | null;
+    listen_port: number | null;
+    enabled: boolean;
+    in_pool: boolean;
+    source: string;
+    last_seen: string | null;
+    age_seconds: number | null;
+    stale: boolean;
+  };
+  connectivity: {
+    reachable: boolean;
+    api_latency_ms: number | null;
+    bt_listening?: boolean;
+    bt_reachable_hint?: boolean | null;
+    bt_port?: number | null;
+    bt?: { dht_nodes?: number | null; peers?: number | null } | null;
+    error?: string;
+  } | null;
+  session: {
+    torrents?: number;
+    torrents_active?: number;
+    download_rate?: number;
+    upload_rate?: number;
+    total_uploaded?: number;
+    total_downloaded?: number;
+    peers?: number;
+    seeds?: number;
+  } | null;
+  sysinfo: {
+    hostname?: string;
+    backend?: string | null;
+    os?: string;
+    python?: string;
+    libtorrent?: string | null;
+    uptime_seconds?: number;
+    data_root?: string;
+    local_ip?: string | null;
+    wan_ip?: string | null;
+    advertise_url?: string;
+    listen_interfaces?: string;
+    cpu_count?: number | null;
+    cpu_pct?: number | null;
+    load1?: number | null;
+    load5?: number | null;
+    load15?: number | null;
+    mem_total?: number | null;
+    mem_available?: number | null;
+    proc_rss?: number | null;
+    disk_total?: number | null;
+    disk_free?: number | null;
+  } | null;
+  errors?: Record<string, string>;
+};
+
 type RuntimeOut = {
   db_id: number;
   magnet_uri: string | null;
@@ -3733,6 +3794,94 @@ function mountMaintenancePanel(): HTMLElement {
   return panel;
 }
 
+function fmtUptime(s: number | null | undefined): string {
+  if (s == null || s < 0) return "—";
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}д ${h}ч`;
+  if (h > 0) return `${h}ч ${m}м`;
+  if (m > 0) return `${m}м`;
+  return `${s}с`;
+}
+
+function buildEngineDetail(info: EngineInfoOut): HTMLElement {
+  const wrap = el("div", { className: "engine-detail__grid" });
+  const reg = info.registry;
+  const sys = info.sysinfo;
+  const conn = info.connectivity;
+  const ses = info.session;
+
+  const kv = (label: string, value: string | null | undefined, cls?: string) =>
+    el("div", { className: "engine-detail__kv" }, [
+      el("span", { className: "engine-detail__k" }, [label]),
+      el("span", { className: `engine-detail__v${cls ? ` ${cls}` : ""}` }, [value && value !== "" ? value : "—"]),
+    ]);
+
+  const section = (title: string, rows: HTMLElement[]) =>
+    el("div", { className: "engine-detail__sec" }, [
+      el("div", { className: "engine-detail__title" }, [title]),
+      ...rows,
+    ]);
+
+  const memUsed =
+    sys && sys.mem_total != null && sys.mem_available != null ? sys.mem_total - sys.mem_available : null;
+  const diskUsed =
+    sys && sys.disk_total != null && sys.disk_free != null ? sys.disk_total - sys.disk_free : null;
+  const load =
+    sys && sys.load1 != null ? `${sys.load1} / ${sys.load5 ?? "—"} / ${sys.load15 ?? "—"}` : null;
+
+  wrap.append(
+    section("Расположение", [
+      kv("URL оркестратора", reg.url),
+      kv("LAN/адрес", reg.advertise_host),
+      kv("Контейнер/хост", sys?.hostname),
+      kv("ОС", sys?.os),
+      kv("libtorrent", sys?.libtorrent ?? sys?.backend ?? null),
+      kv("Аптайм", fmtUptime(sys?.uptime_seconds)),
+      kv("Источник", `${reg.source}${reg.in_pool ? " · в пуле" : ""}${reg.stale ? " · протух" : ""}`),
+    ]),
+    section("Сеть", [
+      kv("Локальный IP", sys?.local_ip),
+      kv("Внешний (WAN) IP", sys?.wan_ip, "engine-detail__v--mono"),
+      kv("TLS", reg.tls ? "да" : "нет"),
+      kv(
+        "API",
+        conn?.reachable ? `доступен · ${conn.api_latency_ms ?? "?"} мс` : `недоступен${conn?.error ? ` (${conn.error})` : ""}`,
+        conn?.reachable ? "conn-ok" : "conn-bad",
+      ),
+      kv(
+        "BT-порт",
+        conn
+          ? `${conn.bt_port ?? "?"} · ${conn.bt_listening ? "слушает" : "не слушает"}${conn.bt_reachable_hint ? " · входящие ✓" : ""}`
+          : null,
+      ),
+      kv("DHT-узлы", conn?.bt?.dht_nodes != null ? String(conn.bt.dht_nodes) : null),
+      kv("Слушает интерфейсы", sys?.listen_interfaces),
+    ]),
+    section("Нагрузка", [
+      kv("CPU", sys?.cpu_pct != null ? `${sys.cpu_pct}% · ${sys.cpu_count ?? "?"} ядер` : null),
+      kv("Load avg (1/5/15)", load),
+      kv("RAM хоста", memUsed != null ? `${fmtBytes(memUsed)} / ${fmtBytes(sys?.mem_total)}` : null),
+      kv("RSS процесса", fmtBytes(sys?.proc_rss)),
+      kv(
+        "Диск данных",
+        diskUsed != null ? `${fmtBytes(diskUsed)} / ${fmtBytes(sys?.disk_total)} · своб. ${fmtBytes(sys?.disk_free)}` : null,
+      ),
+      kv("Путь данных", sys?.data_root ?? reg.storage_prefix),
+    ]),
+    section("Раздачи", [
+      kv("Всего", ses?.torrents != null ? String(ses.torrents) : null),
+      kv("Активных", ses?.torrents_active != null ? String(ses.torrents_active) : null),
+      kv("Отдача / приём", ses ? `${fmtRate(ses.upload_rate)} / ${fmtRate(ses.download_rate)}` : null),
+      kv("Роздано всего", fmtBytes(ses?.total_uploaded)),
+      kv("Скачано всего", fmtBytes(ses?.total_downloaded)),
+      kv("Пиры / сиды", ses ? `${ses.peers ?? 0} / ${ses.seeds ?? 0}` : null),
+    ]),
+  );
+  return wrap;
+}
+
 function mountEngineRegistryPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Реестр движков"]);
@@ -3818,8 +3967,10 @@ function mountEngineRegistryPanel(): HTMLElement {
         if (e.in_pool) tags.push("в пуле");
         if (e.stale) tags.push("протух");
         if (!e.enabled) tags.push("выключен");
-        const meta = el("div", { className: "key-row__meta" }, [
+        const caret = el("span", { className: "engine-caret" }, ["▸"]);
+        const meta = el("div", { className: "key-row__meta key-row__meta--clickable" }, [
           el("span", { className: "key-row__name" }, [
+            caret,
             e.id,
             el("span", { className: "key-row__tag" }, [e.url.startsWith("https") ? "TLS" : "—"]),
           ]),
@@ -3827,6 +3978,36 @@ function mountEngineRegistryPanel(): HTMLElement {
             `${tags.join(" · ")} · отклик ${fmtAge(e.age_seconds)}`,
           ]),
         ]);
+        const detail = el("div", { className: "engine-detail" });
+        detail.style.display = "none";
+        let loaded = false;
+        const toggleDetail = async () => {
+          const open = detail.style.display === "none";
+          detail.style.display = open ? "" : "none";
+          caret.textContent = open ? "▾" : "▸";
+          if (open && !loaded) {
+            loaded = true;
+            detail.replaceChildren(el("p", { className: "field__hint" }, ["Загрузка…"]));
+            try {
+              const info = await fetchJson<EngineInfoOut>(`/engines/${encodeURIComponent(e.id)}/info`);
+              detail.replaceChildren(buildEngineDetail(info));
+            } catch (err) {
+              loaded = false;
+              detail.replaceChildren(
+                el("p", { className: "field__hint conn-bad" }, [err instanceof Error ? err.message : String(err)]),
+              );
+            }
+          }
+        };
+        meta.setAttribute("role", "button");
+        meta.setAttribute("tabindex", "0");
+        meta.addEventListener("click", () => void toggleDetail());
+        meta.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter" || ev.key === " ") {
+            ev.preventDefault();
+            void toggleDetail();
+          }
+        });
         const connOut = el("span", { className: "key-row__sub" }, [""]);
         const probeBtn = el("button", { type: "button", className: "btn btn--sm" }, [
           "Проверить связь",
@@ -3863,6 +4044,7 @@ function mountEngineRegistryPanel(): HTMLElement {
           meta,
           el("div", { className: "btn-row" }, [probeBtn, restoreBtn, registerBtn, restartBtn]),
           connOut,
+          detail,
         );
         list.append(row);
       }
