@@ -23,6 +23,7 @@ _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 # {1}, {2}… — группы из регулярки.
 _RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("POST", re.compile(r"^/auth/login$"), "Вход в систему"),
+    ("POST", re.compile(r"^/auth/key-login$"), "Вход по API-ключу"),
     ("POST", re.compile(r"^/auth/logout$"), "Выход из системы"),
     ("POST", re.compile(r"^/auth/users$"), "Создан пользователь"),
     ("PATCH", re.compile(r"^/auth/users/(\d+)$"), "Изменён пользователь #{1}"),

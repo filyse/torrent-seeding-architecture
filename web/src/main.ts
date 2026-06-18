@@ -2345,6 +2345,12 @@ function showLoginDialog(): void {
       const p = passInput.value;
       if (keyVisible && keyInput.value.trim() && !u) {
         setApiKey(keyInput.value.trim());
+        // Явно отмечаем вход по ключу в аудите (best-effort).
+        try {
+          await fetchJson("/auth/key-login", { method: "POST" });
+        } catch {
+          /* невалидный ключ — обработается ниже через finish() */
+        }
         if (await finish()) return;
         throw new Error("Неверный ключ или нет доступа");
       }

@@ -135,6 +135,15 @@ async def whoami(principal: Principal = Depends(require_auth)):
     return {"name": principal.name, "role": principal.role, "source": principal.source}
 
 
+@router.post("/auth/key-login")
+async def key_login(principal: Principal = Depends(require_auth)):
+    """Явный «вход по API-ключу» из UI — нужен только чтобы записать событие в аудит.
+
+    Программный доступ по ключу пишет в журнал свои действия (мутации) и в этом
+    эндпоинте не нуждается."""
+    return {"name": principal.name, "role": principal.role, "source": principal.source}
+
+
 def _user_out(row) -> dict:
     return {
         "id": row.id,
