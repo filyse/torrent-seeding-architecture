@@ -258,6 +258,14 @@
   сверка runtime с БД, проверка здоровья, дорегистрация queued-раздач. Плюс «Реестр движков»
   с `GET /engines/registry` (последний отклик, staleness, в пуле/нет) и кнопкой пробы
   связности (`GET /engines/{id}/connectivity` — API + BT-порт).
+- ✅ Перезагрузка компонентов из UI (admin): в «Обслуживании» блок «Перезагрузка
+  компонентов» (API / PostgreSQL / Redis / Очередь ARQ) и кнопка «Перезапустить» у каждого
+  движка в «Реестре движков». API: `GET /api/v1/components` (состояние) и
+  `POST /api/v1/components/{service}/restart` (`require_admin`). Перезапуск идёт через Docker
+  Engine API по unix-сокету (`/var/run/docker.sock` смонтирован в `api`, `seeding_api/docker_ctl.py`);
+  контейнеры ищутся по compose-меткам (имя проекта берётся из меток самого `api`, не
+  хардкодится). Разрешён allowlist сервисов (ядро + `engine-*`). Самоперезапуск `api`
+  отложенный — ответ клиенту уходит раньше, чем контейнер уходит в рестарт.
 - ✅ Бэкапы из UI: скачивание (`GET /api/v1/backups/{f}/download`) и удаление
   (`DELETE /api/v1/backups/{f}`) добавлены к списку/созданию/восстановлению (admin).
 - ✅ Переименование раздачи (`display_name`) прямо в деталях через `PATCH /torrents/{id}`.

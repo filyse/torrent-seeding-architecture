@@ -169,6 +169,9 @@ services:
     volumes:
       - ./config/engines.ct400.json:/config/engines.json:ro
       - ./certs/ca.crt:/certs/ca.crt:ro
+      # Перезапуск компонентов стека из UI («Обслуживание»). Даёт api доступ к Docker
+      # демону — только admin-эндпоинты /components/* и allowlist сервисов.
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8000:8000"
     healthcheck:

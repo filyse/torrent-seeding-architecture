@@ -70,6 +70,19 @@ type EngineRegistryItem = {
   source: string;
 };
 
+type ComponentItem = {
+  service: string;
+  container: string;
+  state: string | null;
+  status: string | null;
+};
+
+type ComponentsOut = {
+  available: boolean;
+  reason?: string;
+  components?: ComponentItem[];
+};
+
 type ConnectivityOut = {
   id: string;
   url: string;
@@ -3505,6 +3518,95 @@ function mountUsersPanel(): HTMLElement {
 type BackupItem = { filename: string; size: number; created_at: string };
 type BackupsOut = { dir: string; available: boolean; items: BackupItem[] };
 
+function mountComponentsPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  const head = el("div", { className: "panel__head panel__head--with-action" }, [
+    "Перезагрузка компонентов",
+  ]);
+  const refreshBtn = el(
+    "button",
+    { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" },
+    [icon("refresh")],
+  );
+  head.append(refreshBtn);
+  panel.append(head);
+
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, [
+    "Перезапуск контейнеров сервиса. Движки перезапускаются отдельно — в «Реестре движков» ниже.",
+  ]);
+  const list = el("div", { className: "keys-list" });
+  body.append(hint, list);
+  panel.append(body);
+
+  const LABELS: Record<string, string> = {
+    api: "API",
+    db: "PostgreSQL",
+    redis: "Redis",
+    queue_worker: "Очередь (ARQ)",
+  };
+  const CONFIRMS: Record<string, string> = {
+    api: "Перезапустить API? Веб-интерфейс на пару секунд потеряет связь.",
+    db: "Перезапустить PostgreSQL? На время рестарта изменения в БД будут недоступны.",
+    redis: "Перезапустить Redis? Очередь задач кратко прервётся.",
+    queue_worker: "Перезапустить воркер очереди (ARQ)?",
+  };
+  const ORDER = ["api", "db", "redis", "queue_worker"];
+
+  const restart = async (service: string, btn: HTMLButtonElement) => {
+    if (!window.confirm(CONFIRMS[service] ?? `Перезапустить «${service}»?`)) return;
+    btn.disabled = true;
+    try {
+      const r = await fetchJson<{ message?: string }>(
+        `/components/${encodeURIComponent(service)}/restart`,
+        { method: "POST" },
+      );
+      showToast(r.message ?? `${LABELS[service] ?? service}: перезапущен`);
+      setTimeout(() => void reload(), 2000);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  const reload = async () => {
+    try {
+      const data = await fetchJson<ComponentsOut>("/components");
+      list.replaceChildren();
+      if (!data.available) {
+        list.append(el("p", { className: "field__hint" }, [data.reason ?? "Перезапуск недоступен"]));
+        return;
+      }
+      const byService = new Map((data.components ?? []).map((c) => [c.service, c]));
+      for (const svc of ORDER) {
+        const c = byService.get(svc);
+        const running = c?.state === "running";
+        const row = el("div", { className: `key-row${running ? "" : " key-row--off"}` });
+        const meta = el("div", { className: "key-row__meta" }, [
+          el("span", { className: "key-row__name" }, [LABELS[svc] ?? svc]),
+          el("span", { className: "key-row__sub" }, [c?.status ?? "контейнер не найден"]),
+        ]);
+        const btn = el("button", { type: "button", className: "btn btn--sm btn--danger" }, [
+          "Перезапустить",
+        ]) as HTMLButtonElement;
+        if (!c) btn.disabled = true;
+        btn.addEventListener("click", () => void restart(svc, btn));
+        row.append(meta, el("div", { className: "btn-row" }, [btn]));
+        list.append(row);
+      }
+    } catch (e) {
+      list.replaceChildren(
+        el("p", { className: "field__hint" }, [e instanceof Error ? e.message : String(e)]),
+      );
+    }
+  };
+
+  refreshBtn.addEventListener("click", () => void reload());
+  void reload();
+  return panel;
+}
+
 function mountMaintenancePanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   panel.append(el("div", { className: "panel__head" }, ["Очередь задач"]));
@@ -3655,9 +3757,27 @@ function mountEngineRegistryPanel(): HTMLElement {
           "Дорегистрировать",
           `/jobs/bulk-register/${encodeURIComponent(e.id)}`,
         );
+        const restartBtn = el("button", { type: "button", className: "btn btn--sm btn--danger" }, [
+          "Перезапустить",
+        ]) as HTMLButtonElement;
+        restartBtn.addEventListener("click", async () => {
+          if (!window.confirm(`Перезапустить контейнер движка «${e.id}»?`)) return;
+          restartBtn.disabled = true;
+          try {
+            await fetchJson(`/components/${encodeURIComponent(`engine-${e.id}`)}/restart`, {
+              method: "POST",
+            });
+            showToast(`Движок ${e.id}: перезапущен`);
+            setTimeout(() => void reload(), 2000);
+          } catch (err) {
+            showToast(err instanceof Error ? err.message : String(err), true);
+          } finally {
+            restartBtn.disabled = false;
+          }
+        });
         row.append(
           meta,
-          el("div", { className: "btn-row" }, [probeBtn, restoreBtn, registerBtn]),
+          el("div", { className: "btn-row" }, [probeBtn, restoreBtn, registerBtn, restartBtn]),
           connOut,
         );
         list.append(row);
@@ -3951,7 +4071,12 @@ function mountSettingsShell(root: HTMLElement): void {
       id: "maint",
       label: "Обслуживание",
       visible: isAdmin(),
-      panels: () => [mountMaintenancePanel(), mountEngineRegistryPanel(), mountBackupsPanel()],
+      panels: () => [
+        mountComponentsPanel(),
+        mountMaintenancePanel(),
+        mountEngineRegistryPanel(),
+        mountBackupsPanel(),
+      ],
     },
     {
       id: "logs",

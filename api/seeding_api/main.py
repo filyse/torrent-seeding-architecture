@@ -23,6 +23,7 @@ from seeding_api.restore import maybe_restore_torrents_to_engine
 from seeding_api.routers import audit as audit_router
 from seeding_api.routers import auth as auth_router
 from seeding_api.routers import backups as backups_router
+from seeding_api.routers import components as components_router
 from seeding_api.routers import engines as engines_router
 from seeding_api.routers import health as health_router
 from seeding_api.routers import jobs as jobs_router
@@ -253,6 +254,10 @@ app.include_router(
     jobs_router.router,
     prefix="/api/v1",
     dependencies=[Depends(require_auth)],
+)
+app.include_router(
+    components_router.router,
+    prefix="/api/v1",
 )
 app.include_router(
     quotas_router.router,
