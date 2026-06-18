@@ -709,6 +709,56 @@ body {
   min-width: 0;
 }
 
+.detail-label-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: -0.5rem 0 1rem;
+  min-height: 1.9rem;
+}
+
+.detail-label-key {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.detail-label-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 999px;
+}
+
+.detail-label-chip--empty {
+  color: var(--muted);
+  font-weight: 500;
+  background: transparent;
+  border-color: var(--border);
+}
+
+.detail-label-input {
+  flex: 0 1 18rem;
+  min-width: 0;
+  padding: 0.35rem 0.55rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.detail-label-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .detail-title-input {
   flex: 1 1 auto;
   min-width: 0;

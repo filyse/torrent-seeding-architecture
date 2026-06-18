@@ -2563,29 +2563,63 @@ async function loadDetail(
       delBtn,
     );
 
-    // Метка — редактируемая прямо в карточке управления.
-    const labelInput = el("input", {
-      type: "text",
-      placeholder: "Без метки",
-      value: data.label || "",
-    }) as HTMLInputElement;
-    const labelSave = el("button", { type: "button", className: "btn btn--sm" }, ["Сохранить"]);
-    labelSave.addEventListener("click", async () => {
-      labelSave.disabled = true;
-      try {
-        await fetchJson(`/torrents/${id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ label: labelInput.value.trim() }),
-        });
-        showToast("Метка сохранена");
-        await backRefresh();
-      } catch (e) {
-        showToast(e instanceof Error ? e.message : String(e), true);
-      } finally {
-        labelSave.disabled = false;
+    // Метка — редактируемая инлайн (плашка с карандашом, как заголовок).
+    const labelWrap = el("div", { className: "detail-label-wrap" });
+    const renderLabelView = () => {
+      const text = data.label?.trim() || "";
+      const chip = el(
+        "span",
+        { className: `detail-label-chip${text ? "" : " detail-label-chip--empty"}` },
+        [text || "Без метки"],
+      );
+      const children: (string | Node)[] = [el("span", { className: "detail-label-key" }, ["Метка"]), chip];
+      if (canWrite()) {
+        const editBtn = el("button", {
+          type: "button",
+          className: "btn btn--ghost btn--sm detail-title-edit",
+          title: "Изменить метку",
+          "aria-label": "Изменить метку",
+        }, [icon("edit")]);
+        editBtn.addEventListener("click", renderLabelEdit);
+        children.push(editBtn);
       }
-    });
-    const labelRow = el("div", { className: "manage-card__row" }, [labelInput, labelSave]);
+      labelWrap.replaceChildren(...children);
+    };
+    const renderLabelEdit = () => {
+      const input = el("input", {
+        type: "text",
+        className: "detail-label-input",
+        placeholder: "Без метки",
+        value: data.label || "",
+      }) as HTMLInputElement;
+      const save = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Сохранить"]);
+      const cancel = el("button", { type: "button", className: "btn btn--sm" }, ["Отмена"]);
+      labelWrap.replaceChildren(el("div", { className: "detail-title-editor" }, [input, save, cancel]));
+      input.focus();
+      input.select();
+      const commit = async () => {
+        save.disabled = true;
+        cancel.disabled = true;
+        try {
+          await fetchJson(`/torrents/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ label: input.value.trim() }),
+          });
+          await backRefresh();
+        } catch (err) {
+          showToast(err instanceof Error ? err.message : String(err), true);
+          save.disabled = false;
+          cancel.disabled = false;
+        }
+      };
+      save.addEventListener("click", () => void commit());
+      cancel.addEventListener("click", renderLabelView);
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") void commit();
+        else if (ev.key === "Escape") renderLabelView();
+      });
+    };
+    renderLabelView();
 
     const manageCard = (heading: string, node: HTMLElement) =>
       el("div", { className: "manage-card" }, [
@@ -2594,7 +2628,6 @@ async function loadDetail(
       ]);
 
     const manage = el("div", { className: "detail-manage" }, [
-      manageCard("Метка", labelRow),
       manageCard("Лимиты скорости", buildLimitsForm(data, () => void backRefresh())),
       manageCard("Приватный режим", buildPrivateRow(data, () => void backRefresh())),
       manageCard("Перенести на движок", buildMigrateRow(data, () => void backRefresh())),
@@ -2616,7 +2649,7 @@ async function loadDetail(
     const metaBlock = buildDetailsSpoiler("Подробности", detailsContent);
     applyDetailSpoilerState(metaBlock, id, "meta");
 
-    body.append(head, sub, progressWrap, chips);
+    body.append(head, sub, labelWrap, progressWrap, chips);
     if (canWrite()) body.append(toolbar, manage);
     body.append(
       buildFilesSpoiler(files, id, () => void backRefresh()),
