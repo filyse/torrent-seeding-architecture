@@ -3560,7 +3560,7 @@ function mountSettingsShell(root: HTMLElement): void {
   const themePanel = el("section", { className: "panel" });
   themePanel.append(el("div", { className: "panel__head" }, ["Внешний вид"]));
   const themeBody = el("div", { className: "panel__body" });
-  const themeSelect = el("select", { className: "select" }) as HTMLSelectElement;
+  const themeSelect = el("select", { className: "select select--inline" }) as HTMLSelectElement;
   for (const [val, label] of [
     ["auto", "Тема: как в системе"],
     ["light", "Тема: светлая"],

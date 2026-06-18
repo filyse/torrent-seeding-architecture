@@ -221,6 +221,13 @@ body {
   width: 100%;
 }
 
+/* Компактный селект (не растягивается на всю ширину панели). */
+.field .select.select--inline {
+  width: auto;
+  min-width: 16rem;
+  max-width: 100%;
+}
+
 /* Единый стиль кастомного селекта (закрытый контрол). Список опций рисует ОС. */
 .select {
   appearance: none;
