@@ -93,6 +93,7 @@ class RuntimeHandleOut(BaseModel):
     added_time: int | None = None
     download_limit: int | None = None
     upload_limit: int | None = None
+    private: bool | None = None
 
 
 class TorrentFileOut(BaseModel):
@@ -119,6 +120,10 @@ class FilePrioritiesIn(BaseModel):
 class LimitsIn(BaseModel):
     download_limit: int | None = None
     upload_limit: int | None = None
+
+
+class PrivateIn(BaseModel):
+    enabled: bool | None = None  # None = автоопределение по флагу/passkey
 
 
 class TrackerAddIn(BaseModel):
@@ -538,6 +543,15 @@ async def reannounce_runtime_torrent(request: Request, db_id: int):
 async def set_runtime_limits(request: Request, db_id: int, body: LimitsIn):
     rt = get_runtime(request)
     h = await rt.set_limits(db_id, body.download_limit, body.upload_limit)
+    if h is None:
+        raise HTTPException(status_code=404, detail="torrent not in engine runtime")
+    return RuntimeHandleOut.model_validate(h)
+
+
+@router.post("/torrents/{db_id}/private", response_model=RuntimeHandleOut)
+async def set_runtime_private(request: Request, db_id: int, body: PrivateIn):
+    rt = get_runtime(request)
+    h = await rt.set_private(db_id, body.enabled)
     if h is None:
         raise HTTPException(status_code=404, detail="torrent not in engine runtime")
     return RuntimeHandleOut.model_validate(h)

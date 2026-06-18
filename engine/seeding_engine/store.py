@@ -25,6 +25,7 @@ class RuntimeHandle:
     added_time: int | None = None  # epoch seconds
     download_limit: int | None = None  # bytes/sec, 0 = без лимита
     upload_limit: int | None = None  # bytes/sec, 0 = без лимита
+    private: bool | None = None  # приватный режим: DHT/PEX/LSD отключены для раздачи
 
 
 class RuntimeStore:

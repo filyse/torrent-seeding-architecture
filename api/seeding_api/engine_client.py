@@ -357,6 +357,16 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def set_private(self, db_id: int, enabled: bool | None) -> dict | None:
+        r = await self._client.post(
+            f"/internal/v1/torrents/{db_id}/private",
+            json={"enabled": enabled},
+        )
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
     async def add_tracker(self, db_id: int, url: str) -> list[dict]:
         r = await self._client.post(
             f"/internal/v1/torrents/{db_id}/trackers",

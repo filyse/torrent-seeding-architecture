@@ -953,6 +953,29 @@ body {
   color: inherit;
 }
 
+.private-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.private-form__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.private-state {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.private-state--on {
+  color: var(--accent, #4caf50);
+  font-weight: 600;
+}
+
 .file-table__name {
   word-break: break-all;
   max-width: 28rem;

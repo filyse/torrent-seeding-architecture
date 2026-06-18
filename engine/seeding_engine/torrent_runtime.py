@@ -66,6 +66,100 @@ def _clear_auto_managed_params(lt, p) -> None:
         log.warning("clear auto_managed on params failed: %s", exc)
 
 
+# Эвристика «приватного» трекера: многие ру-трекеры (rudub и т.п.) не ставят флаг
+# private в метаданных, но используют passkey/authkey. Для таких раздач тоже нужно
+# глушить DHT/PEX/LSD, иначе libtorrent тянет мусорные пиры из открытых сетей.
+_PRIVATE_TRACKER_HINTS = (
+    "passkey=",
+    "authkey=",
+    "torrent_pass=",
+    "secret=",
+    "/rss/",
+    "/announce.php",
+)
+
+
+def _urls_look_private(urls) -> bool:
+    for url in urls or ():
+        low = str(url or "").lower()
+        for hint in _PRIVATE_TRACKER_HINTS:
+            if hint in low:
+                return True
+    return False
+
+
+def _ti_is_private(ti) -> bool:
+    """Раздача приватная, если выставлен флаг private ИЛИ трекер выглядит приватным."""
+    if ti is None:
+        return False
+    try:
+        if bool(ti.priv()):
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        urls = [t.url for t in ti.trackers()]
+    except Exception:  # noqa: BLE001
+        urls = []
+    return _urls_look_private(urls)
+
+
+def _private_flags_mask(lt) -> int:
+    """Битовая маска disable_dht|disable_pex|disable_lsd (то, что есть в биндинге)."""
+    tf = getattr(lt, "torrent_flags", None)
+    if tf is None:
+        return 0
+    mask = 0
+    for name in ("disable_dht", "disable_pex", "disable_lsd"):
+        flag = getattr(tf, name, None)
+        if flag is not None:
+            mask |= int(flag)
+    return mask
+
+
+def _handle_is_private(lt, h) -> bool:
+    ti = None
+    try:
+        ti = h.torrent_file()
+    except Exception:  # noqa: BLE001
+        ti = None
+    if _ti_is_private(ti):
+        return True
+    try:
+        urls = []
+        for t in h.trackers():
+            if isinstance(t, dict):
+                urls.append(t.get("url", ""))
+            else:
+                urls.append(getattr(t, "url", ""))
+    except Exception:  # noqa: BLE001
+        urls = []
+    return _urls_look_private(urls)
+
+
+def _apply_private_to_params(lt, p) -> bool:
+    """Если раздача приватная — выставляем disable_dht/pex/lsd на add_torrent_params."""
+    mask = _private_flags_mask(lt)
+    if not mask:
+        return False
+    priv = _ti_is_private(getattr(p, "ti", None))
+    if not priv:
+        try:
+            urls = list(getattr(p, "trackers", []) or [])
+        except Exception:  # noqa: BLE001
+            urls = []
+        priv = _urls_look_private(urls)
+    if not priv:
+        return False
+    try:
+        p.flags |= mask
+    except Exception as exc:  # noqa: BLE001
+        log.warning("apply private flags on params failed: %s", exc)
+        return False
+    log.info("private torrent detected -> DHT/PEX/LSD disabled")
+    return True
+
+
 def _apply_libtorrent_session_settings(lt, ses) -> None:
     """DHT/LSD/UPnP/NAT-PMP и лимиты из env (разные версии биндингов — best effort)."""
     listen_ifs = os.getenv("LT_LISTEN_INTERFACES", "0.0.0.0:51413,[::]:51413").strip()
@@ -185,6 +279,11 @@ class TorrentRuntime(ABC):
 
     async def set_limits(
         self, db_id: int, download_limit: int | None, upload_limit: int | None
+    ) -> RuntimeHandle | None:
+        return None
+
+    async def set_private(
+        self, db_id: int, on: bool | None = None
     ) -> RuntimeHandle | None:
         return None
 
@@ -571,6 +670,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     raise ValueError(f"invalid .torrent data: {exc}") from exc
             p.save_path = save_path
             _clear_auto_managed_params(lt, p)
+            _apply_private_to_params(lt, p)
             return ses.add_torrent(p)
 
         try:
@@ -1263,9 +1363,17 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 up_limit = int(h.upload_limit())
             except Exception:  # noqa: BLE001
                 pass
-            return st, str(ih), paused, dl_limit, up_limit
+            private = None
+            tf = getattr(lt, "torrent_flags", None)
+            disable_dht = getattr(tf, "disable_dht", None) if tf is not None else None
+            if disable_dht is not None:
+                try:
+                    private = bool(h.flags() & disable_dht)
+                except Exception:  # noqa: BLE001
+                    private = None
+            return st, str(ih), paused, dl_limit, up_limit, private
 
-        st, ih_hex, paused, dl_limit, up_limit = await asyncio.to_thread(_read)
+        st, ih_hex, paused, dl_limit, up_limit, private = await asyncio.to_thread(_read)
         zero = "0" * 40
         if not ih_hex or ih_hex == zero:
             ih_hex = None
@@ -1317,6 +1425,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             added_time=added_time,
             download_limit=dl_limit,
             upload_limit=up_limit,
+            private=private,
         )
 
     def _unset_auto_managed(self, h) -> None:
@@ -1579,6 +1688,39 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 h.set_download_limit(max(0, int(download_limit)))
             if upload_limit is not None and hasattr(h, "set_upload_limit"):
                 h.set_upload_limit(max(0, int(upload_limit)))
+
+        await asyncio.to_thread(_apply)
+        await asyncio.to_thread(save_fastresume, lt, h, db_id)
+        return await self._snapshot(db_id)
+
+    async def set_private(
+        self, db_id: int, on: bool | None = None
+    ) -> RuntimeHandle | None:
+        """Включить/выключить приватный режим раздачи (DHT/PEX/LSD).
+
+        on=None — автоопределение по флагу private/passkey трекера."""
+        lt = self._lt
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None:
+            return None
+        mask = _private_flags_mask(lt)
+
+        def _apply():
+            want = on
+            if want is None:
+                want = _handle_is_private(lt, h)
+            if mask and hasattr(h, "set_flags") and hasattr(h, "unset_flags"):
+                if want:
+                    h.set_flags(mask)
+                else:
+                    h.unset_flags(mask)
+            # переаннонс, чтобы изменения подхватились трекером/сессией
+            if hasattr(h, "force_reannounce"):
+                try:
+                    h.force_reannounce(0)
+                except TypeError:
+                    h.force_reannounce()
 
         await asyncio.to_thread(_apply)
         await asyncio.to_thread(save_fastresume, lt, h, db_id)

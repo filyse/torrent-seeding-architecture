@@ -77,6 +77,7 @@ type RuntimeOut = {
   added_time?: number | null;
   download_limit?: number | null;
   upload_limit?: number | null;
+  private?: boolean | null;
 };
 
 type TorrentFileOut = {
@@ -654,6 +655,39 @@ type QuotaItem = {
 };
 
 const GIB = 1024 * 1024 * 1024;
+
+function mountPrivateMaintenancePanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  panel.append(el("div", { className: "panel__head" }, ["Приватные трекеры"]));
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, [
+    "Прогнать все раздачи и автоматически отключить DHT/PEX/LSD там, где трекер приватный (флаг private или passkey в адресе). Применяется к уже запущенным раздачам.",
+  ]);
+  const btn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, [
+    "Применить приватный режим ко всем",
+  ]);
+  const result = el("p", { className: "field__hint" }, [""]);
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    result.textContent = "Обрабатываю…";
+    try {
+      const r = await fetchJson<{ checked: number; applied: number; private: number; errors: number }>(
+        "/torrents/maintenance/reapply-private",
+        { method: "POST" },
+      );
+      result.textContent = `Проверено ${r.checked}, приватных ${r.private}, ошибок ${r.errors}.`;
+      showToast("Приватный режим применён");
+    } catch (e) {
+      result.textContent = e instanceof Error ? e.message : String(e);
+      showToast(result.textContent, true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  body.append(hint, btn, result);
+  panel.append(body);
+  return panel;
+}
 
 function mountQuotasPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
@@ -1282,6 +1316,41 @@ function buildLimitsForm(data: TorrentDetailOut, onApplied: () => void): HTMLEle
     el("label", { className: "limits-form__field" }, ["↑ КБ/с", ulInput]),
     applyBtn,
   );
+  return wrap;
+}
+
+function buildPrivateRow(data: TorrentDetailOut, onApplied: () => void): HTMLElement {
+  const wrap = el("div", { className: "private-form" });
+  const on = data.runtime?.private === true;
+  const status = el("span", { className: `private-state${on ? " private-state--on" : ""}` }, [
+    on ? "Приватный: DHT/PEX/LSD выключены" : "Публичный: DHT/PEX/LSD включены",
+  ]);
+  const hint = el("p", { className: "field__hint" }, [
+    "Для приватных трекеров (passkey) держите режим включённым — иначе libtorrent тянет мусорные пиры из DHT.",
+  ]);
+  const toggleBtn = el("button", { type: "button", className: "btn btn--sm" }, [
+    on ? "Выключить приватный режим" : "Включить приватный режим",
+  ]);
+  const autoBtn = el("button", { type: "button", className: "btn btn--sm btn--ghost" }, ["Авто"]);
+  const apply = async (enabled: boolean | null) => {
+    toggleBtn.disabled = true;
+    autoBtn.disabled = true;
+    try {
+      await fetchJson(`/torrents/${data.id}/private`, {
+        method: "POST",
+        body: JSON.stringify({ enabled }),
+      });
+      showToast("Приватный режим обновлён");
+      onApplied();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+      toggleBtn.disabled = false;
+      autoBtn.disabled = false;
+    }
+  };
+  toggleBtn.addEventListener("click", () => void apply(!on));
+  autoBtn.addEventListener("click", () => void apply(null));
+  wrap.append(status, el("div", { className: "private-form__row" }, [toggleBtn, autoBtn]), hint);
   return wrap;
 }
 
@@ -2267,6 +2336,7 @@ async function loadDetail(
     );
     const dl = data.runtime?.downloaded ?? 0;
     if (dl > 0) chips.append(statChip(fmtBytes(dl), "Скачано всего"));
+    if (data.runtime?.private === true) chips.append(statChip("🔒 Приватная", "DHT/PEX/LSD выключены"));
 
     // Тулбар: основное действие (пауза/старт) + проверка/переанонс, удаление справа.
     const toolbar = el("div", { className: "detail-toolbar" });
@@ -2360,6 +2430,7 @@ async function loadDetail(
     const manage = el("div", { className: "detail-manage" }, [
       manageCard("Метка", labelRow),
       manageCard("Лимиты скорости", buildLimitsForm(data, () => void backRefresh())),
+      manageCard("Приватный режим", buildPrivateRow(data, () => void backRefresh())),
       manageCard("Перенести на движок", buildMigrateRow(data, () => void backRefresh())),
     ]);
 
@@ -3201,7 +3272,7 @@ function mountSettingsShell(root: HTMLElement): void {
   const account = mountAccountPanel();
 
   root.append(back, header, statsHost, health, account);
-  if (canWrite()) root.append(mountEngineLimitsPanel(), mountQuotasPanel());
+  if (canWrite()) root.append(mountEngineLimitsPanel(), mountQuotasPanel(), mountPrivateMaintenancePanel());
   if (isAdmin())
     root.append(mountUsersPanel(), mountApiKeysPanel(), mountBackupsPanel(), mountAuditPanel());
   root.append(themePanel);

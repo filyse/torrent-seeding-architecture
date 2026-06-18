@@ -127,6 +127,7 @@ class TorrentRuntimeOut(BaseModel):
     added_time: int | None = None
     download_limit: int | None = None
     upload_limit: int | None = None
+    private: bool | None = None
 
 
 class TorrentFileOut(BaseModel):
@@ -153,6 +154,10 @@ class FilePrioritiesIn(BaseModel):
 class LimitsIn(BaseModel):
     download_limit: int | None = Field(default=None, ge=0)
     upload_limit: int | None = Field(default=None, ge=0)
+
+
+class PrivateIn(BaseModel):
+    enabled: bool | None = None  # None = автоопределение по флагу/passkey
 
 
 class BatchUploadItem(BaseModel):

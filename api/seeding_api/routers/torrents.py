@@ -18,6 +18,7 @@ from seeding_api.schemas import (
     BulkLabelIn,
     FilePrioritiesIn,
     LimitsIn,
+    PrivateIn,
     TorrentCreate,
     TorrentDetailOut,
     TorrentFileOut,
@@ -761,6 +762,50 @@ async def set_torrent_limits(
     data["status"] = status
     data["runtime"] = runtime
     return TorrentDetailOut.model_validate(data)
+
+
+@router.post("/{torrent_id}/private", response_model=TorrentDetailOut)
+async def set_torrent_private(
+    torrent_id: int, body: PrivateIn, session: DbSession, pool: EnginePoolDep
+):
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    try:
+        runtime = await pool.client_for_row(row).set_private(torrent_id, body.enabled)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    if runtime is None:
+        raise HTTPException(status_code=409, detail="torrent not in runtime")
+    status = await merge_runtime_into_row(repo, row, runtime)
+    data = TorrentOut.model_validate(row).model_dump()
+    data["status"] = status
+    data["runtime"] = runtime
+    return TorrentDetailOut.model_validate(data)
+
+
+@router.post("/maintenance/reapply-private")
+async def reapply_private_all(session: DbSession, pool: EnginePoolDep):
+    """Прогнать автоопределение приватности по всем раздачам и заглушить DHT/PEX/LSD
+    там, где трекер приватный (флаг private или passkey)."""
+    repo = TorrentRepository(session)
+    rows = await repo.list_all()
+    changed = 0
+    private = 0
+    errors = 0
+    for row in rows:
+        try:
+            runtime = await pool.client_for_row(row).set_private(row.id, None)
+        except httpx.HTTPError:
+            errors += 1
+            continue
+        if runtime is None:
+            continue
+        changed += 1
+        if runtime.get("private"):
+            private += 1
+    return {"checked": len(rows), "applied": changed, "private": private, "errors": errors}
 
 
 @router.post("/{torrent_id}/pause", response_model=TorrentOut)
