@@ -2406,7 +2406,7 @@ async function loadDetail(
     );
     const dl = data.runtime?.downloaded ?? 0;
     if (dl > 0) chips.append(statChip(fmtBytes(dl), "Скачано всего"));
-    if (data.runtime?.private === true) chips.append(statChip("🔒 Приватная", "DHT/PEX/LSD выключены"));
+    if (data.runtime?.private === true) chips.append(statChip("Приватная", "DHT/PEX/LSD выключены"));
 
     // Тулбар: основное действие (пауза/старт) + проверка/переанонс, удаление справа.
     const toolbar = el("div", { className: "detail-toolbar" });
