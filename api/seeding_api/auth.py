@@ -14,19 +14,25 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import os
+import secrets
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from fastapi import Header, HTTPException, Request
-from seeding_db.repository import ApiKeyRepository
+from seeding_db.repository import ApiKeyRepository, SessionRepository
 
 ROLE_LEVEL = {"viewer": 1, "operator": 2, "admin": 3}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+SESSION_PREFIX = "ses_"
 
-# Троттлинг записи last_used_at: не чаще раза в N секунд на ключ.
+# Троттлинг записи last_used_at: не чаще раза в N секунд на ключ/сессию.
 _LAST_TOUCH: dict[int, float] = {}
+_LAST_TOUCH_SESS: dict[str, float] = {}
 _TOUCH_INTERVAL = 60.0
 
 
@@ -34,7 +40,7 @@ _TOUCH_INTERVAL = 60.0
 class Principal:
     name: str
     role: str
-    source: str  # "env" | "db" | "anonymous"
+    source: str  # "env" | "db" | "session" | "anonymous"
     key_id: int | None = None
 
     @property
@@ -44,6 +50,32 @@ class Principal:
 
 def hash_key(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def hash_password(password: str, *, iterations: int = 200_000) -> str:
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return (
+        f"pbkdf2_sha256${iterations}$"
+        f"{base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
+    )
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    try:
+        algo, iters, salt_b64, hash_b64 = encoded.split("$")
+        if algo != "pbkdf2_sha256":
+            return False
+        salt = base64.b64decode(salt_b64)
+        expected = base64.b64decode(hash_b64)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, int(iters))
+        return hmac.compare_digest(dk, expected)
+    except Exception:
+        return False
+
+
+def new_session_token() -> str:
+    return SESSION_PREFIX + secrets.token_urlsafe(32)
 
 
 def _env_admin_keys() -> set[str]:
@@ -59,6 +91,27 @@ async def resolve_principal(request: Request, api_key: str | None) -> Principal 
     if api_key:
         if api_key in env_keys:
             return Principal(name="env", role="admin", source="env")
+        # Сессия по логину/паролю (токен ses_…).
+        if api_key.startswith(SESSION_PREFIX) and factory is not None:
+            token_hash = hash_key(api_key)
+            async with factory() as session:
+                srepo = SessionRepository(session)
+                srow = await srepo.get_by_hash(token_hash)
+                if srow is None:
+                    return None
+                exp = srow.expires_at
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
+                if exp <= datetime.now(timezone.utc):
+                    await srepo.delete_by_hash(token_hash)
+                    await session.commit()
+                    return None
+                now = time.monotonic()
+                if now - _LAST_TOUCH_SESS.get(token_hash, 0.0) > _TOUCH_INTERVAL:
+                    _LAST_TOUCH_SESS[token_hash] = now
+                    await srepo.touch(srow.id)
+                    await session.commit()
+                return Principal(name=srow.username, role=srow.role, source="session")
         if factory is not None:
             key_hash = hash_key(api_key)
             async with factory() as session:
@@ -79,6 +132,11 @@ async def resolve_principal(request: Request, api_key: str | None) -> Principal 
     if factory is not None:
         async with factory() as session:
             if await ApiKeyRepository(session).count_enabled() > 0:
+                return None
+            from seeding_db.repository import UserRepository  # локально, чтобы избежать цикла
+
+            users = await UserRepository(session).list_all()
+            if users:
                 return None
     return Principal(name="anonymous", role="admin", source="anonymous")
 

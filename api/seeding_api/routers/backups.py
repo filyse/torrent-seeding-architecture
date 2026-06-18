@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlsplit
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from seeding_api import maintenance
 from seeding_api.auth import Principal, require_admin
 
 router = APIRouter(tags=["backups"])
@@ -118,11 +119,17 @@ async def restore_backup(body: RestoreIn, _: Principal = Depends(require_admin))
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="файл бэкапа не найден")
     conn = _db_conn()
-    code, log = await _run(
-        ["pg_restore", "-h", conn["host"], "-p", conn["port"], "-U", conn["user"],
-         "-d", conn["db"], "--clean", "--if-exists", "--no-owner", path],
-        conn["password"],
-    )
+    # Мягкий режим обслуживания: на время restore API отвечает 503 на рабочие маршруты,
+    # чтобы клиенты не ходили в БД, пока таблицы пересоздаются.
+    maintenance.begin("Идёт восстановление БД, подождите…", ttl_seconds=600.0)
+    try:
+        code, log = await _run(
+            ["pg_restore", "-h", conn["host"], "-p", conn["port"], "-U", conn["user"],
+             "-d", conn["db"], "--clean", "--if-exists", "--no-owner", path],
+            conn["password"],
+        )
+    finally:
+        maintenance.end()
     # pg_restore может вернуть ненулевой код из-за безобидных предупреждений (например,
     # DROP несуществующего объекта). Считаем успехом, если нет строк с "error".
     has_error = bool(re.search(r"\berror\b", log, re.IGNORECASE))

@@ -3,7 +3,14 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from seeding_db.models import ApiKeyRecord, EngineRecord, TorrentRecord, TorrentStatus
+from seeding_db.models import (
+    ApiKeyRecord,
+    EngineRecord,
+    SessionRecord,
+    TorrentRecord,
+    TorrentStatus,
+    UserRecord,
+)
 
 
 class TorrentRepository:
@@ -228,6 +235,130 @@ class ApiKeyRepository:
 
     async def touch(self, key_id: int) -> None:
         row = await self.get_by_id(key_id)
+        if row is not None:
+            row.last_used_at = datetime.now(timezone.utc)
+            await self._session.flush()
+
+
+class UserRepository:
+    """Пользователи с логином/паролем (Фаза 5)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, *, username: str, password_hash: str, role: str) -> UserRecord:
+        row = UserRecord(
+            username=username, password_hash=password_hash, role=role, enabled=True
+        )
+        self._session.add(row)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def get_by_username(self, username: str) -> UserRecord | None:
+        result = await self._session.execute(
+            select(UserRecord).where(UserRecord.username == username)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_id(self, user_id: int) -> UserRecord | None:
+        return await self._session.get(UserRecord, user_id)
+
+    async def list_all(self) -> list[UserRecord]:
+        result = await self._session.execute(select(UserRecord).order_by(UserRecord.id))
+        return list(result.scalars())
+
+    async def count_admins(self, *, exclude_id: int | None = None) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(UserRecord)
+            .where(UserRecord.enabled.is_(True), UserRecord.role == "admin")
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(UserRecord.id != exclude_id)
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one() or 0)
+
+    async def update(
+        self,
+        user_id: int,
+        *,
+        role: str | None = None,
+        enabled: bool | None = None,
+        password_hash: str | None = None,
+    ) -> UserRecord | None:
+        row = await self.get_by_id(user_id)
+        if row is None:
+            return None
+        if role is not None:
+            row.role = role
+        if enabled is not None:
+            row.enabled = enabled
+        if password_hash is not None:
+            row.password_hash = password_hash
+        await self._session.flush()
+        return row
+
+    async def delete(self, user_id: int) -> bool:
+        row = await self.get_by_id(user_id)
+        if row is None:
+            return False
+        await self._session.delete(row)
+        await self._session.flush()
+        return True
+
+    async def touch_login(self, user_id: int) -> None:
+        row = await self.get_by_id(user_id)
+        if row is not None:
+            row.last_login_at = datetime.now(timezone.utc)
+            await self._session.flush()
+
+
+class SessionRepository:
+    """Сессии входа (Фаза 5)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self, *, token_hash: str, user_id: int, username: str, role: str, expires_at: datetime
+    ) -> SessionRecord:
+        row = SessionRecord(
+            token_hash=token_hash,
+            user_id=user_id,
+            username=username,
+            role=role,
+            expires_at=expires_at,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def get_by_hash(self, token_hash: str) -> SessionRecord | None:
+        result = await self._session.execute(
+            select(SessionRecord).where(SessionRecord.token_hash == token_hash)
+        )
+        return result.scalar_one_or_none()
+
+    async def delete_by_hash(self, token_hash: str) -> bool:
+        row = await self.get_by_hash(token_hash)
+        if row is None:
+            return False
+        await self._session.delete(row)
+        await self._session.flush()
+        return True
+
+    async def delete_for_user(self, user_id: int) -> None:
+        rows = await self._session.execute(
+            select(SessionRecord).where(SessionRecord.user_id == user_id)
+        )
+        for row in rows.scalars():
+            await self._session.delete(row)
+        await self._session.flush()
+
+    async def touch(self, session_id: int) -> None:
+        row = await self._session.get(SessionRecord, session_id)
         if row is not None:
             row.last_used_at = datetime.now(timezone.utc)
             await self._session.flush()

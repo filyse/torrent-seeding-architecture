@@ -51,6 +51,37 @@ class ApiKeyRecord(Base):
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class UserRecord(Base):
+    """Пользователь с логином/паролем (Фаза 5, обычная авторизация). Пароль хранится
+    только в виде PBKDF2-хеша. Роль — те же уровни, что и у API-ключей."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(Text, default="")
+    role: Mapped[str] = mapped_column(String(16), default="operator")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SessionRecord(Base):
+    """Сессия входа по логину/паролю. Токен (`ses_…`) не хранится — только его SHA-256.
+    Роль и имя денормализованы, чтобы проверка не требовала JOIN."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    username: Mapped[str] = mapped_column(String(64), default="")
+    role: Mapped[str] = mapped_column(String(16), default="viewer")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class EngineRecord(Base):
     """Динамический реестр движков (Фаза 4.5): движок может зарегистрироваться сам по
     API-ключу, без правки статического `engines.json`. Статический конфиг остаётся базой —

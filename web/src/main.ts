@@ -305,6 +305,16 @@ async function throwIfNotOk(res: Response): Promise<void> {
     if (res.status === 403) {
       throw new Error("Доступ запрещён");
     }
+    if (res.status === 503) {
+      let msg = "Идёт обслуживание, подождите…";
+      try {
+        const b = JSON.parse(await res.text()) as { error?: { message?: string } };
+        if (b.error?.message) msg = b.error.message;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(msg);
+    }
     const text = await res.text();
     let detail = text || res.statusText;
     try {
@@ -2257,47 +2267,116 @@ async function loadMe(): Promise<void> {
   }
 }
 
+async function loginWithPassword(username: string, password: string): Promise<void> {
+  const res = await fetch(`${API}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    let msg = "неверный логин или пароль";
+    try {
+      const b = (await res.json()) as { error?: { message?: string } };
+      if (b.error?.message) msg = b.error.message;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
+  const data = (await res.json()) as { token: string };
+  setApiKey(data.token);
+}
+
 function showLoginDialog(): void {
   document.querySelector(".modal-overlay.login-overlay")?.remove();
   const overlay = el("div", { className: "modal-overlay login-overlay" });
   const dialog = el("div", { className: "modal-dialog", role: "dialog", "aria-modal": "true" });
+
+  const userInput = el("input", {
+    type: "text",
+    placeholder: "имя пользователя",
+    className: "login-input",
+    autocomplete: "username",
+  }) as HTMLInputElement;
+  const passInput = el("input", {
+    type: "password",
+    placeholder: "пароль",
+    className: "login-input",
+    autocomplete: "current-password",
+  }) as HTMLInputElement;
+
   const keyInput = el("input", {
     type: "password",
     placeholder: "sk_…",
     className: "login-input",
     value: getApiKey(),
   }) as HTMLInputElement;
+  const keyWrap = el("div", { hidden: "" }, [field("API-ключ", keyInput)]);
+  const toggleKey = el("button", { type: "button", className: "btn btn--link btn--sm" }, [
+    "Войти по API-ключу",
+  ]);
+  toggleKey.addEventListener("click", () => {
+    const show = keyWrap.hasAttribute("hidden");
+    if (show) keyWrap.removeAttribute("hidden");
+    else keyWrap.setAttribute("hidden", "");
+    toggleKey.textContent = show ? "Скрыть API-ключ" : "Войти по API-ключу";
+  });
+
   const errLine = el("p", { className: "modal-text login-error", hidden: "" });
   const submit = el("button", { type: "button", className: "btn btn--primary" }, ["Войти"]);
-  const doLogin = async () => {
-    const key = keyInput.value.trim();
-    submit.disabled = true;
-    errLine.hidden = true;
-    setApiKey(key);
+
+  const finish = async () => {
     await loadMe();
     if (currentRole) {
       overlay.remove();
       render();
-    } else {
-      errLine.textContent = "Неверный ключ или нет доступа";
+      return true;
+    }
+    return false;
+  };
+
+  const doLogin = async () => {
+    submit.disabled = true;
+    errLine.hidden = true;
+    try {
+      const keyVisible = !keyWrap.hasAttribute("hidden");
+      const u = userInput.value.trim();
+      const p = passInput.value;
+      if (keyVisible && keyInput.value.trim() && !u) {
+        setApiKey(keyInput.value.trim());
+        if (await finish()) return;
+        throw new Error("Неверный ключ или нет доступа");
+      }
+      if (!u || !p) throw new Error("Введите логин и пароль");
+      await loginWithPassword(u, p);
+      if (await finish()) return;
+      throw new Error("Не удалось войти");
+    } catch (e) {
+      errLine.textContent = e instanceof Error ? e.message : String(e);
       errLine.hidden = false;
       submit.disabled = false;
     }
   };
   submit.addEventListener("click", () => void doLogin());
-  keyInput.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter") void doLogin();
-  });
+  for (const inp of [userInput, passInput, keyInput]) {
+    inp.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") void doLogin();
+    });
+  }
+
   dialog.append(
     el("h2", { className: "modal-title" }, ["Вход"]),
-    el("p", { className: "modal-text" }, ["Введите API-ключ для доступа к платформе."]),
-    field("API-ключ", keyInput),
+    el("p", { className: "modal-text" }, ["Войдите по имени пользователя и паролю."]),
+    field("Пользователь", userInput),
+    field("Пароль", passInput),
+    keyWrap,
+    el("div", { className: "btn-row" }, [toggleKey]),
     errLine,
     el("div", { className: "modal-actions" }, [submit]),
   );
   overlay.append(dialog);
   document.body.append(overlay);
-  keyInput.focus();
+  userInput.focus();
 }
 
 function mountAccountPanel(): HTMLElement {
@@ -2305,22 +2384,42 @@ function mountAccountPanel(): HTMLElement {
   panel.append(el("div", { className: "panel__head" }, ["Аккаунт"]));
   const body = el("div", { className: "panel__body" });
   const role = currentRole ?? "viewer";
+  const who =
+    currentMe && currentMe.source === "session"
+      ? `${currentMe.name} · ${ROLE_LABEL[role]}`
+      : currentMe
+        ? ROLE_LABEL[role]
+        : "Не авторизован";
   body.append(
     el("div", { className: "account-row" }, [
       el("span", { className: "health-dot health-dot--ok" }),
-      el("span", {}, [currentMe ? `${ROLE_LABEL[role]}` : "Не авторизован"]),
+      el("span", {}, [who]),
     ]),
   );
   if (currentMe?.source === "anonymous") {
     body.append(
       el("p", { className: "field__hint" }, [
-        "Ключей ещё нет — доступ открыт. Создайте admin-ключ ниже, чтобы включить защиту.",
+        "Учётных данных ещё нет — доступ открыт. Создайте пользователя или admin-ключ ниже, чтобы включить защиту.",
       ]),
     );
   }
-  const changeBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Сменить ключ"]);
+  const btnRow = el("div", { className: "btn-row" });
+  const logoutBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Выйти"]);
+  logoutBtn.addEventListener("click", async () => {
+    try {
+      await fetchJson("/auth/logout", { method: "POST" });
+    } catch {
+      /* ignore */
+    }
+    setApiKey("");
+    currentMe = null;
+    currentRole = null;
+    showLoginDialog();
+  });
+  const changeBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Сменить аккаунт"]);
   changeBtn.addEventListener("click", () => showLoginDialog());
-  body.append(el("div", { className: "btn-row" }, [changeBtn]));
+  btnRow.append(logoutBtn, changeBtn);
+  body.append(btnRow);
   panel.append(body);
   return panel;
 }
@@ -2422,6 +2521,146 @@ function mountApiKeysPanel(): HTMLElement {
   body.append(
     el("p", { className: "field__hint" }, ["Ключ показывается один раз при создании — сохраните его."]),
     el("div", { className: "keys-form" }, [nameInput, roleSelect, createBtn]),
+    list,
+  );
+  panel.append(body);
+  void reload();
+  return panel;
+}
+
+type UserItem = {
+  id: number;
+  username: string;
+  role: Role;
+  enabled: boolean;
+  created_at: string | null;
+  last_login_at: string | null;
+};
+
+function mountUsersPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  panel.append(el("div", { className: "panel__head" }, ["Пользователи"]));
+  const body = el("div", { className: "panel__body" });
+
+  const nameInput = el("input", { type: "text", placeholder: "имя пользователя" }) as HTMLInputElement;
+  const passInput = el("input", { type: "password", placeholder: "пароль (мин. 6)" }) as HTMLInputElement;
+  const roleSelect = el("select", { className: "select" }) as HTMLSelectElement;
+  for (const [val, label] of [
+    ["admin", "admin — полный доступ"],
+    ["operator", "operator — управление раздачами"],
+    ["viewer", "viewer — только чтение"],
+  ]) {
+    roleSelect.append(el("option", { value: val }, [label]));
+  }
+  roleSelect.value = "operator";
+  const createBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Добавить"]);
+  const list = el("div", { className: "keys-list" });
+
+  const reload = async () => {
+    try {
+      const users = await fetchJson<UserItem[]>("/auth/users");
+      list.replaceChildren();
+      if (users.length === 0) {
+        list.append(el("p", { className: "field__hint" }, ["Пользователей пока нет"]));
+        return;
+      }
+      for (const u of users) {
+        const row = el("div", { className: `key-row${u.enabled ? "" : " key-row--off"}` });
+        const meta = el("div", { className: "key-row__meta" }, [
+          el("span", { className: "key-row__name" }, [u.username]),
+          el("span", { className: "key-row__sub" }, [
+            `${u.role}${u.enabled ? "" : " · выключен"}${
+              u.last_login_at ? ` · вход ${new Date(u.last_login_at).toLocaleDateString("ru-RU")}` : ""
+            }`,
+          ]),
+        ]);
+        const roleSel = el("select", { className: "select select--sm" }) as HTMLSelectElement;
+        for (const r of ["admin", "operator", "viewer"]) roleSel.append(el("option", { value: r }, [r]));
+        roleSel.value = u.role;
+        roleSel.addEventListener("change", async () => {
+          try {
+            await fetchJson(`/auth/users/${u.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ role: roleSel.value }),
+            });
+            await reload();
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : String(e), true);
+          }
+        });
+        const pwBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Пароль"]);
+        pwBtn.addEventListener("click", async () => {
+          const np = window.prompt(`Новый пароль для «${u.username}» (мин. 6):`);
+          if (!np) return;
+          try {
+            await fetchJson(`/auth/users/${u.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ password: np }),
+            });
+            showToast("Пароль обновлён");
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : String(e), true);
+          }
+        });
+        const toggle = el("button", { type: "button", className: "btn btn--sm" }, [
+          u.enabled ? "Выключить" : "Включить",
+        ]);
+        toggle.addEventListener("click", async () => {
+          try {
+            await fetchJson(`/auth/users/${u.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ enabled: !u.enabled }),
+            });
+            await reload();
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : String(e), true);
+          }
+        });
+        const del = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["Удалить"]);
+        del.addEventListener("click", async () => {
+          if (!window.confirm(`Удалить пользователя «${u.username}»?`)) return;
+          try {
+            await fetchDelete(`/auth/users/${u.id}`);
+            await reload();
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : String(e), true);
+          }
+        });
+        row.append(meta, el("div", { className: "btn-row" }, [roleSel, pwBtn, toggle, del]));
+        list.append(row);
+      }
+    } catch (e) {
+      list.replaceChildren(el("p", { className: "field__hint" }, [e instanceof Error ? e.message : String(e)]));
+    }
+  };
+
+  createBtn.addEventListener("click", async () => {
+    const u = nameInput.value.trim();
+    const p = passInput.value;
+    if (!u || p.length < 6) {
+      showToast("Имя и пароль (мин. 6) обязательны", true);
+      return;
+    }
+    createBtn.disabled = true;
+    try {
+      await fetchJson("/auth/users", {
+        method: "POST",
+        body: JSON.stringify({ username: u, password: p, role: roleSelect.value }),
+      });
+      nameInput.value = "";
+      passInput.value = "";
+      showToast("Пользователь добавлен");
+      await reload();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      createBtn.disabled = false;
+    }
+  });
+
+  body.append(
+    el("p", { className: "field__hint" }, ["Вход по имени и паролю. Роль можно менять в списке."]),
+    el("div", { className: "keys-form" }, [nameInput, passInput, roleSelect, createBtn]),
     list,
   );
   panel.append(body);
@@ -2579,7 +2818,7 @@ function mountSettingsShell(root: HTMLElement): void {
   const account = mountAccountPanel();
 
   root.append(back, header, statsHost, health, account);
-  if (isAdmin()) root.append(mountApiKeysPanel(), mountBackupsPanel());
+  if (isAdmin()) root.append(mountUsersPanel(), mountApiKeysPanel(), mountBackupsPanel());
   root.append(themePanel);
   if (canWrite()) {
     const limits = mountGlobalLimitsPanel();

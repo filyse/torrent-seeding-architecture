@@ -11,6 +11,7 @@ from seeding_db.session import create_engine as make_async_engine
 from seeding_db.session import create_session_factory, init_models
 from sqlalchemy import text
 
+from seeding_api import maintenance
 from seeding_api.arq_util import redis_settings_from_url
 from seeding_api.auth import require_auth
 from seeding_api.engine_pool import EnginePool
@@ -89,6 +90,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Маршруты, доступные даже в режиме обслуживания (здоровье, вход, бэкапы).
+_MAINTENANCE_ALLOW = ("/api/v1/health", "/api/v1/auth", "/api/v1/backups")
+
+
+@app.middleware("http")
+async def maintenance_gate(request: Request, call_next):
+    on, reason = maintenance.status()
+    if on:
+        path = request.url.path
+        if path.startswith("/api/v1") and not path.startswith(_MAINTENANCE_ALLOW):
+            return JSONResponse(
+                status_code=503,
+                content={"error": {"code": 503, "message": reason or "Идёт обслуживание"}},
+            )
+    return await call_next(request)
 
 
 @app.exception_handler(HTTPException)
