@@ -1,12 +1,5 @@
 [
   {
-    "id": "b1",
-    "url": "https://engine-b1:8081",
-    "storage_prefix": "/data/b1",
-    "listen_port": 50001,
-    "media_path": "/media/seeding-test/b1/b1"
-  },
-  {
     "id": "b2",
     "url": "https://engine-b2:8081",
     "storage_prefix": "/data/b2",

@@ -2,11 +2,6 @@
 # Запуск: docker compose -f docker-compose.multi-engine.yml -f docker-compose.multi-engine.media.yml up -d
 
 services:
-  engine-b1:
-    volumes:
-      - /mnt/media/seeding-test/b1:/data
-      - /mnt/media:/media:ro
-
   engine-b2:
     volumes:
       - /mnt/media/seeding-test/b2:/data
