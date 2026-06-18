@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 from urllib.parse import urlparse
@@ -8,7 +9,7 @@ from arq import cron
 from arq.connections import RedisSettings
 from seeding_db.config import get_database_url
 from seeding_db.models import TorrentStatus
-from seeding_db.repository import TorrentRepository
+from seeding_db.repository import QuotaRepository, TorrentRepository
 from seeding_db.status_from_runtime import status_from_runtime
 from seeding_db.session import create_engine, create_session_factory
 
@@ -43,6 +44,65 @@ async def check_engine_health(ctx):
     results = await check_all_engines_health()
     log.info("engine health job ok engines=%s", list(results))
     return {"ok": True, "engines": results}
+
+
+async def _meter_and_enforce(session, db_rows, runtime_by_id) -> dict:
+    """Учёт отданного по меткам и принудительная пауза при превышении квоты.
+
+    Дельта берётся из `total_uploaded` каждого торрента метки относительно сохранённой
+    отметки; при сбросе счётчика движка (рестарт) дельта считается от нуля."""
+    qrepo = QuotaRepository(session)
+    quotas = await qrepo.list_quotas()
+    if not quotas:
+        return {"quota_labels": 0, "enforced": 0}
+
+    quota_labels = {q.label for q in quotas}
+    meters = await qrepo.get_meters()
+    deltas: dict[str, int] = {}
+    for row in db_rows:
+        if row.label not in quota_labels:
+            continue
+        rt = runtime_by_id.get(row.id)
+        if not rt:
+            continue
+        cur = rt.get("total_uploaded")
+        if cur is None:
+            continue
+        cur = int(cur)
+        last = meters.get(row.id, 0)
+        delta = (cur - last) if cur >= last else cur
+        if delta > 0:
+            deltas[row.label] = deltas.get(row.label, 0) + delta
+        await qrepo.set_meter(row.id, cur)
+    for label, d in deltas.items():
+        await qrepo.add_uploaded(label, d)
+
+    enforced = 0
+    trepo = TorrentRepository(session)
+    for q in await qrepo.list_quotas():
+        if not q.enabled or not q.upload_quota:
+            continue
+        if q.uploaded_total >= q.upload_quota and not q.exceeded:
+            targets = [
+                r for r in db_rows
+                if r.label == q.label
+                and r.status in (TorrentStatus.downloading.value, TorrentStatus.seeding.value)
+            ]
+            paused: list[int] = []
+            for r in targets:
+                try:
+                    base = engine_url(r.engine_id).rstrip("/")
+                    async with make_engine_client(base, 15.0) as client:
+                        rr = await client.post(f"{base}/internal/v1/torrents/{r.id}/pause")
+                    if rr.status_code < 300:
+                        await trepo.update_status(r.id, TorrentStatus.paused.value)
+                        paused.append(r.id)
+                except (httpx.HTTPError, KeyError):
+                    pass
+            await qrepo.set_exceeded(q.label, True, json.dumps(paused))
+            enforced += 1
+            log.info("quota exceeded label=%s paused=%s", q.label, len(paused))
+    return {"quota_labels": len(quota_labels), "enforced": enforced}
 
 
 async def sync_runtime_to_db(ctx):
@@ -103,6 +163,8 @@ async def sync_runtime_to_db(ctx):
                 ):
                     db_missing_runtime += 1
 
+            quota_result = await _meter_and_enforce(session, db_rows, runtime_by_id)
+
             await session.commit()
     finally:
         await eng.dispose()
@@ -116,6 +178,7 @@ async def sync_runtime_to_db(ctx):
         "updated_info_hash": updated_info_hash,
         "runtime_missing_db": runtime_missing_db,
         "db_missing_runtime": db_missing_runtime,
+        "quotas": quota_result,
     }
     log.info("sync_runtime_to_db done %s", result)
     return result

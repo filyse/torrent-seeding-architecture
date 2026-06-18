@@ -642,6 +642,158 @@ function mountEngineLimitsPanel(): HTMLElement {
   return panel;
 }
 
+type QuotaItem = {
+  label: string;
+  upload_quota: number | null;
+  uploaded_total: number;
+  enabled: boolean;
+  exceeded: boolean;
+  percent: number | null;
+  paused_count: number;
+  since: string | null;
+};
+
+const GIB = 1024 * 1024 * 1024;
+
+function mountQuotasPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  const head = el("div", { className: "panel__head panel__head--with-action" }, ["Квоты по меткам"]);
+  const refreshBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Обновить"]);
+  head.append(refreshBtn);
+  panel.append(head);
+
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, [
+    "Лимит суммарной отдачи на метку (ГиБ). При достижении активные раздачи метки ставятся на паузу; «Сбросить» обнуляет счётчик и возобновляет их.",
+  ]);
+
+  const labelSelect = el("select", { className: "select" }) as HTMLSelectElement;
+  const quotaInput = el("input", { type: "number", min: "0", step: "0.1", placeholder: "ГиБ" }) as HTMLInputElement;
+  const addBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Задать"]);
+  const form = el("div", { className: "keys-form" }, [labelSelect, quotaInput, addBtn]);
+  const list = el("div", { className: "keys-list" });
+  body.append(hint, form, list);
+  panel.append(body);
+
+  const loadLabels = async () => {
+    try {
+      const labels = await fetchJson<string[]>("/labels");
+      labelSelect.replaceChildren();
+      if (labels.length === 0) {
+        labelSelect.append(el("option", { value: "" }, ["Нет меток"]));
+        return;
+      }
+      for (const l of labels) labelSelect.append(el("option", { value: l }, [l]));
+    } catch {
+      labelSelect.replaceChildren(el("option", { value: "" }, ["Ошибка загрузки меток"]));
+    }
+  };
+
+  const reload = async () => {
+    try {
+      const rows = await fetchJson<QuotaItem[]>("/quotas");
+      list.replaceChildren();
+      if (rows.length === 0) {
+        list.append(el("p", { className: "field__hint" }, ["Квоты не заданы"]));
+        return;
+      }
+      for (const q of rows) {
+        const row = el("div", { className: `key-row${q.enabled ? "" : " key-row--off"}` });
+        const quotaStr = q.upload_quota ? fmtBytes(q.upload_quota) : "∞";
+        const pct = q.percent != null ? Math.min(100, q.percent) : 0;
+        const bar = el("div", { className: "quota-bar" }, [
+          el("div", {
+            className: `quota-bar__fill${q.exceeded ? " quota-bar__fill--over" : ""}`,
+            style: `width:${pct}%`,
+          }),
+        ]);
+        const meta = el("div", { className: "key-row__meta quota-meta" }, [
+          el("span", { className: "key-row__name" }, [
+            q.label,
+            q.exceeded ? el("span", { className: "audit-status audit-status--err quota-badge" }, ["лимит"]) : "",
+          ]),
+          el("span", { className: "key-row__sub" }, [
+            `${fmtBytes(q.uploaded_total)} / ${quotaStr}${q.percent != null ? ` · ${q.percent}%` : ""}${
+              q.paused_count ? ` · на паузе: ${q.paused_count}` : ""
+            }`,
+          ]),
+          bar,
+        ]);
+        const toggle = el("button", { type: "button", className: "btn btn--sm" }, [
+          q.enabled ? "Выключить" : "Включить",
+        ]);
+        toggle.addEventListener("click", async () => {
+          try {
+            await fetchJson("/quotas", {
+              method: "POST",
+              body: JSON.stringify({ label: q.label, upload_quota: q.upload_quota ?? 0, enabled: !q.enabled }),
+            });
+            await reload();
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : String(e), true);
+          }
+        });
+        const reset = el("button", { type: "button", className: "btn btn--sm" }, ["Сбросить"]);
+        reset.addEventListener("click", async () => {
+          if (!window.confirm(`Сбросить счётчик метки «${q.label}» и возобновить приостановленные раздачи?`)) return;
+          try {
+            const r = await fetchJson<{ resumed: number }>(`/quotas/${encodeURIComponent(q.label)}/reset`, {
+              method: "POST",
+            });
+            showToast(`Счётчик сброшен, возобновлено: ${r.resumed}`);
+            await reload();
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : String(e), true);
+          }
+        });
+        const del = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["Удалить"]);
+        del.addEventListener("click", async () => {
+          if (!window.confirm(`Удалить квоту метки «${q.label}»?`)) return;
+          try {
+            await fetchDelete(`/quotas/${encodeURIComponent(q.label)}`);
+            await reload();
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : String(e), true);
+          }
+        });
+        row.append(meta, el("div", { className: "btn-row" }, [toggle, reset, del]));
+        list.append(row);
+      }
+    } catch (e) {
+      list.replaceChildren(el("p", { className: "field__hint" }, [e instanceof Error ? e.message : String(e)]));
+    }
+  };
+
+  addBtn.addEventListener("click", async () => {
+    const label = labelSelect.value;
+    if (!label) {
+      showToast("Выберите метку", true);
+      return;
+    }
+    const gib = Number(quotaInput.value.trim());
+    const bytes = Number.isFinite(gib) && gib > 0 ? Math.round(gib * GIB) : 0;
+    addBtn.disabled = true;
+    try {
+      await fetchJson("/quotas", {
+        method: "POST",
+        body: JSON.stringify({ label, upload_quota: bytes, enabled: true }),
+      });
+      quotaInput.value = "";
+      showToast(`Квота для «${label}» задана`);
+      await reload();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      addBtn.disabled = false;
+    }
+  });
+
+  refreshBtn.addEventListener("click", () => void reload());
+  void loadLabels();
+  void reload();
+  return panel;
+}
+
 function effectiveStatus(t: TorrentOut | TorrentDetailOut): string {
   const rs = (t.runtime?.runtime_status || "").toLowerCase();
   const lt = (t.runtime?.lt_state || "").toLowerCase();
@@ -2980,7 +3132,7 @@ function mountSettingsShell(root: HTMLElement): void {
   const account = mountAccountPanel();
 
   root.append(back, header, statsHost, health, account);
-  if (canWrite()) root.append(mountEngineLimitsPanel());
+  if (canWrite()) root.append(mountEngineLimitsPanel(), mountQuotasPanel());
   if (isAdmin())
     root.append(mountUsersPanel(), mountApiKeysPanel(), mountBackupsPanel(), mountAuditPanel());
   root.append(themePanel);

@@ -1389,6 +1389,31 @@ body {
   width: 100%;
 }
 
+/* ---- Квоты по меткам ---- */
+.quota-meta {
+  flex: 1;
+  min-width: 0;
+}
+.quota-badge {
+  margin-left: 0.4rem;
+}
+.quota-bar {
+  margin-top: 0.35rem;
+  height: 6px;
+  width: 100%;
+  background: var(--surface-3, var(--border));
+  border-radius: 4px;
+  overflow: hidden;
+}
+.quota-bar__fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+.quota-bar__fill--over {
+  background: var(--danger);
+}
+
 /* ---- Журнал действий (аудит) ---- */
 .audit-list {
   display: flex;

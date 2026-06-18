@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -101,6 +101,36 @@ class AuditRecord(Base):
     status: Mapped[int] = mapped_column(Integer, default=0)
     ip: Mapped[str] = mapped_column(String(64), default="")
     summary: Mapped[str] = mapped_column(Text, default="")
+
+
+class LabelQuota(Base):
+    """Кумулятивная квота по объёму отдачи на метку (Фаза 5).
+
+    `uploaded_total` копится воркером из дельт `total_uploaded` каждого торрента метки
+    (переживает рестарт движка: при сбросе счётчика libtorrent дельта берётся от нуля).
+    При достижении `upload_quota` активные раздачи метки ставятся на паузу; при сбросе
+    квоты они возобновляются."""
+
+    __tablename__ = "label_quotas"
+
+    label: Mapped[str] = mapped_column(String(128), primary_key=True)
+    upload_quota: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    uploaded_total: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    exceeded: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    paused_ids: Mapped[str] = mapped_column(Text, default="")
+    since: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TorrentMeter(Base):
+    """Базовая отметка отданного по торренту — для подсчёта дельт квот (Фаза 5)."""
+
+    __tablename__ = "torrent_meter"
+
+    torrent_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    last_uploaded: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class EngineRecord(Base):

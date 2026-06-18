@@ -8,7 +8,9 @@ from seeding_db.models import (
     ApiKeyRecord,
     AuditRecord,
     EngineRecord,
+    LabelQuota,
     SessionRecord,
+    TorrentMeter,
     TorrentRecord,
     TorrentStatus,
     UserRecord,
@@ -413,6 +415,86 @@ class AuditRepository:
         )
         await self._session.flush()
         return int(result.rowcount or 0)
+
+
+class QuotaRepository:
+    """Квоты по объёму на метку + счётчики отданного по торрентам (Фаза 5)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    # --- квоты ---
+    async def list_quotas(self) -> list[LabelQuota]:
+        result = await self._session.execute(select(LabelQuota).order_by(LabelQuota.label))
+        return list(result.scalars())
+
+    async def get_quota(self, label: str) -> LabelQuota | None:
+        return await self._session.get(LabelQuota, label)
+
+    async def upsert_quota(
+        self, label: str, *, upload_quota: int | None, enabled: bool
+    ) -> LabelQuota:
+        row = await self._session.get(LabelQuota, label)
+        if row is None:
+            row = LabelQuota(label=label, uploaded_total=0)
+            self._session.add(row)
+        row.upload_quota = upload_quota if (upload_quota and upload_quota > 0) else None
+        row.enabled = enabled
+        row.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def add_uploaded(self, label: str, delta: int) -> None:
+        row = await self._session.get(LabelQuota, label)
+        if row is None or delta <= 0:
+            return
+        row.uploaded_total = int(row.uploaded_total or 0) + int(delta)
+        row.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
+
+    async def set_exceeded(self, label: str, exceeded: bool, paused_ids: str) -> None:
+        row = await self._session.get(LabelQuota, label)
+        if row is None:
+            return
+        row.exceeded = exceeded
+        row.paused_ids = paused_ids
+        row.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
+
+    async def reset_quota(self, label: str) -> LabelQuota | None:
+        row = await self._session.get(LabelQuota, label)
+        if row is None:
+            return None
+        row.uploaded_total = 0
+        row.exceeded = False
+        row.paused_ids = ""
+        row.since = datetime.now(timezone.utc)
+        row.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
+        return row
+
+    async def delete_quota(self, label: str) -> bool:
+        row = await self._session.get(LabelQuota, label)
+        if row is None:
+            return False
+        await self._session.delete(row)
+        await self._session.flush()
+        return True
+
+    # --- счётчики по торрентам ---
+    async def get_meters(self) -> dict[int, int]:
+        result = await self._session.execute(select(TorrentMeter))
+        return {m.torrent_id: int(m.last_uploaded or 0) for m in result.scalars()}
+
+    async def set_meter(self, torrent_id: int, value: int) -> None:
+        row = await self._session.get(TorrentMeter, torrent_id)
+        if row is None:
+            row = TorrentMeter(torrent_id=torrent_id)
+            self._session.add(row)
+        row.last_uploaded = int(value)
+        row.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
 
 
 class EngineRepository:
