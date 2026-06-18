@@ -2256,17 +2256,15 @@ function mountListShell(root: HTMLElement): void {
   }, [icon("refresh")]);
   refreshBtn.addEventListener("click", () => void refresh());
 
-  // Один ряд: фильтры слева, справа — счётчик, сброс и обновление.
+  // Один ряд: фильтры слева (поиск тянется), справа — сброс и обновление.
+  // Счётчик торрентов не дублируем — он есть в карточке статистики выше.
   const filters = el("div", { className: "list-controls" }, [
     searchInput,
     statusSelect,
     labelSelect,
     sortSelect,
     densitySelect,
-    el("span", { className: "list-controls__spacer" }),
-    countEl,
-    resetFilters,
-    refreshBtn,
+    el("div", { className: "list-controls__right" }, [resetFilters, refreshBtn]),
     labelSuggestions,
   ]);
   applyDensity();

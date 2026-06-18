@@ -1396,19 +1396,14 @@ body {
   align-items: center;
 }
 
-.list-controls__spacer {
-  flex: 1 1 0;
-}
-
-.list-controls .list-toolbar__count {
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--muted);
-  white-space: nowrap;
+.list-controls__right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .list-controls__refresh {
-  font-size: 1.05rem;
   line-height: 1;
   padding: 0.4rem 0.6rem;
 }
@@ -1436,8 +1431,8 @@ body {
 }
 
 .list-filter__search {
-  flex: 1 1 12rem;
-  min-width: 10rem;
+  flex: 1 1 22rem;
+  min-width: 12rem;
   padding: 0.45rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
