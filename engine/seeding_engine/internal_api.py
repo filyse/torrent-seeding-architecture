@@ -165,6 +165,24 @@ async def internal_health(request: Request):
     }
 
 
+@router.post("/restart")
+async def restart_engine():
+    """Грациозный самоперезапуск движка.
+
+    Шлём себе SIGTERM — uvicorn корректно завершится (shutdown-хук сохранит fastresume и
+    session.state), процесс выйдет, и контейнер поднимет политика рестарта Docker
+    (`restart: unless-stopped`). Работает и для удалённых движков, до Docker которых у
+    оркестратора нет доступа (раньше рестарт шёл через локальный Docker API → «не найден»)."""
+    import signal  # noqa: PLC0415
+
+    async def _later() -> None:
+        await asyncio.sleep(0.5)  # дать ответу уйти до завершения процесса
+        signal.raise_signal(signal.SIGTERM)
+
+    asyncio.create_task(_later())
+    return {"status": "restarting", "service": "engine"}
+
+
 @router.get("/torrents", response_model=list[RuntimeHandleOut])
 async def list_runtime_torrents(request: Request):
     rt = get_runtime(request)

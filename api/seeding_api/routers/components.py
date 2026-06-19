@@ -12,7 +12,7 @@ import logging
 import re
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from seeding_api import docker_ctl
 from seeding_api.auth import Principal, require_admin
@@ -49,11 +49,33 @@ async def list_components(_: Principal = Depends(require_admin)) -> dict:
 
 @router.post("/{service}/restart")
 async def restart_component(
-    service: str, _: Principal = Depends(require_admin)
+    service: str, request: Request, _: Principal = Depends(require_admin)
 ) -> dict:
     """Перезапустить контейнер сервиса. `api` рестартует с задержкой, чтобы успеть ответить."""
     if not _is_allowed(service):
         raise HTTPException(status_code=400, detail=f"сервис «{service}» нельзя перезапускать")
+
+    # Движки перезапускаем через их собственный внутренний API (self-restart по SIGTERM),
+    # а не через локальный Docker: движки могут жить на других хостах, до Docker которых у
+    # api нет доступа (иначе локальный Docker отвечал «контейнер не найден»).
+    if _ENGINE_RE.match(service):
+        eid = service[len("engine-"):]
+        pool = getattr(request.app.state, "engine_pool", None)
+        if pool is None:
+            raise HTTPException(status_code=503, detail="пул движков недоступен")
+        try:
+            client = pool.client_for(eid)
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"движок «{eid}» не найден в активном пуле (offline/протух?)",
+            )
+        try:
+            res = await client.restart()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"движок «{eid}» недоступен: {exc}")
+        return {"service": service, "engine_id": eid, "restarted": True, **(res or {})}
+
     if not docker_ctl.docker_available():
         raise HTTPException(
             status_code=503,

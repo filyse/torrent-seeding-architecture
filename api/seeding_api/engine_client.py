@@ -74,6 +74,13 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def restart(self) -> dict:
+        """Грациозный самоперезапуск движка (движок шлёт себе SIGTERM, контейнер поднимает
+        политика рестарта Docker). Короткий таймаут: движок может закрыть соединение на выходе."""
+        r = await self._client.post("/internal/v1/restart", timeout=httpx.Timeout(10.0))
+        r.raise_for_status()
+        return r.json()
+
     async def register_torrent(self, db_id: int, magnet_uri: str | None, save_path: str) -> dict:
         r = await self._client.post(
             "/internal/v1/torrents",

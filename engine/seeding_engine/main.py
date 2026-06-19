@@ -113,12 +113,16 @@ async def shutdown() -> None:
 
 @app.get("/health")
 async def health(request: Request):
+    from seeding_engine import sysinfo as _sysinfo
+
     rt = request.app.state.torrent_runtime
     return {
         "status": "ok",
         "service": "engine",
         "backend": rt.backend_name,
         "data_root": os.getenv("SEEDING_DATA_ROOT", ""),
+        "version": _sysinfo.engine_version(),
+        "built_at": _sysinfo.build_time(),
     }
 
 
