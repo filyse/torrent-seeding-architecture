@@ -30,8 +30,10 @@ class EngineSpec:
 
 def _parse_specs(raw: str) -> list[EngineSpec]:
     data = json.loads(raw)
-    if not isinstance(data, list) or not data:
-        raise ValueError("ENGINES_CONFIG must be a non-empty JSON array")
+    if not isinstance(data, list):
+        raise ValueError("ENGINES_CONFIG must be a JSON array")
+    # Пустой массив допустим: все движки регистрируются динамически (heartbeat'ом)
+    # и подтягиваются в пул из БД. Актуально, когда на control-plane нет локальных движков.
     specs: list[EngineSpec] = []
     for item in data:
         if not isinstance(item, dict):

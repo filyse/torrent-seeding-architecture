@@ -71,57 +71,9 @@ services:
       timeout: 3s
       retries: 5
 
-  engine-b3:
-    <<: *engine-common
-    environment:
-      <<: *engine-env
-      ENGINE_STORAGE_SUBDIR: b3
-      LT_LISTEN_INTERFACES: "0.0.0.0:50003,[::]:50003"
-    volumes:
-      - seeding_b3:/data
-      - ./certs:/certs:ro
-    ports:
-      - "50003:50003"
-      - "50003:50003/udp"
-
-  engine-b4:
-    <<: *engine-common
-    environment:
-      <<: *engine-env
-      ENGINE_STORAGE_SUBDIR: b4
-      LT_LISTEN_INTERFACES: "0.0.0.0:50004,[::]:50004"
-    volumes:
-      - seeding_b4:/data
-      - ./certs:/certs:ro
-    ports:
-      - "50004:50004"
-      - "50004:50004/udp"
-
-  engine-b5:
-    <<: *engine-common
-    environment:
-      <<: *engine-env
-      ENGINE_STORAGE_SUBDIR: b5
-      LT_LISTEN_INTERFACES: "0.0.0.0:50005,[::]:50005"
-    volumes:
-      - seeding_b5:/data
-      - ./certs:/certs:ro
-    ports:
-      - "50005:50005"
-      - "50005:50005/udp"
-
-  engine-b6:
-    <<: *engine-common
-    environment:
-      <<: *engine-env
-      ENGINE_STORAGE_SUBDIR: b6
-      LT_LISTEN_INTERFACES: "0.0.0.0:50006,[::]:50006"
-    volumes:
-      - seeding_b6:/data
-      - ./certs:/certs:ro
-    ports:
-      - "50006:50006"
-      - "50006:50006/udp"
+  # Все libtorrent-движки (b1–b6) вынесены на выделенный сидбокс 192.168.1.171 и
+  # регистрируются в оркестраторе динамически (см. docker-compose.engine.yml на хосте).
+  # CT400 несёт только control plane (api/queue/web/db/redis) и наблюдаемость.
 
   api:
     build:
@@ -165,14 +117,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      engine-b3:
-        condition: service_healthy
-      engine-b4:
-        condition: service_healthy
-      engine-b5:
-        condition: service_healthy
-      engine-b6:
-        condition: service_healthy
 
   queue_worker:
     build:
@@ -207,8 +151,4 @@ services:
 
 volumes:
   pgdata:
-  seeding_b3:
-  seeding_b4:
-  seeding_b5:
-  seeding_b6:
 
