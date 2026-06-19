@@ -75,13 +75,24 @@ def _resolve_target(pool, engine_id: str | None, save_path: str | None) -> tuple
 async def list_torrents(session: DbSession, pool: EnginePoolDep):
     repo = TorrentRepository(session)
     rows = await repo.list_all()
+
+    # N+1 наоборот: вместо запроса к движку на каждый торрент тянем полный рантайм-список
+    # с каждого движка ОДИН раз и параллельно, затем мерджим по db_id. На сотнях/тысячах
+    # раздач это разница между десятками секунд и долями секунды.
+    engine_ids = {row.engine_id for row in rows if row.engine_id}
+
+    async def _fetch(eid: str) -> tuple[str, dict[int, dict]]:
+        try:
+            return eid, await pool.client_for(eid).list_runtime()
+        except (httpx.HTTPError, KeyError):
+            return eid, {}
+
+    fetched = await asyncio.gather(*(_fetch(eid) for eid in engine_ids))
+    runtime_by_engine: dict[str, dict[int, dict]] = dict(fetched)
+
     out: list[TorrentDetailOut] = []
     for row in rows:
-        runtime = None
-        try:
-            runtime = await pool.client_for_row(row).runtime_snapshot(row.id)
-        except httpx.HTTPError:
-            runtime = None
+        runtime = runtime_by_engine.get(row.engine_id, {}).get(row.id)
         status = await merge_runtime_into_row(repo, row, runtime)
         data = TorrentOut.model_validate(row).model_dump()
         data["status"] = status

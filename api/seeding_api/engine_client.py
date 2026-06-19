@@ -293,6 +293,21 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def list_runtime(self) -> dict[int, dict]:
+        """Все рантайм-снапшоты движка одним запросом: {db_id: handle}.
+
+        Нужно для списка раздач, чтобы не дёргать движок по одному торренту (N+1)."""
+        r = await self._client.get("/internal/v1/torrents")
+        r.raise_for_status()
+        data = r.json()
+        out: dict[int, dict] = {}
+        if isinstance(data, list):
+            for h in data:
+                did = h.get("db_id") if isinstance(h, dict) else None
+                if did is not None:
+                    out[int(did)] = h
+        return out
+
     async def get_migrate_progress(self, db_id: int) -> dict | None:
         r = await self._client.get(f"/internal/v1/torrents/{db_id}/migrate-progress")
         if r.status_code == 404:
