@@ -117,6 +117,7 @@ async def list_torrents(
     runtime_by_engine: dict[str, dict[int, dict]] = dict(fetched)
 
     items: list[TorrentDetailOut] = []
+    runtimes: list[dict | None] = []
     for row in rows:
         runtime = runtime_by_engine.get(row.engine_id, {}).get(row.id)
         merged = await merge_runtime_into_row(repo, row, runtime)
@@ -124,6 +125,29 @@ async def list_torrents(
         data["status"] = merged
         data["runtime"] = runtime
         items.append(TorrentDetailOut.model_validate(data))
+        runtimes.append(runtime)
+
+    # Страница ВЫБРАНА по снимку рантайма в БД (его пишет фоновый воркер раз в N секунд),
+    # но в UI показываются «живые» значения, взятые в момент запроса. Из-за лага снимка
+    # видимый порядок мог не совпадать с показанными числами. До-сортируем текущую страницу
+    # по тому же «живому» полю, что отображается, — чтобы порядок строго совпадал с числами.
+    live_key = {
+        "up": "upload_rate",
+        "down": "download_rate",
+        "peers": "peers",
+        "uploaded": "total_uploaded",
+        "progress": "progress",
+        "ratio": "ratio",
+        "size": "size",
+    }.get(sort)
+    if live_key is not None:
+        paired = sorted(
+            zip(runtimes, items),
+            key=lambda pair: float((pair[0] or {}).get(live_key) or 0),
+            reverse=True,
+        )
+        items = [it for _, it in paired]
+
     return TorrentPageOut(items=items, total=total, limit=limit, offset=offset)
 
 
