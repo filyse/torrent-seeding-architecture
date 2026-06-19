@@ -95,8 +95,6 @@ class TorrentRepository:
         # Фильтры по состоянию раздачи (по снимку рантайма).
         if state == "active":  # идёт отдача прямо сейчас
             conds.append(TorrentRecord.up_rate > 0)
-        elif state == "traffic":  # есть любой трафик (отдача или скачивание)
-            conds.append(or_(TorrentRecord.up_rate > 0, TorrentRecord.down_rate > 0))
         elif state == "peers":  # есть подключённые пиры
             conds.append(TorrentRecord.peers > 0)
         elif state == "idle":  # сидируется, но без активности — кандидаты «проверить»
@@ -185,14 +183,11 @@ class TorrentRepository:
             )
         ).all()
         # Все состояния одним запросом через агрегаты с FILTER.
-        total, active, traffic, peers, idle, incomplete, err = (
+        total, active, peers, idle, incomplete, err = (
             await self._session.execute(
                 select(
                     func.count(),
                     func.count().filter(TorrentRecord.up_rate > 0),
-                    func.count().filter(
-                        or_(TorrentRecord.up_rate > 0, TorrentRecord.down_rate > 0)
-                    ),
                     func.count().filter(TorrentRecord.peers > 0),
                     func.count().filter(
                         TorrentRecord.status == seeding,
@@ -211,7 +206,6 @@ class TorrentRepository:
             "engines": {str(e): int(c) for e, c in engine_rows if e},
             "states": {
                 "active": int(active),
-                "traffic": int(traffic),
                 "peers": int(peers),
                 "idle": int(idle),
                 "incomplete": int(incomplete),

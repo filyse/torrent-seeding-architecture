@@ -315,7 +315,7 @@ const SORT_VALUES = [
   "progress",
 ] as const;
 type ListSort = (typeof SORT_VALUES)[number];
-const STATE_VALUES = ["", "active", "traffic", "peers", "idle", "incomplete", "error"] as const;
+const STATE_VALUES = ["", "active", "peers", "idle", "incomplete", "error"] as const;
 type ListState = (typeof STATE_VALUES)[number];
 type ListDensity = "comfortable" | "compact";
 type ThemeMode = "auto" | "light" | "dark";
@@ -2321,7 +2321,6 @@ function mountListShell(root: HTMLElement): void {
   for (const [val, label] of [
     ["", "Состояние: все"],
     ["active", "Активные (отдача)"],
-    ["traffic", "Есть трафик"],
     ["peers", "Есть пиры"],
     ["idle", "Простаивают"],
     ["incomplete", "Незавершённые"],
@@ -2558,7 +2557,6 @@ function mountListShell(root: HTMLElement): void {
   };
   const STATE_LABELS: Record<string, string> = {
     active: "Активные",
-    traffic: "Есть трафик",
     peers: "Есть пиры",
     idle: "Простаивают",
     incomplete: "Незавершённые",

@@ -82,7 +82,7 @@ async def list_torrents(
     label: str | None = Query(None, description="Фильтр по метке"),
     engine_id: str | None = Query(None, description="Фильтр по движку"),
     state: str | None = Query(
-        None, description="active|traffic|peers|idle|incomplete|error (по активности)"
+        None, description="active|peers|idle|incomplete|error (по активности)"
     ),
     sort: str = Query("name", description="name|added|up|down|peers|uploaded|ratio|size|progress"),
     limit: int = Query(50, ge=1, le=200),
