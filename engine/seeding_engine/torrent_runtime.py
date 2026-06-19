@@ -411,13 +411,6 @@ class MockTorrentRuntime(TorrentRuntime):
         return self._store.remove(db_id)
 
 
-def _peer_bool(peer, name: str) -> bool:
-    val = getattr(peer, name, None)
-    if val is None or callable(val):
-        return False
-    return bool(val)
-
-
 def _format_peer_endpoint(peer) -> str:
     ip = getattr(peer, "ip", None)
     if ip is None:
@@ -442,36 +435,59 @@ def _format_peer_endpoint(peer) -> str:
     return s
 
 
-def _format_peer_flags(peer) -> str | None:
+# Имена флагов peer_info, которые показываем в UI. Сами значения — это битовые константы
+# КЛАССА lt.peer_info (например peer_info.seed == 1024), а НЕ булевы атрибуты экземпляра.
+_PEER_FLAG_NAMES = (
+    "interesting",
+    "choked",
+    "remote_interested",
+    "remote_choked",
+    "supports_extensions",
+    "local_connection",
+    "handshake",
+    "connecting",
+    "on_parole",
+    "seed",
+    "optimistic_unchoke",
+    "snubbed",
+    "upload_only",
+    "endgame_mode",
+    "holepunched",
+    "utp_socket",
+    "ssl_socket",
+    "rc4_encrypted",
+    "plaintext_encrypted",
+)
+
+
+def _format_peer_flags(peer, lt) -> str | None:
+    """Декодируем битовую маску peer.flags через константы lt.peer_info.
+
+    ВАЖНО: нельзя делать getattr(peer, "seed") — у экземпляра peer_info нет булевых полей
+    seed/choked/..., есть только КЛАССОВЫЕ константы (биты), и getattr вернёт сам бит (≠0),
+    из-за чего раньше у каждого пира «горели» все флаги сразу."""
+    raw = getattr(peer, "flags", None)
+    pi = getattr(lt, "peer_info", None) if lt is not None else None
+    if raw is None or pi is None:
+        return None
+    try:
+        bits = int(raw)
+    except (TypeError, ValueError):
+        return None
     labels: list[str] = []
-    for name in (
-        "seed",
-        "upload_only",
-        "interesting",
-        "choked",
-        "remote_interested",
-        "remote_choked",
-        "outgoing_connection",
-        "local_connection",
-        "utp_socket",
-        "ssl_socket",
-        "holepunched",
-        "connecting",
-    ):
-        if _peer_bool(peer, name):
-            labels.append(name)
-    if labels:
-        return ", ".join(labels)
-    flags = getattr(peer, "flags", None)
-    if flags is not None:
+    for name in _PEER_FLAG_NAMES:
+        const = getattr(pi, name, None)
+        if const is None:
+            continue
         try:
-            return hex(int(flags))
+            if bits & int(const):
+                labels.append(name)
         except (TypeError, ValueError):
-            return str(flags)
-    return None
+            continue
+    return ", ".join(labels) if labels else None
 
 
-def _peer_to_dict(peer) -> dict[str, object]:
+def _peer_to_dict(peer, lt=None) -> dict[str, object]:
     progress: float | None = None
     if hasattr(peer, "progress"):
         try:
@@ -504,7 +520,7 @@ def _peer_to_dict(peer) -> dict[str, object]:
         "progress": progress,
         "download_rate": down,
         "upload_rate": up,
-        "flags": _format_peer_flags(peer),
+        "flags": _format_peer_flags(peer, lt),
         "source": source,
     }
 
@@ -1615,6 +1631,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         return await asyncio.to_thread(_collect)
 
     async def list_peers(self, db_id: int) -> list[dict[str, object]]:
+        lt = self._lt
         async with self._lock:
             h = self._handles.get(db_id)
         if h is None or not hasattr(h, "get_peer_info"):
@@ -1626,7 +1643,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             except Exception as exc:  # noqa: BLE001
                 log.debug("get_peer_info db_id=%s: %s", db_id, exc)
                 return []
-            return [_peer_to_dict(p) for p in raw]
+            return [_peer_to_dict(p, lt) for p in raw]
 
         return await asyncio.to_thread(_read)
 
