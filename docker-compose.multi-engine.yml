@@ -71,19 +71,6 @@ services:
       timeout: 3s
       retries: 5
 
-  engine-b2:
-    <<: *engine-common
-    environment:
-      <<: *engine-env
-      ENGINE_STORAGE_SUBDIR: b2
-      LT_LISTEN_INTERFACES: "0.0.0.0:50002,[::]:50002"
-    volumes:
-      - seeding_b2:/data
-      - ./certs:/certs:ro
-    ports:
-      - "50002:50002"
-      - "50002:50002/udp"
-
   engine-b3:
     <<: *engine-common
     environment:
@@ -178,8 +165,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      engine-b2:
-        condition: service_healthy
       engine-b3:
         condition: service_healthy
       engine-b4:
@@ -222,7 +207,6 @@ services:
 
 volumes:
   pgdata:
-  seeding_b2:
   seeding_b3:
   seeding_b4:
   seeding_b5:
