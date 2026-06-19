@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
+from sqlalchemy import func, nullslast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seeding_db.models import (
@@ -55,6 +56,98 @@ class TorrentRepository:
     async def list_all(self) -> list[TorrentRecord]:
         result = await self._session.execute(select(TorrentRecord).order_by(TorrentRecord.id))
         return list(result.scalars())
+
+    async def list_page(
+        self,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        label: str | None = None,
+        engine_id: str | None = None,
+        state: str | None = None,
+        sort: str = "added",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[TorrentRecord], int]:
+        """Страница раздач с фильтрами/сортировкой на стороне БД (масштабируется на 10k+).
+
+        Фильтры: q (имя/метка/hash, подстрока), status, label, engine_id, state (по активности).
+        sort: added|name|up|down|peers|uploaded|ratio|size|progress.
+        «Живые» поля (up/down/peers/progress/uploaded/size) — снимок из фонового воркера.
+        Возвращает (rows, total_matched)."""
+        conds = []
+        if q:
+            like = f"%{q.strip().lower()}%"
+            conds.append(
+                or_(
+                    func.lower(TorrentRecord.display_name).like(like),
+                    func.lower(TorrentRecord.label).like(like),
+                    func.lower(TorrentRecord.info_hash).like(like),
+                )
+            )
+        if status:
+            conds.append(TorrentRecord.status == status)
+        if label:
+            conds.append(TorrentRecord.label == label)
+        if engine_id:
+            conds.append(TorrentRecord.engine_id == engine_id)
+
+        # Фильтры по состоянию раздачи (по снимку рантайма).
+        if state == "active":  # идёт отдача прямо сейчас
+            conds.append(TorrentRecord.up_rate > 0)
+        elif state == "traffic":  # есть любой трафик (отдача или скачивание)
+            conds.append(or_(TorrentRecord.up_rate > 0, TorrentRecord.down_rate > 0))
+        elif state == "peers":  # есть подключённые пиры
+            conds.append(TorrentRecord.peers > 0)
+        elif state == "idle":  # сидируется, но без активности — кандидаты «проверить»
+            conds.append(TorrentRecord.status == TorrentStatus.seeding.value)
+            conds.append(TorrentRecord.up_rate == 0)
+            conds.append(TorrentRecord.peers == 0)
+        elif state == "incomplete":  # не докачано
+            conds.append(TorrentRecord.progress < 1.0)
+        elif state == "error":
+            conds.append(TorrentRecord.status == TorrentStatus.error.value)
+
+        count_stmt = select(func.count()).select_from(TorrentRecord)
+        page_stmt = select(TorrentRecord)
+        if conds:
+            count_stmt = count_stmt.where(*conds)
+            page_stmt = page_stmt.where(*conds)
+
+        total = int(await self._session.scalar(count_stmt) or 0)
+
+        # id desc вторичным ключом — стабильный порядок при равных значениях.
+        tail = TorrentRecord.id.desc()
+        if sort == "name":
+            page_stmt = page_stmt.order_by(func.lower(TorrentRecord.display_name).asc(), tail)
+        elif sort == "up":
+            page_stmt = page_stmt.order_by(TorrentRecord.up_rate.desc(), tail)
+        elif sort == "down":
+            page_stmt = page_stmt.order_by(TorrentRecord.down_rate.desc(), tail)
+        elif sort == "peers":
+            page_stmt = page_stmt.order_by(TorrentRecord.peers.desc(), tail)
+        elif sort == "uploaded":
+            page_stmt = page_stmt.order_by(TorrentRecord.uploaded_total.desc(), tail)
+        elif sort == "size":
+            page_stmt = page_stmt.order_by(TorrentRecord.size.desc(), tail)
+        elif sort == "progress":
+            page_stmt = page_stmt.order_by(TorrentRecord.progress.desc(), tail)
+        elif sort == "ratio":
+            ratio = TorrentRecord.uploaded_total / func.nullif(TorrentRecord.size, 0)
+            page_stmt = page_stmt.order_by(nullslast(ratio.desc()), tail)
+        else:  # added (по умолчанию) — новые сверху
+            page_stmt = page_stmt.order_by(tail)
+
+        page_stmt = page_stmt.limit(max(1, limit)).offset(max(0, offset))
+        rows = list((await self._session.execute(page_stmt)).scalars())
+        return rows, total
+
+    async def bulk_update_runtime(self, updates: list[dict]) -> None:
+        """Пакетно обновить снимок рантайма по pk. Каждый элемент: {id, up_rate, down_rate,
+        peers, progress, uploaded_total, size, runtime_at}. Пустой список — no-op."""
+        if not updates:
+            return
+        await self._session.execute(sa_update(TorrentRecord), updates)
 
     async def count_by_status(self) -> dict[str, int]:
         result = await self._session.execute(

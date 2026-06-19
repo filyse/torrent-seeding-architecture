@@ -1512,36 +1512,195 @@ body {
 }
 
 
-/* Единый ряд управления: фильтры слева, счётчик/сброс/обновление справа. */
+/* Панель управления списком: поиск + группа фильтров слева, действия справа.
+   Переносится по строкам без переполнения (flex-wrap), элементы единой высоты. */
 .list-controls {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.85rem;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--surface-2);
   align-items: center;
 }
 
-@media (max-width: 720px) {
-  .list-controls {
-    flex-wrap: wrap;
-  }
+.list-controls__search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 16rem;
+  min-width: 10rem;
 }
 
-.list-controls__right {
+.list-controls__search .icon {
+  position: absolute;
+  left: 0.65rem;
+  display: inline-flex;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.list-controls__actions {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   flex: 0 0 auto;
 }
 
-.list-controls__refresh {
-  line-height: 1;
-  padding: 0.4rem 0.6rem;
+.list-controls__actions .btn {
+  height: 2.4rem;
 }
 
-.list-controls__reset[hidden] {
+/* Иконочные кнопки (вид/обновить) — квадратные, одной высоты с контролами. */
+.list-controls__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+}
+
+/* Кнопка «Фильтры» + всплывающая панель с вторичными фильтрами. */
+.filter-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 2.4rem;
+}
+
+.filter-btn--has {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent);
+}
+
+.filter-btn.is-open {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.filter-btn__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.filter-btn__badge[hidden] {
   display: none;
+}
+
+.filter-popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 30;
+  width: min(20rem, 80vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--surface);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+}
+
+.filter-popover[hidden] {
+  display: none;
+}
+
+.filter-popover__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.filter-popover__field .list-filter__select {
+  width: 100%;
+  max-width: none;
+}
+
+/* Активные фильтры — чипсы под строкой поиска. */
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: -0.35rem 0 0.85rem;
+}
+
+.filter-chips[hidden] {
+  display: none;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.3rem 0.25rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.filter-chip__x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.filter-chip__x:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: inherit;
+}
+
+.filter-chips__reset {
+  margin-left: 0.2rem;
+  height: 1.85rem;
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .list-controls__search {
+    flex-basis: 100%;
+  }
+  .list-controls__actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 .panel--compact {
@@ -1563,23 +1722,50 @@ body {
 }
 
 .list-filter__search {
-  flex: 1 1 12rem;
-  min-width: 8rem;
-  padding: 0.45rem 0.6rem;
+  width: 100%;
+  height: 2.4rem;
+  padding: 0 0.7rem 0 2.2rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   color: inherit;
+  font-size: 0.9rem;
+}
+
+.list-filter__search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .list-filter__select {
-  flex: 0 0 auto;
-  padding: 0.45rem 0.5rem;
+  flex: 0 1 auto;
+  max-width: 13rem;
+  height: 2.4rem;
+  padding: 0 1.9rem 0 0.7rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 0.7rem;
   color: inherit;
-  font-size: 0.875rem;
+  font-size: 0.85rem;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+.list-filter__select:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.list-filter__select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .list-toolbar__label-input {
@@ -1613,6 +1799,54 @@ body {
 
 .bulk-bar[hidden] {
   display: none;
+}
+
+.list-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+
+.list-pager:empty {
+  display: none;
+}
+
+.list-pager .pager__left,
+.list-pager .pager__right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.pager__info {
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+  margin-right: 0.3rem;
+}
+
+.pager__page {
+  color: var(--muted);
+}
+
+.pager__btn {
+  min-width: 2rem;
+  padding-inline: 0.5rem;
+  font-weight: 600;
+}
+
+.pager__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pager__size {
+  min-width: 7rem;
 }
 
 .bulk-bar__count {

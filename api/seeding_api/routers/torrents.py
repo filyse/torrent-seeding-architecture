@@ -23,6 +23,7 @@ from seeding_api.schemas import (
     TorrentDetailOut,
     TorrentFileOut,
     TorrentOut,
+    TorrentPageOut,
     TorrentPatch,
     TorrentTrackerOut,
     TorrentUrlCreate,
@@ -71,14 +72,38 @@ def _resolve_target(pool, engine_id: str | None, save_path: str | None) -> tuple
     return matched, norm
 
 
-@router.get("", response_model=list[TorrentDetailOut])
-async def list_torrents(session: DbSession, pool: EnginePoolDep):
+@router.get("", response_model=TorrentPageOut)
+async def list_torrents(
+    session: DbSession,
+    pool: EnginePoolDep,
+    q: str | None = Query(None, description="Поиск по имени/метке/hash"),
+    status: str | None = Query(None, description="Фильтр по статусу"),
+    label: str | None = Query(None, description="Фильтр по метке"),
+    engine_id: str | None = Query(None, description="Фильтр по движку"),
+    state: str | None = Query(
+        None, description="active|traffic|peers|idle|incomplete|error (по активности)"
+    ),
+    sort: str = Query("added", description="added|name|up|down|peers|uploaded|ratio|size|progress"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Постраничный список раздач. Фильтр/сортировка/пагинация — на стороне БД, поэтому
+    масштабируется на тысячи раздач: рантайм с движков тянется ТОЛЬКО для текущей страницы,
+    и одним батч-запросом на движок (а не по торренту). Сорт/фильтр по «живым» полям
+    (отдача/пиры/…) работает по снимку, который пишет фоновый воркер."""
     repo = TorrentRepository(session)
-    rows = await repo.list_all()
+    rows, total = await repo.list_page(
+        q=q,
+        status=status,
+        label=label,
+        engine_id=engine_id,
+        state=state,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+    )
 
-    # N+1 наоборот: вместо запроса к движку на каждый торрент тянем полный рантайм-список
-    # с каждого движка ОДИН раз и параллельно, затем мерджим по db_id. На сотнях/тысячах
-    # раздач это разница между десятками секунд и долями секунды.
+    # Рантайм только для движков текущей страницы: один список с движка, параллельно.
     engine_ids = {row.engine_id for row in rows if row.engine_id}
 
     async def _fetch(eid: str) -> tuple[str, dict[int, dict]]:
@@ -90,15 +115,15 @@ async def list_torrents(session: DbSession, pool: EnginePoolDep):
     fetched = await asyncio.gather(*(_fetch(eid) for eid in engine_ids))
     runtime_by_engine: dict[str, dict[int, dict]] = dict(fetched)
 
-    out: list[TorrentDetailOut] = []
+    items: list[TorrentDetailOut] = []
     for row in rows:
         runtime = runtime_by_engine.get(row.engine_id, {}).get(row.id)
-        status = await merge_runtime_into_row(repo, row, runtime)
+        merged = await merge_runtime_into_row(repo, row, runtime)
         data = TorrentOut.model_validate(row).model_dump()
-        data["status"] = status
+        data["status"] = merged
         data["runtime"] = runtime
-        out.append(TorrentDetailOut.model_validate(data))
-    return out
+        items.append(TorrentDetailOut.model_validate(data))
+    return TorrentPageOut(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.post("", response_model=TorrentOut, status_code=201)

@@ -228,6 +228,7 @@ type HealthFull = {
 };
 
 type TorrentDetailOut = TorrentOut & { runtime: RuntimeOut | null; peer_list?: TorrentPeerOut[] };
+type TorrentPageOut = { items: TorrentOut[]; total: number; limit: number; offset: number };
 type Route = { view: "list" } | { view: "detail"; id: number } | { view: "settings" };
 type DeleteTorrentChoice = "cancel" | "torrent_only" | "torrent_and_files";
 
@@ -239,6 +240,15 @@ let listAbort: AbortController | null = null;
 let detailAbort: AbortController | null = null;
 let listLoadGeneration = 0;
 let lastListItems: TorrentOut[] = [];
+const PAGE_SIZES = [20, 50, 100] as const;
+let listPage = 0;
+let listPageSize: number = ((): number => {
+  const v = parseInt(lsGet("ui.pageSize") || "50", 10);
+  return (PAGE_SIZES as readonly number[]).includes(v) ? v : 50;
+})();
+let listTotal = 0;
+let pagerHost: HTMLElement | null = null;
+let listReload: (() => void) | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let selectedIds = new Set<number>();
 let selectionChanged: (() => void) | null = null;
@@ -293,16 +303,33 @@ function lsSet(key: string, value: string): void {
   }
 }
 
-type ListSort = "name" | "progress" | "up" | "added";
+const SORT_VALUES = [
+  "added",
+  "name",
+  "up",
+  "down",
+  "peers",
+  "uploaded",
+  "ratio",
+  "size",
+  "progress",
+] as const;
+type ListSort = (typeof SORT_VALUES)[number];
+const STATE_VALUES = ["", "active", "traffic", "peers", "idle", "incomplete", "error"] as const;
+type ListState = (typeof STATE_VALUES)[number];
 type ListDensity = "comfortable" | "compact";
 type ThemeMode = "auto" | "light" | "dark";
 
 let listSearch = lsGet("ui.search") ?? "";
 let listStatusFilter = lsGet("ui.status") ?? "";
 let listLabelFilter = lsGet("ui.label") ?? "";
+let listState: ListState = ((): ListState => {
+  const v = lsGet("ui.state") ?? "";
+  return (STATE_VALUES as readonly string[]).includes(v) ? (v as ListState) : "";
+})();
 let listSort: ListSort = ((): ListSort => {
-  const v = lsGet("ui.sort");
-  return v === "name" || v === "progress" || v === "up" || v === "added" ? v : "added";
+  const v = lsGet("ui.sort") ?? "";
+  return (SORT_VALUES as readonly string[]).includes(v) ? (v as ListSort) : "added";
 })();
 let listDensity: ListDensity = lsGet("ui.density") === "compact" ? "compact" : "comfortable";
 
@@ -493,6 +520,10 @@ function el<K extends keyof HTMLElementTagNameMap>(
 
 const ICON_PATHS: Record<string, string> = {
   edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>',
+  filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+  rows: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
+  grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
   refresh:
     '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   settings:
@@ -592,32 +623,6 @@ const FILE_PRIORITY_OPTIONS: { value: number; label: string }[] = [
 
 async function postAction(path: string): Promise<void> {
   await fetchJson(path, { method: "POST" });
-}
-
-function filterAndSortItems(items: TorrentOut[]): TorrentOut[] {
-  let out = items.slice();
-  const q = listSearch.trim().toLowerCase();
-  if (q) {
-    out = out.filter(
-      (t) =>
-        (t.display_name || "").toLowerCase().includes(q) ||
-        (t.label || "").toLowerCase().includes(q) ||
-        (t.info_hash || "").toLowerCase().includes(q),
-    );
-  }
-  if (listStatusFilter) {
-    out = out.filter((t) => effectiveStatus(t) === listStatusFilter);
-  }
-  if (listLabelFilter) {
-    out = out.filter((t) => (t.label || "") === listLabelFilter);
-  }
-  out.sort((a, b) => {
-    if (listSort === "name") return (a.display_name || "").localeCompare(b.display_name || "", "ru");
-    if (listSort === "progress") return (b.runtime?.progress ?? 0) - (a.runtime?.progress ?? 0);
-    if (listSort === "up") return (b.runtime?.upload_rate ?? 0) - (a.runtime?.upload_rate ?? 0);
-    return b.id - a.id;
-  });
-  return out;
 }
 
 async function loadSessionStats(): Promise<SessionStats | null> {
@@ -1716,34 +1721,24 @@ function updateLiveMeta(metaEl: HTMLElement, items: TorrentOut[]): void {
 
 function paintTorrentList(refs: ListHostRefs, items: TorrentOut[]): void {
   const { listEl, countEl, metaEl } = refs;
-  const filtered = filterAndSortItems(items);
-  const total = items.length;
-  const shown = filtered.length;
-  countEl.textContent =
-    shown === total
-      ? `${total} ${total === 1 ? "торрент" : total < 5 ? "торрента" : "торрентов"}`
-      : `${shown} из ${total}`;
+  // Фильтрация/сортировка/пагинация — целиком на сервере (в т.ч. по «живым» полям из снимка).
+  const shown = items;
+  countEl.textContent = `${listTotal} ${listTotal === 1 ? "торрент" : listTotal < 5 ? "торрента" : "торрентов"}`;
   updateLiveMeta(metaEl, items);
   listEl.replaceChildren();
-  if (shown === 0) {
+  if (shown.length === 0) {
+    const hasFilter = Boolean(listSearch || listStatusFilter || listLabelFilter);
     listEl.append(
       el("div", { className: "empty-state" }, [
-        el("p", {}, [total === 0 ? "Пока пусто" : "Ничего не найдено"]),
-        el("p", {}, [total === 0 ? "Добавьте magnet, URL или .torrent ниже" : "Измените фильтр"]),
+        el("p", {}, [listTotal === 0 && !hasFilter ? "Пока пусто" : "Ничего не найдено"]),
+        el("p", {}, [
+          listTotal === 0 && !hasFilter ? "Добавьте magnet, URL или .torrent ниже" : "Измените фильтр",
+        ]),
       ]),
     );
+    renderPager();
     return;
   }
-  // Чистим выделение от исчезнувших раздач, чтобы счётчик и массовые действия были точны.
-  const presentIds = new Set(items.map((t) => t.id));
-  let pruned = false;
-  for (const id of [...selectedIds]) {
-    if (!presentIds.has(id)) {
-      selectedIds.delete(id);
-      pruned = true;
-    }
-  }
-  if (pruned) selectionChanged?.();
 
   const ul = el("ul", { className: "torrent-list" });
   const refresh = () =>
@@ -1756,8 +1751,56 @@ function paintTorrentList(refs: ListHostRefs, items: TorrentOut[]): void {
     else selectedIds.delete(id);
     selectionChanged?.();
   };
-  for (const t of filtered) ul.append(renderTorrentCard(t, refresh, onSelectToggle));
+  for (const t of shown) ul.append(renderTorrentCard(t, refresh, onSelectToggle));
   listEl.append(ul);
+  renderPager();
+}
+
+function renderPager(): void {
+  if (!pagerHost) return;
+  const pages = Math.max(1, Math.ceil(listTotal / listPageSize));
+  if (listPage > pages - 1) listPage = pages - 1;
+  if (listPage < 0) listPage = 0;
+  const start = listTotal === 0 ? 0 : listPage * listPageSize + 1;
+  const end = Math.min(listTotal, (listPage + 1) * listPageSize);
+
+  const sizeSel = el("select", { className: "list-filter__select pager__size" }) as HTMLSelectElement;
+  for (const n of PAGE_SIZES) {
+    const o = el("option", { value: String(n) }, [`${n} / стр.`]) as HTMLOptionElement;
+    if (n === listPageSize) o.selected = true;
+    sizeSel.append(o);
+  }
+  sizeSel.addEventListener("change", () => {
+    listPageSize = parseInt(sizeSel.value, 10) || 50;
+    lsSet("ui.pageSize", String(listPageSize));
+    listPage = 0;
+    listReload?.();
+  });
+
+  const first = el("button", { type: "button", className: "btn btn--sm pager__btn" }, ["«"]) as HTMLButtonElement;
+  const prev = el("button", { type: "button", className: "btn btn--sm pager__btn" }, ["‹"]) as HTMLButtonElement;
+  const next = el("button", { type: "button", className: "btn btn--sm pager__btn" }, ["›"]) as HTMLButtonElement;
+  const last = el("button", { type: "button", className: "btn btn--sm pager__btn" }, ["»"]) as HTMLButtonElement;
+  first.disabled = prev.disabled = listPage <= 0;
+  next.disabled = last.disabled = listPage >= pages - 1;
+  const go = (p: number) => {
+    listPage = Math.min(Math.max(0, p), pages - 1);
+    listReload?.();
+  };
+  first.addEventListener("click", () => go(0));
+  prev.addEventListener("click", () => go(listPage - 1));
+  next.addEventListener("click", () => go(listPage + 1));
+  last.addEventListener("click", () => go(pages - 1));
+
+  const info = el("span", { className: "pager__info" }, [
+    listTotal === 0 ? "0" : `${start}–${end} из ${listTotal}`,
+    el("span", { className: "pager__page" }, [` · стр. ${listPage + 1}/${pages}`]),
+  ]);
+
+  pagerHost.replaceChildren(
+    el("div", { className: "pager__left" }, [sizeSel]),
+    el("div", { className: "pager__right" }, [info, first, prev, next, last]),
+  );
 }
 
 function showTorrentInList(refs: ListHostRefs, torrent: TorrentOut): void {
@@ -1782,8 +1825,26 @@ async function loadTorrents(
   if (!opts.silent) listEl.classList.add("is-loading");
 
   try {
-    const items = await fetchJson<TorrentOut[]>("/torrents", { signal });
+    const params = new URLSearchParams();
+    params.set("limit", String(listPageSize));
+    params.set("offset", String(listPage * listPageSize));
+    const q = listSearch.trim();
+    if (q) params.set("q", q);
+    if (listStatusFilter) params.set("status", listStatusFilter);
+    if (listLabelFilter) params.set("label", listLabelFilter);
+    if (listState) params.set("state", listState);
+    params.set("sort", listSort);
+    const page = await fetchJson<TorrentPageOut>(`/torrents?${params.toString()}`, { signal });
     if (gen !== listLoadGeneration) return;
+    listTotal = page.total;
+    // Если из-за фильтра текущая страница ушла за пределы — вернёмся на последнюю и перезагрузим.
+    const maxPage = Math.max(0, Math.ceil(listTotal / listPageSize) - 1);
+    if (listPage > maxPage && listTotal > 0) {
+      listPage = maxPage;
+      void loadTorrents(listEl, countEl, metaEl, opts);
+      return;
+    }
+    const items = page.items;
     lastListItems = items;
     paintTorrentList({ listEl, countEl, metaEl, scheduleNext: opts.scheduleNext ?? (() => {}) }, items);
     opts.scheduleNext?.(items, opts.fastPoll ? { fast: true } : undefined);
@@ -1814,7 +1875,7 @@ function scheduleListPoll(
 }
 
 // Push-обновления через SSE. При успехе вытесняют поллинг; при ошибке — откат на поллинг.
-function startListStream(refs: ListHostRefs, sessionBarHost: HTMLElement, onFallback: () => void): void {
+function startListStream(_refs: ListHostRefs, sessionBarHost: HTMLElement, onFallback: () => void): void {
   stopListStream();
   let url = `${API}/stream?interval=3`;
   try {
@@ -1834,11 +1895,10 @@ function startListStream(refs: ListHostRefs, sessionBarHost: HTMLElement, onFall
   es.addEventListener("snapshot", (ev) => {
     if (listStream !== es || parseRoute().view !== "list") return;
     try {
-      const data = JSON.parse((ev as MessageEvent).data) as { torrents: TorrentOut[]; stats: SessionStats };
-      stopListPoll();
-      lastListItems = data.torrents;
-      paintTorrentList(refs, data.torrents);
-      sessionBarHost.replaceChildren(mountSessionBar(data.stats));
+      // Поток отдаёт только агрегаты для живой панели сверху. Список грузится постранично
+      // отдельным поллингом (см. scheduleListPoll), поэтому здесь его НЕ трогаем.
+      const data = JSON.parse((ev as MessageEvent).data) as { stats: SessionStats };
+      if (data.stats) sessionBarHost.replaceChildren(mountSessionBar(data.stats));
     } catch {
       /* ignore malformed frame */
     }
@@ -2157,11 +2217,20 @@ function mountListShell(root: HTMLElement): void {
 
   const repaint = () => paintTorrentList(listRefs, lastListItems);
 
+  // Фильтр/поиск/сортировка/размер страницы меняют выборку на сервере — сбрасываем на
+  // первую страницу и перезагружаем. Навигация по страницам идёт через listReload.
+  const reloadFromFilters = () => {
+    listPage = 0;
+    void refresh();
+  };
+  listReload = () => void refresh();
+
   const onAdded = (created?: TorrentOut) => {
     if (created) showTorrentInList(listRefs, created);
     void refresh({ afterAdd: true });
   };
 
+  let searchDebounce: ReturnType<typeof setTimeout> | null = null;
   const searchInput = el("input", {
     type: "search",
     placeholder: "Поиск по названию, метке, hash…",
@@ -2171,8 +2240,9 @@ function mountListShell(root: HTMLElement): void {
   searchInput.addEventListener("input", () => {
     listSearch = searchInput.value;
     lsSet("ui.search", listSearch);
-    repaint();
     syncReset();
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => reloadFromFilters(), 300);
   });
 
   const statusSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
@@ -2189,7 +2259,7 @@ function mountListShell(root: HTMLElement): void {
   statusSelect.addEventListener("change", () => {
     listStatusFilter = statusSelect.value;
     lsSet("ui.status", listStatusFilter);
-    repaint();
+    reloadFromFilters();
     syncReset();
   });
 
@@ -2213,7 +2283,7 @@ function mountListShell(root: HTMLElement): void {
   labelSelect.addEventListener("change", () => {
     listLabelFilter = labelSelect.value;
     lsSet("ui.label", listLabelFilter);
-    repaint();
+    reloadFromFilters();
     syncReset();
   });
 
@@ -2221,8 +2291,13 @@ function mountListShell(root: HTMLElement): void {
   for (const [val, label] of [
     ["added", "Сорт: новые"],
     ["name", "Сорт: имя"],
+    ["up", "Сорт: отдача сейчас"],
+    ["down", "Сорт: скачивание"],
+    ["peers", "Сорт: пиры"],
+    ["uploaded", "Сорт: раздано всего"],
+    ["ratio", "Сорт: рейтинг"],
+    ["size", "Сорт: размер"],
     ["progress", "Сорт: прогресс"],
-    ["up", "Сорт: отдача"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
     if (val === listSort) o.selected = true;
@@ -2231,24 +2306,45 @@ function mountListShell(root: HTMLElement): void {
   sortSelect.addEventListener("change", () => {
     listSort = sortSelect.value as ListSort;
     lsSet("ui.sort", listSort);
-    repaint();
+    reloadFromFilters();
     syncReset();
   });
 
-  const densitySelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
+  const stateSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
   for (const [val, label] of [
-    ["comfortable", "Вид: строки"],
-    ["compact", "Вид: плитки"],
+    ["", "Состояние: все"],
+    ["active", "Активные (отдача)"],
+    ["traffic", "Есть трафик"],
+    ["peers", "Есть пиры"],
+    ["idle", "Простаивают"],
+    ["incomplete", "Незавершённые"],
+    ["error", "С ошибкой"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
-    if (val === listDensity) o.selected = true;
-    densitySelect.append(o);
+    if (val === listState) o.selected = true;
+    stateSelect.append(o);
   }
+  stateSelect.addEventListener("change", () => {
+    listState = stateSelect.value as ListState;
+    lsSet("ui.state", listState);
+    reloadFromFilters();
+    syncReset();
+  });
+
+  const densityBtn = el("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm list-controls__icon",
+  }) as HTMLButtonElement;
   const applyDensity = () => {
-    listHost.classList.toggle("torrent-list--compact", listDensity === "compact");
+    const compact = listDensity === "compact";
+    listHost.classList.toggle("torrent-list--compact", compact);
+    // Иконка показывает, на какой вид переключит клик.
+    densityBtn.replaceChildren(icon(compact ? "rows" : "grid"));
+    densityBtn.title = compact ? "Показать списком" : "Показать плиткой";
+    densityBtn.setAttribute("aria-label", densityBtn.title);
   };
-  densitySelect.addEventListener("change", () => {
-    listDensity = densitySelect.value === "compact" ? "compact" : "comfortable";
+  densityBtn.addEventListener("click", () => {
+    listDensity = listDensity === "compact" ? "comfortable" : "compact";
     lsSet("ui.density", listDensity);
     applyDensity();
   });
@@ -2342,43 +2438,151 @@ function mountListShell(root: HTMLElement): void {
 
   const resetFilters = el("button", {
     type: "button",
-    className: "btn btn--ghost btn--sm list-controls__reset",
-    title: "Сбросить фильтры",
-  }, ["Сброс"]);
+    className: "btn btn--ghost btn--sm filter-chips__reset",
+  }, ["Сбросить всё"]);
   resetFilters.addEventListener("click", () => {
     listSearch = "";
     listStatusFilter = "";
     listLabelFilter = "";
+    listState = "";
     listSort = "added";
-    for (const k of ["ui.search", "ui.status", "ui.label", "ui.sort"]) lsSet(k, "");
+    for (const k of ["ui.search", "ui.status", "ui.label", "ui.state", "ui.sort"]) lsSet(k, "");
     searchInput.value = "";
     statusSelect.value = "";
+    stateSelect.value = "";
     labelSelect.value = "";
     sortSelect.value = "added";
-    repaint();
+    closePopover();
+    reloadFromFilters();
     syncReset();
   });
-  function syncReset(): void {
-    const active = Boolean(listSearch || listStatusFilter || listLabelFilter) || listSort !== "added";
-    resetFilters.hidden = !active;
-  }
 
   const refreshBtn = el("button", {
     type: "button",
-    className: "btn btn--ghost btn--sm list-controls__refresh",
+    className: "btn btn--ghost btn--sm list-controls__icon",
     title: "Обновить",
+    "aria-label": "Обновить",
   }, [icon("refresh")]);
   refreshBtn.addEventListener("click", () => void refresh());
 
-  // Один ряд: фильтры слева (поиск тянется), справа — сброс и обновление.
-  // Счётчик торрентов не дублируем — он есть в карточке статистики выше.
+  // Вторичные фильтры (статус/состояние/метка) спрятаны в поповер — панель остаётся чистой,
+  // а активные фильтры показываются «чипсами» под строкой поиска и снимаются в один клик.
+  const popover = el("div", { className: "filter-popover", hidden: "" }, [
+    el("label", { className: "filter-popover__field" }, [el("span", {}, ["Статус"]), statusSelect]),
+    el("label", { className: "filter-popover__field" }, [el("span", {}, ["Состояние"]), stateSelect]),
+    el("label", { className: "filter-popover__field" }, [el("span", {}, ["Метка"]), labelSelect]),
+  ]);
+  const filterBadge = el("span", { className: "filter-btn__badge", hidden: "" });
+  const filterBtn = el("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm filter-btn",
+  }, [icon("filter"), el("span", {}, ["Фильтры"]), filterBadge]) as HTMLButtonElement;
+  const filterWrap = el("div", { className: "filter-wrap" }, [filterBtn, popover]);
+
+  let popoverOpen = false;
+  const onDocClick = (ev: Event) => {
+    if (!filterWrap.contains(ev.target as Node)) closePopover();
+  };
+  const onEsc = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape") closePopover();
+  };
+  function closePopover(): void {
+    if (!popoverOpen) return;
+    popoverOpen = false;
+    popover.hidden = true;
+    filterBtn.classList.remove("is-open");
+    document.removeEventListener("click", onDocClick);
+    document.removeEventListener("keydown", onEsc);
+  }
+  function openPopover(): void {
+    popoverOpen = true;
+    popover.hidden = false;
+    filterBtn.classList.add("is-open");
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onEsc);
+  }
+  filterBtn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (popoverOpen) closePopover();
+    else openPopover();
+  });
+
+  const STATUS_LABELS: Record<string, string> = {
+    seeding: "Раздача",
+    downloading: "Загрузка",
+    paused: "Пауза",
+  };
+  const STATE_LABELS: Record<string, string> = {
+    active: "Активные",
+    traffic: "Есть трафик",
+    peers: "Есть пиры",
+    idle: "Простаивают",
+    incomplete: "Незавершённые",
+    error: "С ошибкой",
+  };
+  const makeChip = (text: string, onRemove: () => void): HTMLElement => {
+    const chip = el("span", { className: "filter-chip" }, [text]);
+    const x = el("button", { type: "button", className: "filter-chip__x", "aria-label": "Убрать" }, ["✕"]);
+    x.addEventListener("click", onRemove);
+    chip.append(x);
+    return chip;
+  };
+
+  const chipsRow = el("div", { className: "filter-chips", hidden: "" });
+
+  // syncReset обновляет всё состояние UI фильтров: бейдж на кнопке, чипсы, кнопку сброса.
+  function syncReset(): void {
+    const count = [listStatusFilter, listState, listLabelFilter].filter(Boolean).length;
+    filterBadge.hidden = count === 0;
+    filterBadge.textContent = String(count);
+    filterBtn.classList.toggle("filter-btn--has", count > 0);
+
+    const chips: HTMLElement[] = [];
+    if (listStatusFilter) {
+      chips.push(
+        makeChip(`Статус: ${STATUS_LABELS[listStatusFilter] ?? listStatusFilter}`, () => {
+          listStatusFilter = "";
+          statusSelect.value = "";
+          lsSet("ui.status", "");
+          reloadFromFilters();
+          syncReset();
+        }),
+      );
+    }
+    if (listState) {
+      chips.push(
+        makeChip(`Состояние: ${STATE_LABELS[listState] ?? listState}`, () => {
+          listState = "" as ListState;
+          stateSelect.value = "";
+          lsSet("ui.state", "");
+          reloadFromFilters();
+          syncReset();
+        }),
+      );
+    }
+    if (listLabelFilter) {
+      chips.push(
+        makeChip(`Метка: ${listLabelFilter}`, () => {
+          listLabelFilter = "";
+          labelSelect.value = "";
+          lsSet("ui.label", "");
+          reloadFromFilters();
+          syncReset();
+        }),
+      );
+    }
+
+    const anyActive =
+      Boolean(listSearch || listStatusFilter || listLabelFilter || listState) || listSort !== "added";
+    chipsRow.replaceChildren(...chips);
+    if (anyActive) chipsRow.append(resetFilters);
+    chipsRow.hidden = !anyActive;
+  }
+
+  const searchField = el("div", { className: "list-controls__search" }, [icon("search"), searchInput]);
   const filters = el("div", { className: "list-controls" }, [
-    searchInput,
-    statusSelect,
-    labelSelect,
-    sortSelect,
-    densitySelect,
-    el("div", { className: "list-controls__right" }, [resetFilters, refreshBtn]),
+    searchField,
+    el("div", { className: "list-controls__actions" }, [filterWrap, sortSelect, densityBtn, refreshBtn]),
     labelSuggestions,
   ]);
   applyDensity();
@@ -2409,12 +2613,17 @@ function mountListShell(root: HTMLElement): void {
   selectionChanged = syncBulkBar;
   syncBulkBar();
 
+  const pager = el("div", { className: "list-pager" });
+  pagerHost = pager;
+
   root.append(
     header,
     sessionBarHost,
     filters,
+    chipsRow,
     bulkBar,
     listHost,
+    pager,
   );
   syncReset();
 

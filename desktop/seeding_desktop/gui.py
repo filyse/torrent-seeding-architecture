@@ -142,7 +142,11 @@ class ApiClient:
 
     # чтение
     def list_torrents(self) -> list[dict[str, Any]]:
-        return self._get("/api/v1/torrents") or []
+        # /torrents теперь постраничный ({items,total,...}); берём крупную первую страницу.
+        data = self._get("/api/v1/torrents?limit=200")
+        if isinstance(data, dict):
+            return data.get("items") or []
+        return data or []
 
     def session_stats(self) -> dict[str, Any]:
         return self._get("/api/v1/session/stats") or {}

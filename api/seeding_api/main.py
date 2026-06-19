@@ -20,6 +20,7 @@ from seeding_api.logconf import setup_logging
 from seeding_api.metrics import render_metrics
 from seeding_api.engine_pool import EnginePool
 from seeding_api.restore import maybe_restore_torrents_to_engine
+from seeding_api.runtime_snapshot import runtime_snapshot_loop
 from seeding_api.routers import audit as audit_router
 from seeding_api.routers import auth as auth_router
 from seeding_api.routers import backups as backups_router
@@ -91,11 +92,14 @@ async def startup() -> None:
         app.state.arq_pool = await create_pool(redis_settings_from_url(redis_url))
     app.state.engine_refresh_task = asyncio.create_task(_engine_refresh_loop(pool))
     app.state.alert_task = asyncio.create_task(alert_notifier_loop(app))
+    app.state.runtime_snapshot_task = asyncio.create_task(
+        runtime_snapshot_loop(pool, app.state.session_factory)
+    )
 
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    for attr in ("engine_refresh_task", "alert_task"):
+    for attr in ("engine_refresh_task", "alert_task", "runtime_snapshot_task"):
         task = getattr(app.state, attr, None)
         if task is not None:
             task.cancel()

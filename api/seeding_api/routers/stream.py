@@ -1,21 +1,21 @@
-"""SSE-поток состояния: периодические снапшоты списка раздач + агрегированной статистики.
+"""SSE-поток агрегированной статистики сессии (для живой панели сверху).
 
-Заменяет клиентский поллинг одним long-lived соединением. EventSource не умеет слать
-заголовки, поэтому API-ключ (если настроен) принимается query-параметром `api_key`.
+Раньше поток слал и весь список раздач — на тысячах торрентов это означало N+1 к движкам
+каждые N секунд и мегабайты трафика. Список теперь грузится постранично (см. GET /torrents),
+а поток отдаёт только лёгкие агрегаты (несколько запросов session/stats на движок).
+
+EventSource не умеет слать заголовки, поэтому API-ключ (если настроен) принимается
+query-параметром `api_key`.
 """
 
 import asyncio
 import json
 import logging
 
-import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from seeding_db.repository import TorrentRepository
 
 from seeding_api.auth import resolve_principal
-from seeding_api.runtime_sync import merge_runtime_into_row
-from seeding_api.schemas import TorrentOut
 
 log = logging.getLogger(__name__)
 
@@ -23,25 +23,9 @@ router = APIRouter()
 
 
 async def _build_snapshot(session_factory, pool) -> dict:
-    async with session_factory() as session:
-        repo = TorrentRepository(session)
-        rows = await repo.list_all()
-        torrents: list[dict] = []
-        for row in rows:
-            runtime = None
-            try:
-                runtime = await pool.client_for_row(row).runtime_snapshot(row.id)
-            except httpx.HTTPError:
-                runtime = None
-            status = await merge_runtime_into_row(repo, row, runtime)
-            data = TorrentOut.model_validate(row).model_dump(mode="json")
-            data["status"] = status
-            data["runtime"] = runtime
-            torrents.append(data)
-        await session.commit()
     by_engine = await pool.session_stats_all()
     stats = pool.aggregate_session_stats(by_engine)
-    return {"torrents": torrents, "stats": stats}
+    return {"stats": stats}
 
 
 @router.get("/stream")

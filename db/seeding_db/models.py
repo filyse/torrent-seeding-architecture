@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -33,6 +33,16 @@ class TorrentRecord(Base):
     label: Mapped[str] = mapped_column(String(128), default="", index=True)
     status: Mapped[str] = mapped_column(String(32), default=TorrentStatus.queued.value)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Снимок «живых» полей рантайма (обновляет фоновый воркер раз в ~10с) — нужен для
+    # глобальной серверной сортировки/фильтрации по активности без обхода движков на каждый запрос.
+    up_rate: Mapped[int] = mapped_column(Integer, default=0, server_default="0", index=True)
+    down_rate: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    peers: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    progress: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    uploaded_total: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    size: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    runtime_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ApiKeyRecord(Base):

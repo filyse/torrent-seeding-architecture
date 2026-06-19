@@ -41,7 +41,9 @@ def test_live_api_torrents_list_shape():
     r = httpx.get(f"{API_BASE}/api/v1/torrents", timeout=10.0)
     assert r.status_code == 200
     data = r.json()
-    assert isinstance(data, list)
+    assert isinstance(data, dict)
+    assert isinstance(data["items"], list)
+    assert "total" in data
 
 
 @skip_unless_compose

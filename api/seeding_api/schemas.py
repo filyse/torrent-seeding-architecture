@@ -192,3 +192,12 @@ class BatchUploadResult(BaseModel):
 class TorrentDetailOut(TorrentOut):
     runtime: TorrentRuntimeOut | None = None
     peer_list: list[TorrentPeerOut] = Field(default_factory=list)
+
+
+class TorrentPageOut(BaseModel):
+    """Страница списка раздач: элементы + общее число подходящих под фильтр."""
+
+    items: list[TorrentDetailOut]
+    total: int
+    limit: int
+    offset: int
