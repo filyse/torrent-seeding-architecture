@@ -16,7 +16,9 @@ import logging
 import os
 from datetime import datetime, timezone
 
+from seeding_db.models import TorrentStatus
 from seeding_db.repository import TorrentRepository
+from seeding_db.status_from_runtime import status_from_runtime
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +47,7 @@ async def snapshot_once(pool, session_factory) -> int:
 
         now = datetime.now(timezone.utc)
         updates: list[dict] = []
+        status_updates: list[dict] = []
         for r in rows:
             rt_map = results.get(r.engine_id)
             if rt_map is None:
@@ -63,6 +66,16 @@ async def snapshot_once(pool, session_factory) -> int:
                 prog = float(h.get("progress") or 0.0)
                 upl = int(h.get("total_uploaded") or 0)
                 sz = int(h.get("size") or 0) or r.size
+
+                # Согласуем статус по рантайму для ВСЕХ раздач (а не только для открытой страницы
+                # списка). Иначе импортированные сиды навсегда висят в «downloading» с импорта и
+                # счётчики статусов врут. «migrating» не трогаем — он держится до конца переноса.
+                if r.status != TorrentStatus.migrating.value:
+                    target = status_from_runtime(
+                        h.get("runtime_status"), h.get("lt_state"), prog
+                    )
+                    if target != r.status:
+                        status_updates.append({"id": r.id, "status": target})
 
             changed = (
                 up != r.up_rate
@@ -87,8 +100,9 @@ async def snapshot_once(pool, session_factory) -> int:
                 )
 
         await repo.bulk_update_runtime(updates)
+        await repo.bulk_update_status(status_updates)
         await session.commit()
-        return len(updates)
+        return len(updates) + len(status_updates)
 
 
 async def runtime_snapshot_loop(pool, session_factory) -> None:

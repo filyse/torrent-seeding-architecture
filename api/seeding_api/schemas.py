@@ -201,3 +201,13 @@ class TorrentPageOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class TorrentFacetsOut(BaseModel):
+    """Счётчики для подписи количества у каждого варианта фильтра."""
+
+    total: int
+    statuses: dict[str, int]
+    labels: dict[str, int]
+    engines: dict[str, int]
+    states: dict[str, int]

@@ -21,6 +21,7 @@ from seeding_api.schemas import (
     PrivateIn,
     TorrentCreate,
     TorrentDetailOut,
+    TorrentFacetsOut,
     TorrentFileOut,
     TorrentOut,
     TorrentPageOut,
@@ -83,7 +84,7 @@ async def list_torrents(
     state: str | None = Query(
         None, description="active|traffic|peers|idle|incomplete|error (по активности)"
     ),
-    sort: str = Query("added", description="added|name|up|down|peers|uploaded|ratio|size|progress"),
+    sort: str = Query("name", description="name|added|up|down|peers|uploaded|ratio|size|progress"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
@@ -124,6 +125,13 @@ async def list_torrents(
         data["runtime"] = runtime
         items.append(TorrentDetailOut.model_validate(data))
     return TorrentPageOut(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/facets", response_model=TorrentFacetsOut)
+async def torrents_facets(session: DbSession):
+    """Счётчики для подписи количества у вариантов фильтров (статус/метка/движок/состояние).
+    Считаются по БД (снимок рантайма пишет фоновый воркер), поэтому дёшево и масштабируемо."""
+    return await TorrentRepository(session).facets()
 
 
 @router.post("", response_model=TorrentOut, status_code=201)

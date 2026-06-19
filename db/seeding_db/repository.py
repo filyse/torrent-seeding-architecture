@@ -65,7 +65,7 @@ class TorrentRepository:
         label: str | None = None,
         engine_id: str | None = None,
         state: str | None = None,
-        sort: str = "added",
+        sort: str = "name",
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[TorrentRecord], int]:
@@ -149,11 +149,75 @@ class TorrentRepository:
             return
         await self._session.execute(sa_update(TorrentRecord), updates)
 
+    async def bulk_update_status(self, updates: list[dict]) -> None:
+        """Пакетно согласовать статус по pk. Каждый элемент: {id, status}. Пустой список — no-op.
+        Нужно фоновому воркеру, чтобы статус сходился для всех раздач, а не только для открытой
+        страницы списка (иначе счётчики статусов врут на неоткрытых страницах)."""
+        if not updates:
+            return
+        await self._session.execute(sa_update(TorrentRecord), updates)
+
     async def count_by_status(self) -> dict[str, int]:
         result = await self._session.execute(
             select(TorrentRecord.status, func.count()).group_by(TorrentRecord.status)
         )
         return {str(status): int(count) for status, count in result.all()}
+
+    async def facets(self) -> dict:
+        """Счётчики для фильтров: сколько раздач под каждый статус/метку/движок/состояние.
+        Состояния считаются по тем же условиям, что и фильтр в list_page (по снимку рантайма)."""
+        seeding = TorrentStatus.seeding.value
+        error = TorrentStatus.error.value
+
+        status_rows = (
+            await self._session.execute(
+                select(TorrentRecord.status, func.count()).group_by(TorrentRecord.status)
+            )
+        ).all()
+        label_rows = (
+            await self._session.execute(
+                select(TorrentRecord.label, func.count()).group_by(TorrentRecord.label)
+            )
+        ).all()
+        engine_rows = (
+            await self._session.execute(
+                select(TorrentRecord.engine_id, func.count()).group_by(TorrentRecord.engine_id)
+            )
+        ).all()
+        # Все состояния одним запросом через агрегаты с FILTER.
+        total, active, traffic, peers, idle, incomplete, err = (
+            await self._session.execute(
+                select(
+                    func.count(),
+                    func.count().filter(TorrentRecord.up_rate > 0),
+                    func.count().filter(
+                        or_(TorrentRecord.up_rate > 0, TorrentRecord.down_rate > 0)
+                    ),
+                    func.count().filter(TorrentRecord.peers > 0),
+                    func.count().filter(
+                        TorrentRecord.status == seeding,
+                        TorrentRecord.up_rate == 0,
+                        TorrentRecord.peers == 0,
+                    ),
+                    func.count().filter(TorrentRecord.progress < 1.0),
+                    func.count().filter(TorrentRecord.status == error),
+                )
+            )
+        ).one()
+        return {
+            "total": int(total),
+            "statuses": {str(s): int(c) for s, c in status_rows},
+            "labels": {str(lb): int(c) for lb, c in label_rows if lb},
+            "engines": {str(e): int(c) for e, c in engine_rows if e},
+            "states": {
+                "active": int(active),
+                "traffic": int(traffic),
+                "peers": int(peers),
+                "idle": int(idle),
+                "incomplete": int(incomplete),
+                "error": int(err),
+            },
+        }
 
     async def list_by_engine(self, engine_id: str) -> list[TorrentRecord]:
         stmt = (

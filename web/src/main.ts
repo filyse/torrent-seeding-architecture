@@ -329,7 +329,7 @@ let listState: ListState = ((): ListState => {
 })();
 let listSort: ListSort = ((): ListSort => {
   const v = lsGet("ui.sort") ?? "";
-  return (SORT_VALUES as readonly string[]).includes(v) ? (v as ListSort) : "added";
+  return (SORT_VALUES as readonly string[]).includes(v) ? (v as ListSort) : "name";
 })();
 let listDensity: ListDensity = lsGet("ui.density") === "compact" ? "compact" : "comfortable";
 
@@ -2208,12 +2208,14 @@ function mountListShell(root: HTMLElement): void {
     scheduleNext: (items, pollOpts) => scheduleListPoll(listHost, countEl, metaEl, items, pollOpts),
   };
 
-  const refresh = (opts?: { afterAdd?: boolean }) =>
+  const refresh = (opts?: { afterAdd?: boolean }) => {
+    void refreshFacets();
     void loadTorrents(listHost, countEl, metaEl, {
       silent: lastListItems.length > 0 && !opts?.afterAdd,
       fastPoll: opts?.afterAdd,
       scheduleNext: listRefs.scheduleNext,
     });
+  };
 
   const repaint = () => paintTorrentList(listRefs, lastListItems);
 
@@ -2253,6 +2255,7 @@ function mountListShell(root: HTMLElement): void {
     ["paused", "Пауза"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
+    o.dataset.base = label;
     if (val === listStatusFilter) o.selected = true;
     statusSelect.append(o);
   }
@@ -2266,12 +2269,15 @@ function mountListShell(root: HTMLElement): void {
   const labelSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
   const labelSuggestions = el("datalist", { id: "label-suggestions" }) as HTMLDataListElement;
   const reloadLabels = async () => {
-    labelSelect.replaceChildren(el("option", { value: "" }, ["Все метки"]));
+    const allOpt = el("option", { value: "" }, ["Все метки"]) as HTMLOptionElement;
+    allOpt.dataset.base = "Все метки";
+    labelSelect.replaceChildren(allOpt);
     labelSuggestions.replaceChildren();
     try {
       const labels = await fetchJson<string[]>("/labels");
       for (const lb of labels) {
         const o = el("option", { value: lb }, [lb]) as HTMLOptionElement;
+        o.dataset.base = lb;
         if (lb === listLabelFilter) o.selected = true;
         labelSelect.append(o);
         labelSuggestions.append(el("option", { value: lb }));
@@ -2279,6 +2285,7 @@ function mountListShell(root: HTMLElement): void {
     } catch {
       /* ignore */
     }
+    applyFacetCounts();
   };
   labelSelect.addEventListener("change", () => {
     listLabelFilter = labelSelect.value;
@@ -2289,8 +2296,8 @@ function mountListShell(root: HTMLElement): void {
 
   const sortSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
   for (const [val, label] of [
-    ["added", "Сорт: новые"],
     ["name", "Сорт: имя"],
+    ["added", "Сорт: новые"],
     ["up", "Сорт: отдача сейчас"],
     ["down", "Сорт: скачивание"],
     ["peers", "Сорт: пиры"],
@@ -2321,6 +2328,7 @@ function mountListShell(root: HTMLElement): void {
     ["error", "С ошибкой"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
+    o.dataset.base = label;
     if (val === listState) o.selected = true;
     stateSelect.append(o);
   }
@@ -2330,6 +2338,42 @@ function mountListShell(root: HTMLElement): void {
     reloadFromFilters();
     syncReset();
   });
+
+  // Счётчики у вариантов фильтров: B1 (1 720 шт), есть трафик (40 шт), Раздача (8 000 шт)…
+  type ListFacets = {
+    total: number;
+    statuses: Record<string, number>;
+    labels: Record<string, number>;
+    engines: Record<string, number>;
+    states: Record<string, number>;
+  };
+  let facets: ListFacets | null = null;
+  let lastFacetsAt = 0;
+  const fmtCount = (n: number) => ` (${n.toLocaleString("ru-RU")} шт)`;
+  function applyCountsTo(sel: HTMLSelectElement, counts: Record<string, number>): void {
+    for (const o of Array.from(sel.options)) {
+      const base = o.dataset.base ?? o.textContent ?? "";
+      const c = o.value === "" ? facets?.total : counts[o.value];
+      o.textContent = c == null ? base : base + fmtCount(c);
+    }
+  }
+  function applyFacetCounts(): void {
+    if (!facets) return;
+    applyCountsTo(statusSelect, facets.statuses);
+    applyCountsTo(stateSelect, facets.states);
+    applyCountsTo(labelSelect, facets.labels);
+  }
+  async function refreshFacets(): Promise<void> {
+    const now = Date.now();
+    if (now - lastFacetsAt < 5000) return; // не дёргаем чаще раза в 5с
+    lastFacetsAt = now;
+    try {
+      facets = await fetchJson<ListFacets>("/torrents/facets");
+      applyFacetCounts();
+    } catch {
+      /* счётчики необязательны — молча игнорируем */
+    }
+  }
 
   const densityBtn = el("button", {
     type: "button",
@@ -2445,13 +2489,13 @@ function mountListShell(root: HTMLElement): void {
     listStatusFilter = "";
     listLabelFilter = "";
     listState = "";
-    listSort = "added";
+    listSort = "name";
     for (const k of ["ui.search", "ui.status", "ui.label", "ui.state", "ui.sort"]) lsSet(k, "");
     searchInput.value = "";
     statusSelect.value = "";
     stateSelect.value = "";
     labelSelect.value = "";
-    sortSelect.value = "added";
+    sortSelect.value = "name";
     closePopover();
     reloadFromFilters();
     syncReset();
@@ -2573,7 +2617,7 @@ function mountListShell(root: HTMLElement): void {
     }
 
     const anyActive =
-      Boolean(listSearch || listStatusFilter || listLabelFilter || listState) || listSort !== "added";
+      Boolean(listSearch || listStatusFilter || listLabelFilter || listState) || listSort !== "name";
     chipsRow.replaceChildren(...chips);
     if (anyActive) chipsRow.append(resetFilters);
     chipsRow.hidden = !anyActive;
