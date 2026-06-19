@@ -18,18 +18,21 @@ from sqlalchemy import text
 log = logging.getLogger(__name__)
 
 
+# Порог в процентах ОТКЛЮЧЁН по умолчанию: на сидбоксе диски (18+ ТБ) намеренно
+# забиты под завязку, поэтому «свободно 0.6%» — норма, а не повод для алерта.
 def _disk_alert_pct() -> float:
     try:
-        return max(0.0, float(os.getenv("SEEDING_DISK_ALERT_PCT", "10")))
-    except ValueError:
-        return 10.0
-
-
-def _disk_alert_gb() -> float:
-    try:
-        return max(0.0, float(os.getenv("SEEDING_DISK_ALERT_GB", "0")))
+        return max(0.0, float(os.getenv("SEEDING_DISK_ALERT_PCT", "0")))
     except ValueError:
         return 0.0
+
+
+# Главный порог — абсолютный остаток в ГиБ. Меньше этого — критично (по умолчанию 100 ГиБ).
+def _disk_alert_gb() -> float:
+    try:
+        return max(0.0, float(os.getenv("SEEDING_DISK_ALERT_GB", "100")))
+    except ValueError:
+        return 100.0
 
 
 async def evaluate_alerts(app) -> list[dict]:
@@ -74,10 +77,10 @@ async def evaluate_alerts(app) -> list[dict]:
             if total > 0:
                 free_pct = free / total * 100.0
                 free_gb = free / (1024 ** 3)
-                low = (pct > 0 and free_pct < pct) or (gb > 0 and free_gb < gb)
+                low = (gb > 0 and free_gb < gb) or (pct > 0 and free_pct < pct)
                 if low:
                     alerts.append({
-                        "id": f"disk_low:{eid}", "severity": "warning",
+                        "id": f"disk_low:{eid}", "severity": "critical",
                         "title": f"Мало места на движке {eid}",
                         "message": f"Свободно {free_gb:.1f} ГиБ ({free_pct:.0f}%)",
                     })

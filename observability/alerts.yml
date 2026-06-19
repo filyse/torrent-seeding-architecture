@@ -38,13 +38,15 @@ groups:
           description: "{{ $value }} раздач(и) в статусе error дольше 5 минут."
 
       - alert: EngineDiskLow
-        expr: (seeding_engine_disk_free_bytes / seeding_engine_disk_total_bytes) * 100 < 10
+        # Абсолютный остаток: диски сидбокса намеренно забиты, проценты не показательны.
+        # Критично, когда свободно меньше 100 ГиБ (100 * 1024^3 байт).
+        expr: seeding_engine_disk_free_bytes < 107374182400
         for: 5m
         labels:
-          severity: warning
+          severity: critical
         annotations:
           summary: "Мало места на движке {{ $labels.engine }}"
-          description: "Свободно меньше 10% на движке {{ $labels.engine }}."
+          description: "Свободно меньше 100 ГиБ на движке {{ $labels.engine }}."
 
       - alert: QueueReportStale
         expr: seeding_queue_report_age_seconds > 120

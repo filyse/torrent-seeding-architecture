@@ -85,8 +85,10 @@ JSON, включая логи доступа uvicorn. Уровень — `LOG_LE
 - БД недоступна (`db_down`, critical);
 - очередь зависла/отстаёт (`queue_stale`/`redis_down`, warning);
 - есть раздачи в ошибке (`torrents_error`, warning);
-- мало места на движке (`disk_low:<id>`, warning) — пороги `SEEDING_DISK_ALERT_PCT`
-  (по умолчанию 10%) и/или `SEEDING_DISK_ALERT_GB`.
+- мало места на движке (`disk_low:<id>`, critical) — порог по абсолютному остатку
+  `SEEDING_DISK_ALERT_GB` (по умолчанию **100 ГиБ**: меньше — критично). Процентный порог
+  `SEEDING_DISK_ALERT_PCT` по умолчанию **0** (выключен): на сидбоксе диски намеренно
+  забиты под завязку, поэтому проценты не показательны. Любой из заданных порогов триггерит алерт.
 
 API: `GET /api/v1/alerts` (operator+). UI: панель «Уведомления» в Настройках с
 автообновлением. Если задан `SEEDING_ALERT_WEBHOOK`, фоновый цикл (`SEEDING_ALERT_INTERVAL`,
