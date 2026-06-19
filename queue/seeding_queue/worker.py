@@ -18,6 +18,7 @@ from seeding_queue.engine_util import (
     engine_url,
     fetch_all_runtime,
     make_engine_client,
+    resolve_specs,
 )
 from seeding_queue.logconf import setup_logging
 
@@ -80,6 +81,8 @@ async def _meter_and_enforce(session, db_rows, runtime_by_id) -> dict:
 
     enforced = 0
     trepo = TorrentRepository(session)
+    # Карта id→url из env+БД (динамические движки), резолвим один раз для всего прохода.
+    url_by_id = {s.id: s.url.rstrip("/") for s in await resolve_specs(session)}
     for q in await qrepo.list_quotas():
         if not q.enabled or not q.upload_quota:
             continue
@@ -91,8 +94,10 @@ async def _meter_and_enforce(session, db_rows, runtime_by_id) -> dict:
             ]
             paused: list[int] = []
             for r in targets:
+                base = url_by_id.get(r.engine_id)
+                if not base:
+                    continue
                 try:
-                    base = engine_url(r.engine_id).rstrip("/")
                     async with make_engine_client(base, 15.0) as client:
                         rr = await client.post(f"{base}/internal/v1/torrents/{r.id}/pause")
                     if rr.status_code < 300:
@@ -195,7 +200,7 @@ async def _register_one(client: httpx.AsyncClient, base: str, row) -> bool:
 
 async def bulk_register_engine(ctx, engine_id: str):
     """Регистрация всех queued торрентов одного движка (bulk через очередь)."""
-    base = engine_url(engine_id).rstrip("/")
+    base = (await engine_url(engine_id)).rstrip("/")
     db_url = get_database_url()
     eng = create_engine(db_url)
     sf = create_session_factory(eng)
@@ -237,7 +242,7 @@ async def restore_engine(ctx, engine_id: str):
     Фоновое восстановление активных торрентов одного движка.
     Дублирует логику API restore, но через очередь (bulk).
     """
-    base = engine_url(engine_id).rstrip("/")
+    base = (await engine_url(engine_id)).rstrip("/")
     db_url = get_database_url()
     eng = create_engine(db_url)
     sf = create_session_factory(eng)
@@ -297,9 +302,7 @@ async def restore_engine(ctx, engine_id: str):
 
 
 async def restore_all_engines(ctx):
-    from seeding_db.engine_registry import load_engine_specs
-
-    specs = load_engine_specs()
+    specs = await resolve_specs()
     results = await asyncio.gather(*[restore_engine(ctx, s.id) for s in specs])
     return {"ok": True, "engines": list(results)}
 
