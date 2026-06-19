@@ -82,7 +82,9 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
-    async def register_torrent_file(self, db_id: int, torrent_bytes: bytes, save_path: str) -> dict:
+    async def register_torrent_file(
+        self, db_id: int, torrent_bytes: bytes, save_path: str, seed_mode: bool = False
+    ) -> dict:
         r = await self._client.post(
             "/internal/v1/torrents",
             json={
@@ -90,6 +92,7 @@ class EngineClient:
                 "magnet_uri": None,
                 "torrent_b64": base64.b64encode(torrent_bytes).decode("ascii"),
                 "save_path": save_path,
+                "seed_mode": seed_mode,
             },
         )
         r.raise_for_status()

@@ -123,6 +123,7 @@ async def upload_torrent_file(
     engine_id: str = Form(""),
     display_name: str = Form(""),
     label: str = Form(""),
+    seed_mode: bool = Form(False),
 ):
     filename = (torrent_file.filename or "").strip()
     if not filename.lower().endswith(".torrent"):
@@ -143,7 +144,9 @@ async def upload_torrent_file(
     await session.flush()
     await session.refresh(row)
     try:
-        await pool.client_for(engine_id).register_torrent_file(row.id, payload, row.save_path)
+        await pool.client_for(engine_id).register_torrent_file(
+            row.id, payload, row.save_path, seed_mode=seed_mode
+        )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="engine unavailable") from exc
     except ValueError as exc:

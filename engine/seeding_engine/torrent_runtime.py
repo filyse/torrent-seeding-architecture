@@ -67,6 +67,21 @@ def _clear_auto_managed_params(lt, p) -> None:
         log.warning("clear auto_managed on params failed: %s", exc)
 
 
+def _set_seed_mode_param(lt, p) -> None:
+    """Включить seed_mode на add_torrent_params: libtorrent принимает данные как готовые
+    и проверяет кусок лениво при первом запросе пира — без полной перепроверки на диске."""
+    try:
+        tf = getattr(lt, "torrent_flags", None)
+        if tf is not None and hasattr(tf, "seed_mode") and hasattr(p, "flags"):
+            p.flags |= tf.seed_mode
+            return
+        atp = getattr(lt, "add_torrent_params", None)
+        if atp is not None and hasattr(atp, "flag_seed_mode") and hasattr(p, "flags"):
+            p.flags |= atp.flag_seed_mode
+    except Exception as exc:  # noqa: BLE001
+        log.warning("set seed_mode on params failed: %s", exc)
+
+
 # Эвристика «приватного» трекера: многие ру-трекеры (rudub и т.п.) не ставят флаг
 # private в метаданных, но используют passkey/authkey. Для таких раздач тоже нужно
 # глушить DHT/PEX/LSD, иначе libtorrent тянет мусорные пиры из открытых сетей.
@@ -272,6 +287,7 @@ class TorrentRuntime(ABC):
         magnet_uri: str | None,
         save_path: str,
         torrent_data: bytes | None = None,
+        seed_mode: bool = False,
     ) -> RuntimeHandle: ...
 
     @abstractmethod
@@ -368,6 +384,7 @@ class MockTorrentRuntime(TorrentRuntime):
         magnet_uri: str | None,
         save_path: str,
         torrent_data: bytes | None = None,
+        seed_mode: bool = False,
     ) -> RuntimeHandle:
         return self._store.upsert(db_id, magnet_uri, save_path)
 
@@ -689,6 +706,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         magnet_uri: str | None,
         save_path: str,
         torrent_data: bytes | None = None,
+        seed_mode: bool = False,
     ) -> RuntimeHandle:
         has_magnet = bool(magnet_uri and magnet_uri.startswith("magnet:"))
         has_file = bool(torrent_data)
@@ -730,6 +748,11 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             p.save_path = save_path
             _clear_auto_managed_params(lt, p)
             _apply_private_to_params(lt, p, self._net)
+            # seed_mode: импорт уже готового контента (напр. из rtorrent) без полной
+            # перепроверки — libtorrent считает данные на месте и хеширует кусок лениво
+            # при первом запросе пира. Применимо только к .torrent (не magnet).
+            if seed_mode and not has_magnet:
+                _set_seed_mode_param(lt, p)
             return ses.add_torrent(p)
 
         try:

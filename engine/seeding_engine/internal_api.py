@@ -39,6 +39,7 @@ class TorrentRegisterIn(BaseModel):
     magnet_uri: str | None = None
     torrent_b64: str | None = None
     save_path: str = Field(..., min_length=1)
+    seed_mode: bool = False
 
 
 class TorrentImportIn(BaseModel):
@@ -174,7 +175,13 @@ async def register_torrent(request: Request, body: TorrentRegisterIn):
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=422, detail="invalid torrent_b64 payload") from exc
     try:
-        h = await rt.add_torrent(body.db_id, body.magnet_uri, body.save_path, torrent_data=torrent_data)
+        h = await rt.add_torrent(
+            body.db_id,
+            body.magnet_uri,
+            body.save_path,
+            torrent_data=torrent_data,
+            seed_mode=body.seed_mode,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RuntimeHandleOut.model_validate(h)
