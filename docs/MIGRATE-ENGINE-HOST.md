@@ -92,12 +92,60 @@ curl -s -H "X-API-Key: $KEY" http://127.0.0.1:8000/api/v1/engines/registry      
 curl -s -H "X-API-Key: $KEY" http://127.0.0.1:8000/api/v1/engines/b1/connectivity # reachable=true, bt listening=true
 ```
 
+## 6. Открыть BT-порт на роутере (для движка с раздачами — обязательно)
+
+Без входящего проброса на seedbox раздаётся **0 КБ/с**: оркестраторская проверка
+(`connectivity`) ходит по LAN и зелёная, но интернет-пиры не достучатся. Симптом —
+много раздач в `seeding`, но `up = 0` и нет established-соединений на BT-порту.
+
+Проверить **реальный** порт libtorrent внутри контейнера (а не только публикацию Docker):
+
+```bash
+# 50001 = C351, 51413 = C8D5 (hex). Должен слушаться нужный порт:
+docker exec <engine> sh -c 'grep -iE "C351|C8D5" /proc/net/tcp /proc/net/udp'
+```
+
+На роутере (OpenWrt/fw4) — DNAT WAN→`<host>:<BT-порт>`, tcp+udp. Если порт раньше
+вёл на старый хост (напр. диапазон `50001-50006 → CT400`), **сузить старое правило**
+и добавить новое на новый хост:
+
+```sh
+uci set firewall.<ct400_rule>.src_dport='50002-50006'   # было 50001-50006
+uci set firewall.<ct400_rule>.dest_port='50002-50006'
+S=$(uci add firewall redirect)
+uci set firewall.$S.name='seeding_b1_171_wan1'
+uci set firewall.$S.src='wan'; uci set firewall.$S.src_dport='50001'
+uci set firewall.$S.dest='lan'; uci set firewall.$S.dest_ip='192.168.1.171'
+uci set firewall.$S.dest_port='50001'
+uci add_list firewall.$S.proto='tcp'; uci add_list firewall.$S.proto='udp'
+uci set firewall.$S.target='DNAT'; uci set firewall.$S.reflection='1'
+uci commit firewall && /etc/init.d/firewall reload
+```
+
+Проверка снаружи (с любого внешнего хоста):
+
+```bash
+(exec 3<>/dev/tcp/<WAN-IP>/50001) && echo OPEN || echo closed
+# и на движке убедиться, что появились пиры:
+docker exec <engine> sh -c 'grep -E " 01 " /proc/net/tcp | grep C351 | wc -l'
+```
+
 ## Замечания и подводные камни
 
 - **Flip-flop реестра**: если оставить старый контейнер движка работать, он и новый
   хост будут попеременно перетирать `url` в БД. Всегда сначала шаг 2.
 - **BT-порт**: для входящих пиров из интернета нужен проброс (DNAT) на роутере на
-  `<host-ip>:<BT-порт>`. Для пустого движка не критично.
+  `<host-ip>:<BT-порт>` (см. шаг 6). Для пустого движка не критично, для движка с
+  раздачами — обязательно, иначе `up = 0`.
+- **Какой порт реально слушает libtorrent**: `docker-compose.engine.yml` выводит
+  `LT_LISTEN_INTERFACES` из `SEEDING_ENGINE_LISTEN_PORT`, поэтому при штатном деплое
+  bind = заданному порту. Но если запускать движок другим путём (или с чужим
+  `LT_LISTEN_INTERFACES`), libtorrent уйдёт на дефолт `51413`. Сверяйтесь с `/proc`
+  (см. шаг 6), а не только с публикацией Docker.
+- **Stale `docker-compose.override.yml`**: `docker compose up` без явных `-f`
+  автоматически подхватывает `override.yml`. Если там остался старый порт — он
+  «перехватит» публикацию. Деплой движка всегда с явными `-f docker-compose.engine.yml
+  -f docker-compose.b1-content.yml`.
 - **Безопасность**: порт `8081` слушает `0.0.0.0`, но защищён TLS + `X-Engine-Token`.
   Желательно ограничить его фаерволом на IP оркестратора.
 - **media_path**: у удалённого движка его нет (нет общего `/media`), поэтому
