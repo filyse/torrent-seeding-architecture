@@ -2061,6 +2061,13 @@ body {
   margin-top: 0.25rem;
   word-break: break-word;
 }
+.health-card__ver {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
 .health-meta {
   display: flex;
   align-items: center;

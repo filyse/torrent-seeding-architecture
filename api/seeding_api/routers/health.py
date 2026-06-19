@@ -106,8 +106,13 @@ async def _check_engine(pool: EnginePool, spec) -> dict:
         return comp
     t0 = time.perf_counter()
     try:
-        await client.health()
+        hc = await client.health()
         comp.update(status="ok", latency_ms=_ms(t0))
+        if isinstance(hc, dict):
+            if hc.get("version"):
+                comp["version"] = str(hc["version"])
+            if hc.get("built_at"):
+                comp["built_at"] = str(hc["built_at"])
     except httpx.HTTPError as exc:
         comp.update(detail=f"Недоступен: {exc}")
         return comp
@@ -134,12 +139,15 @@ async def _check_engine(pool: EnginePool, spec) -> dict:
 @router.get("/health/full")
 async def health_full(request: Request):
     pool: EnginePool = request.app.state.engine_pool
+    from seeding_api.buildinfo import version_info
+
     api_comp = {
         "id": "api",
         "name": "API",
         "kind": "core",
         "status": "ok",
         "detail": "Отвечает",
+        **version_info(),
     }
     db_comp, redisqueue, engine_comps = await asyncio.gather(
         _check_database(request),

@@ -112,6 +112,49 @@ def _disk(path: str) -> tuple[int | None, int | None]:
         return None, None
 
 
+def storage_path() -> str:
+    """Каталог, ИЗ которого реально идёт раздача — его и показываем по диску.
+
+    На .171 у каждого движка отдельный примонтированный диск в /data/<eid> (а само /data —
+    маленький корень контейнера). Поэтому место надо считать по storage_prefix, а не по /data."""
+    prefix = os.getenv("SEEDING_ENGINE_STORAGE_PREFIX", "").strip()
+    if prefix:
+        return prefix
+    root = os.getenv("SEEDING_DATA_ROOT", "/data").rstrip("/")
+    eid = (os.getenv("SEEDING_ENGINE_ID", "") or os.getenv("ENGINE_STORAGE_SUBDIR", "")).strip()
+    return f"{root}/{eid}" if eid else root
+
+
+def storage_disk() -> tuple[int | None, int | None, str]:
+    """(total, free, path) по каталогу раздачи; при недоступности — откат на SEEDING_DATA_ROOT."""
+    path = storage_path()
+    total, free = _disk(path)
+    if total is None:
+        root = os.getenv("SEEDING_DATA_ROOT", "/data")
+        total, free = _disk(root)
+        path = root
+    return total, free, path
+
+
+def engine_version() -> str:
+    try:
+        from seeding_engine import __version__  # noqa: PLC0415
+
+        return str(__version__)
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
+def build_time() -> str | None:
+    """Метка времени сборки образа (пишется Dockerfile'ом в /app/BUILD_TIME)."""
+    path = os.getenv("BUILD_TIME_FILE", "/app/BUILD_TIME")
+    try:
+        with open(path, encoding="ascii") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
 def _loadavg() -> tuple[float, float, float] | None:
     try:
         return os.getloadavg()
@@ -123,7 +166,8 @@ def collect(rt=None) -> dict:
     """Собрать sysinfo. Тяжёлые вызовы (cpu sample, wan) — синхронно, вызывать в to_thread."""
     data_root = os.getenv("SEEDING_DATA_ROOT", "/data")
     mem_total, mem_avail = _meminfo()
-    disk_total, disk_free = _disk(data_root)
+    # Диск считаем по каталогу раздачи (примонтированный том), а не по корню контейнера.
+    disk_total, disk_free, disk_path = storage_disk()
     load = _loadavg()
     out: dict = {
         "engine_id": os.getenv("SEEDING_ENGINE_ID", "") or os.getenv("ENGINE_STORAGE_SUBDIR", ""),
@@ -132,8 +176,11 @@ def collect(rt=None) -> dict:
         "os": platform.platform(),
         "python": platform.python_version(),
         "libtorrent": _lt_version(),
+        "version": engine_version(),
+        "built_at": build_time(),
         "uptime_seconds": int(time.monotonic() - _START),
         "data_root": data_root,
+        "storage_path": disk_path,
         "local_ip": _primary_ip(),
         "wan_ip": _wan_ip(),
         "advertise_url": os.getenv("SEEDING_ENGINE_ADVERTISE_URL", ""),

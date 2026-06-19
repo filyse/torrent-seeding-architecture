@@ -2,7 +2,6 @@ import asyncio
 import base64
 import hmac
 import os
-import shutil
 import tarfile
 from pathlib import Path
 
@@ -155,7 +154,15 @@ def get_runtime(request: Request):
 @router.get("/health")
 async def internal_health(request: Request):
     rt = get_runtime(request)
-    return {"status": "ok", "service": "engine", "backend": rt.backend_name}
+    from seeding_engine import sysinfo as _sysinfo  # noqa: PLC0415
+
+    return {
+        "status": "ok",
+        "service": "engine",
+        "backend": rt.backend_name,
+        "version": _sysinfo.engine_version(),
+        "built_at": _sysinfo.build_time(),
+    }
 
 
 @router.get("/torrents", response_model=list[RuntimeHandleOut])
@@ -583,15 +590,16 @@ async def set_runtime_private(request: Request, db_id: int, body: PrivateIn):
 async def session_stats(request: Request):
     rt = get_runtime(request)
     stats = await rt.session_stats()
-    # Свободное место на томе движка — чтобы UI понимал, влезет ли контент.
-    try:
-        root = os.getenv("SEEDING_DATA_ROOT", "/data")
-        usage = shutil.disk_usage(root)
-        if isinstance(stats, dict):
-            stats["disk_total"] = int(usage.total)
-            stats["disk_free"] = int(usage.free)
-    except OSError:
-        pass
+    # Свободное место на ТОМЕ РАЗДАЧИ (storage_prefix), а не на корне контейнера /data:
+    # на выделенных хостах под каждый движок примонтирован свой диск в /data/<eid>.
+    from seeding_engine import sysinfo as _sysinfo  # noqa: PLC0415
+
+    total, free, _ = _sysinfo.storage_disk()
+    if isinstance(stats, dict):
+        if total is not None:
+            stats["disk_total"] = int(total)
+        if free is not None:
+            stats["disk_free"] = int(free)
     return stats
 
 

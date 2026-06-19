@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && git clone --depth 1 --branch v0.26.3 https://github.com/samuelcolvin/arq.git /opt/arq
 COPY db /app/db
 COPY queue /app/queue
+# Метка времени сборки образа (обновляется при каждой реальной пересборке — слой идёт после COPY).
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/BUILD_TIME
 ENV PYTHONPATH=/app/queue:/app/db:/opt/arq
 ENV REDIS_URL=redis://redis:6379/0
 CMD ["python3", "-m", "arq", "seeding_queue.worker.WorkerSettings"]

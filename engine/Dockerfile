@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY . /app/engine
 RUN sed -i 's/\r$//' /app/engine/docker-entrypoint.sh \
     && chmod +x /app/engine/docker-entrypoint.sh
+# Метка времени сборки образа (обновляется при каждой реальной пересборке — слой идёт после COPY).
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/BUILD_TIME
 ENV PYTHONPATH=/app/engine
 ENV SEEDING_DATA_ROOT=/data
 ENV SEEDING_ENGINE_BACKEND=libtorrent

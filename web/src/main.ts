@@ -1,4 +1,5 @@
 import "./style.css";
+import { WEB_VERSION } from "./version";
 
 const API = "/api/v1";
 
@@ -136,8 +137,11 @@ type EngineInfoOut = {
     os?: string;
     python?: string;
     libtorrent?: string | null;
+    version?: string | null;
+    built_at?: string | null;
     uptime_seconds?: number;
     data_root?: string;
+    storage_path?: string | null;
     local_ip?: string | null;
     wan_ip?: string | null;
     advertise_url?: string;
@@ -218,6 +222,8 @@ type HealthComponent = {
   engine_id?: string | null;
   url?: string | null;
   tls?: boolean;
+  version?: string | null;
+  built_at?: string | null;
   meta?: Record<string, unknown> | null;
 };
 type HealthFull = {
@@ -3073,6 +3079,14 @@ const HEALTH_OVERALL_LABEL: Record<HealthStatus, string> = {
   down: "Обнаружен сбой",
 };
 
+function fmtBuildTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function healthCard(c: HealthComponent): HTMLElement {
   const card = el("div", { className: `health-card health-card--${c.status}` });
   const top = el("div", { className: "health-card__top" }, [
@@ -3091,6 +3105,13 @@ function healthCard(c: HealthComponent): HTMLElement {
   }
   card.append(statusRow);
   if (c.detail) card.append(el("div", { className: "health-card__detail" }, [c.detail]));
+  if (c.version) {
+    card.append(
+      el("div", { className: "health-card__ver", title: c.built_at ? `Собрано ${fmtBuildTime(c.built_at)}` : "" }, [
+        `v${c.version}${c.built_at ? ` · ${fmtBuildTime(c.built_at)}` : ""}`,
+      ]),
+    );
+  }
   if (c.kind === "engine") {
     const eid = c.engine_id ?? c.id;
     card.classList.add("health-card--clickable");
@@ -3336,6 +3357,20 @@ function fmtPercentRaw(v: number | null | undefined): string {
   return `${v.toFixed(1)}%`;
 }
 
+let webBuildTime: string | null = null;
+let webBuildTimeFetched = false;
+
+async function ensureWebBuildTime(): Promise<void> {
+  if (webBuildTimeFetched) return;
+  webBuildTimeFetched = true;
+  try {
+    const res = await fetch("/BUILD_TIME", { cache: "no-store" });
+    if (res.ok) webBuildTime = (await res.text()).trim() || null;
+  } catch {
+    /* статика может отсутствовать в dev — версии достаточно */
+  }
+}
+
 function mountHealthPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Состояние сервисов"]);
@@ -3367,10 +3402,20 @@ function mountHealthPanel(): HTMLElement {
     );
     const core = data.components.filter((c) => c.kind === "core");
     const engines = data.components.filter((c) => c.kind === "engine");
+    const webComp: HealthComponent = {
+      id: "web",
+      name: "Веб-интерфейс",
+      kind: "core",
+      status: "ok",
+      detail: "Загружен в браузере",
+      version: WEB_VERSION,
+      built_at: webBuildTime,
+    };
     grid.replaceChildren();
     grid.append(el("div", { className: "health-grid__label" }, ["Ядро"]));
     const coreRow = el("div", { className: "health-cards" });
     for (const c of core) coreRow.append(healthCard(c));
+    coreRow.append(healthCard(webComp));
     grid.append(coreRow);
     if (engines.length > 0) {
       grid.append(el("div", { className: "health-grid__label" }, ["Движки"]));
@@ -3410,7 +3455,7 @@ function mountHealthPanel(): HTMLElement {
   };
 
   refreshBtn.addEventListener("click", () => void tick(true));
-  void tick();
+  void ensureWebBuildTime().then(() => void tick());
   return panel;
 }
 
@@ -4105,6 +4150,10 @@ function buildEngineDetail(info: EngineInfoOut): HTMLElement {
       kv("Контейнер/хост", sys?.hostname),
       kv("ОС", sys?.os),
       kv("libtorrent", sys?.libtorrent ?? sys?.backend ?? null),
+      kv(
+        "Версия движка",
+        sys?.version ? `v${sys.version}${sys.built_at ? ` · ${fmtBuildTime(sys.built_at)}` : ""}` : null,
+      ),
       kv("Аптайм", fmtUptime(sys?.uptime_seconds)),
       kv("Источник", `${reg.source}${reg.in_pool ? " · в пуле" : ""}${reg.stale ? " · протух" : ""}`),
     ]),
@@ -4132,10 +4181,10 @@ function buildEngineDetail(info: EngineInfoOut): HTMLElement {
       kv("RAM хоста", memUsed != null ? `${fmtBytes(memUsed)} / ${fmtBytes(sys?.mem_total)}` : null),
       kv("RSS процесса", fmtBytes(sys?.proc_rss)),
       kv(
-        "Диск данных",
+        "Диск раздачи",
         diskUsed != null ? `${fmtBytes(diskUsed)} / ${fmtBytes(sys?.disk_total)} · своб. ${fmtBytes(sys?.disk_free)}` : null,
       ),
-      kv("Путь данных", sys?.data_root ?? reg.storage_prefix),
+      kv("Путь раздачи", sys?.storage_path ?? reg.storage_prefix ?? sys?.data_root),
     ]),
     section("Раздачи", [
       kv("Всего", ses?.torrents != null ? String(ses.torrents) : null),
