@@ -2298,7 +2298,7 @@ function mountListShell(root: HTMLElement): void {
   for (const [val, label] of [
     ["name", "Сорт: имя"],
     ["added", "Сорт: новые"],
-    ["up", "Сорт: отдача сейчас"],
+    ["up", "Сорт: скорость"],
     ["down", "Сорт: скачивание"],
     ["peers", "Сорт: пиры"],
     ["uploaded", "Сорт: раздано всего"],
