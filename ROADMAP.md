@@ -370,6 +370,35 @@
   раньше UI показывал место корня. Затрагивает `session/stats` и `sysinfo`; в UI —
   «Диск раздачи» / «Путь раздачи».
 
+### Фаза 7 — Переход с polling на WebSocket 🟡
+Цель: заменить таймерный поллинг (деталь / настройки / migrate / джобы) и интервальный SSE
+на единое WebSocket-соединение с подписками и пушем **по факту изменения**. Всё за фича-флагом
+`SEEDING_WS_ENABLED`; текущие SSE/поллинг остаются как fallback, ничего не ломаем.
+
+- ⬜ WS-1 Бэкенд: WS-хаб (один воркер). Роутер `routers/ws.py` (`GET /api/v1/ws`), авторизация
+  в handshake (сабпротокол `bearer.<key>` или первое сообщение `{type:"auth"}`, переиспользуя
+  `resolve_principal`; без ключа в URL). `ConnectionManager` с подписками на каналы
+  `stats | torrent:{id} | engines | job:{id} | migrate:{id}`. Протокол: клиент
+  `subscribe/unsubscribe/ping` ↔ сервер `snapshot/event/error/pong`; ping/pong + idle-timeout;
+  на `subscribe` сразу текущий снапшот, далее дельты.
+- ⬜ WS-2 Источники → хаб (event-driven). `runtime_snapshot_loop` публикует дельты изменённых
+  раздач + агрегат `stats`; оркестратор миграций — `migrate:{id}` на смену фазы/процента;
+  refresh/health движков — `engines`; arq-джобы — `job:{id}`.
+- ⬜ WS-3 Масштабирование (Redis pub/sub). Publisher'ы шлют в Redis, каждый воркер раздаёт
+  своим локальным WS-клиентам; снапшот-цикл делаем одним лидером (лок в Redis/БД), чтобы не
+  дублировать опрос движков ×N воркеров.
+- ⬜ WS-4 Фронтенд: WS-клиент. `ws.ts` — одно соединение, авто-reconnect (экспон. backoff),
+  auth-handshake, API подписок, учёт `document.hidden`. Перевод list-stats / детали / migrate /
+  настроек / джоб с поллинга на подписки; патч строк на месте; полл/SSE как fallback.
+- ⬜ WS-5 Прокси/инфра. nginx `location = /api/v1/ws` (`Upgrade`/`Connection: upgrade`, http1.1,
+  длинный `proxy_read_timeout`, буферизация off); проверка сквозного upgrade Caddy→nginx→api.
+- ⬜ WS-6 Раскатка и чистка. Фича-флаг по умолчанию off → канареечный прогон → default on;
+  старый SSE как long-term fallback или удаление после стабилизации.
+
+Сквозное: auth в сабпротоколе (ключи не логируем), backpressure (коалесинг последнего снапшота
+канала), дельты вместо полных списков, метрики (подключения / msg-rate / дропы), тесты
+(хаб / ws-клиент / нагрузка N клиентов).
+
 ### Финал — Нагрузочное тестирование ✅ (2026-06-19)
 Проведено **после** основных функциональных изменений на финальной системе.
 Отчёт: [`docs/reports/2026-06-19-loadtest.md`](docs/reports/2026-06-19-loadtest.md);

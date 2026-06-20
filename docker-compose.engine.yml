@@ -54,6 +54,10 @@ services:
       SEEDING_ENGINE_TLS: ${SEEDING_ENGINE_TLS:-0}
       SEEDING_ENGINE_TLS_CERT: /certs/engine.crt
       SEEDING_ENGINE_TLS_KEY: /certs/engine.key
+      # CA для проверки cert другого движка при ПРЯМОМ переносе движок→движок
+      # (peer-check/import-direct). Без него auto-выбор всегда падает на http через
+      # оркестратор. Движки делят один self-signed cert, поэтому CA = сам cert.
+      SEEDING_ENGINE_TLS_CA: ${SEEDING_ENGINE_TLS_CA:-/certs/engine.crt}
     ports:
       # Внутренний API движка — нужен оркестратору (метаданные + tar-стрим контента).
       # БЕЗОПАСНОСТЬ: закрой этот порт файрволом на IP оркестратора (аутентификации пока нет).

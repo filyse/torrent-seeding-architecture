@@ -109,13 +109,25 @@ async def restore_rows_for_engine(
     magnet_rows: list[tuple[int, str, str, str]],
     file_rows: list[tuple[int, str, str]],
 ) -> None:
+    # Движок мог выпасть из пула (устаревший heartbeat / ещё не зарегистрировался после
+    # рестарта). Тогда client_for бросает KeyError — ловим и пропускаем, чтобы не ронять
+    # старт API. Раздачи восстановятся, когда движок вернётся в пул и API рестартует.
     try:
-        await pool.client_for(engine_id).health()
+        ec = pool.client_for(engine_id)
+    except KeyError:
+        log.warning(
+            "engine %s not in pool (stale/unregistered), skip restore of %s row(s)",
+            engine_id,
+            len(magnet_rows) + len(file_rows),
+        )
+        return
+
+    try:
+        await ec.health()
     except httpx.HTTPError:
         log.warning("engine %s unavailable, skip restore", engine_id)
         return
 
-    ec = pool.client_for(engine_id)
     sem = asyncio.Semaphore(_RESTORE_CONCURRENCY)
     tasks = [
         _restore_magnet_row(db_id, magnet, sp, st, ec, sem)
@@ -165,7 +177,8 @@ async def maybe_restore_torrents_to_engine(
     file_by_engine = _group_file(file_rows)
     engine_ids = set(magnet_by_engine) | set(file_by_engine)
 
-    await asyncio.gather(
+    # return_exceptions=True: рестор одного движка не должен ронять старт API целиком.
+    results = await asyncio.gather(
         *[
             restore_rows_for_engine(
                 pool,
@@ -174,5 +187,9 @@ async def maybe_restore_torrents_to_engine(
                 file_by_engine.get(eid, []),
             )
             for eid in sorted(engine_ids)
-        ]
+        ],
+        return_exceptions=True,
     )
+    for eid, res in zip(sorted(engine_ids), results):
+        if isinstance(res, Exception):
+            log.error("engine %s restore failed (isolated): %r", eid, res)

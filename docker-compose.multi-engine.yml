@@ -92,6 +92,8 @@ services:
       SEEDING_ENGINE_TLS_CA: /certs/ca.crt
       # Наблюдаемость (Фаза 6): структурные логи.
       SEEDING_LOG_JSON: "1"
+      # WebSocket (Фаза 7): по умолчанию выключен, текущий SSE/поллинг — fallback.
+      SEEDING_WS_ENABLED: ${SEEDING_WS_ENABLED:-0}
     volumes:
       - ./config/engines.ct400.json:/config/engines.json:ro
       - ./certs/ca.crt:/certs/ca.crt:ro

@@ -79,7 +79,7 @@ def set_progress(
     eta = None
     if speed and speed > 0 and total and copied is not None and total > copied:
         eta = round((total - copied) / speed)
-    store[torrent_id] = {
+    snap = {
         "phase": phase,
         "progress": progress,
         "copied": copied,
@@ -89,6 +89,14 @@ def set_progress(
         "message": message,
         "updated_at": now,
     }
+    store[torrent_id] = snap
+    # WS (Фаза 7): пушим прогресс переноса подписчикам migrate:{id}, если хаб привязан к стору.
+    hub = store.get("__hub__")
+    if hub is not None:
+        try:
+            hub.publish_sync(f"migrate:{torrent_id}", {"id": torrent_id, "active": phase not in ("done", "error"), **snap})
+        except Exception:  # noqa: BLE001 — пуш не должен ломать перенос
+            pass
 
 
 _CHECKING_STATES = {
@@ -110,10 +118,23 @@ def _verify_timeout() -> int:
 async def _wait_until_checked(
     client, db_id: int, timeout: int, store: dict | None = None
 ) -> dict | None:
-    """Дождаться окончания recheck на цели и вернуть финальный snapshot (или последний)."""
+    """Дождаться РЕАЛЬНОГО окончания recheck на цели и вернуть финальный snapshot.
+
+    Тонкость (иначе ложные «копия неполная»): при импорте движок делает add_torrent
+    (авто-проверка) и затем force-recheck. Между проходами libtorrent кратковременно
+    показывает НЕ-checking состояние с частичным progress. Раньше мы возвращали этот
+    транзиент — и считали корректную копию неполной. Теперь принимаем не-checking
+    результат только когда он устаканился: либо progress полный (>=0.999), либо мы уже
+    видели проверку и несколько опросов подряд дают одинаковый не-checking progress.
+    """
     interval = 3
     last: dict | None = None
     waited = 0
+    seen_checking = False
+    stable_prog: float | None = None
+    stable_n = 0
+    settle_polls = 3  # ~9с стабильного не-checking прежде чем поверить в «неполную» копию
+    start_grace = 21  # ждём появления checking хотя бы столько, прежде чем доверять не-checking
     while waited <= timeout:
         try:
             snap = await client.runtime_snapshot(db_id)
@@ -121,13 +142,25 @@ async def _wait_until_checked(
             snap = None
         if snap is not None:
             last = snap
+            prog = float(snap.get("progress") or 0.0)
+            checking = str(snap.get("lt_state") or "") in _CHECKING_STATES
             if store is not None:
-                set_progress(
-                    store, db_id, "checking",
-                    progress=float(snap.get("progress") or 0.0),
-                )
-            if str(snap.get("lt_state") or "") not in _CHECKING_STATES:
-                return snap
+                set_progress(store, db_id, "checking", progress=prog)
+            if checking:
+                seen_checking = True
+                stable_prog = None
+                stable_n = 0
+            else:
+                if prog >= 0.999:
+                    return snap
+                if stable_prog is not None and abs(prog - stable_prog) < 1e-6:
+                    stable_n += 1
+                else:
+                    stable_prog = prog
+                    stable_n = 1
+                ready = (seen_checking or waited >= start_grace) and stable_n >= settle_polls
+                if ready:
+                    return snap
         await asyncio.sleep(interval)
         waited += interval
     return last

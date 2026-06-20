@@ -534,6 +534,8 @@ def _launch_migration(
     if progress_store is None:
         progress_store = {}
         request.app.state.migrate_progress = progress_store
+    # WS (Фаза 7): привязываем хаб к стору, чтобы set_progress пушил прогресс переноса.
+    progress_store["__hub__"] = getattr(request.app.state, "ws_hub", None)
     set_progress(
         progress_store, torrent_id, "preparing",
         message=f"{'resume' if resume else 'start'} → {target_engine_id}",

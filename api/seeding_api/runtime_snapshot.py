@@ -30,8 +30,14 @@ def snapshot_interval() -> int:
         return 10
 
 
-async def snapshot_once(pool, session_factory) -> int:
-    """Один проход снимка. Возвращает число обновлённых строк."""
+async def snapshot_once(pool, session_factory, hub=None) -> int:
+    """Один проход снимка. Возвращает число обновлённых строк.
+
+    Если передан ``hub`` (WebSocket-хаб, Фаза 7), для раздач, на которые есть активная
+    подписка ``torrent:{id}``, публикуем дельту живых полей — чтобы деталь обновлялась
+    пушем, а не поллингом. Сборку дельты делаем только для отслеживаемых раздач, поэтому
+    на тысячах раздач это почти бесплатно.
+    """
     async with session_factory() as session:
         repo = TorrentRepository(session)
         rows = await repo.list_all()
@@ -48,6 +54,7 @@ async def snapshot_once(pool, session_factory) -> int:
         now = datetime.now(timezone.utc)
         updates: list[dict] = []
         status_updates: list[dict] = []
+        ws_deltas: dict[int, dict] = {}
         for r in rows:
             rt_map = results.get(r.engine_id)
             if rt_map is None:
@@ -99,13 +106,33 @@ async def snapshot_once(pool, session_factory) -> int:
                     }
                 )
 
+            if hub is not None and hub.has_subscribers(f"torrent:{r.id}"):
+                ws_deltas[r.id] = {
+                    "id": r.id,
+                    "up_rate": up,
+                    "down_rate": down,
+                    "peers": peers,
+                    "progress": prog,
+                    "uploaded_total": upl,
+                    "size": sz,
+                }
+
+        for su in status_updates:
+            if su["id"] in ws_deltas:
+                ws_deltas[su["id"]]["status"] = su["status"]
+
         await repo.bulk_update_runtime(updates)
         await repo.bulk_update_status(status_updates)
         await session.commit()
+
+        if hub is not None and ws_deltas:
+            for tid, payload in ws_deltas.items():
+                await hub.publish(f"torrent:{tid}", payload)
+
         return len(updates) + len(status_updates)
 
 
-async def runtime_snapshot_loop(pool, session_factory) -> None:
+async def runtime_snapshot_loop(pool, session_factory, hub=None) -> None:
     interval = snapshot_interval()
     if interval <= 0:
         log.info("runtime snapshot loop disabled (interval=0)")
@@ -115,12 +142,22 @@ async def runtime_snapshot_loop(pool, session_factory) -> None:
         while True:
             await asyncio.sleep(interval)
             try:
-                n = await snapshot_once(pool, session_factory)
+                n = await snapshot_once(pool, session_factory, hub=hub)
                 if n:
                     log.debug("runtime snapshot: updated %s rows", n)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 log.warning("runtime snapshot failed: %s", exc)
+
+            # WS-канал агрегатов сессии: публикуем только если кто-то смотрит панель.
+            if hub is not None and hub.has_subscribers("stats"):
+                try:
+                    by_engine = await pool.session_stats_all()
+                    await hub.publish("stats", {"stats": pool.aggregate_session_stats(by_engine)})
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("ws stats publish failed: %s", exc)
     except asyncio.CancelledError:
         raise

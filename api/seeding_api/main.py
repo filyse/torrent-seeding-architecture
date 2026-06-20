@@ -16,11 +16,10 @@ from seeding_api import audit, maintenance
 from seeding_api.alerts import alert_notifier_loop
 from seeding_api.arq_util import redis_settings_from_url
 from seeding_api.auth import require_auth
+from seeding_api.engine_pool import EnginePool
 from seeding_api.logconf import setup_logging
 from seeding_api.metrics import render_metrics
-from seeding_api.engine_pool import EnginePool
 from seeding_api.restore import maybe_restore_torrents_to_engine
-from seeding_api.runtime_snapshot import runtime_snapshot_loop
 from seeding_api.routers import audit as audit_router
 from seeding_api.routers import auth as auth_router
 from seeding_api.routers import backups as backups_router
@@ -33,6 +32,9 @@ from seeding_api.routers import session as session_router
 from seeding_api.routers import settings as settings_router
 from seeding_api.routers import stream as stream_router
 from seeding_api.routers import torrents as torrents_router
+from seeding_api.routers import ws as ws_router
+from seeding_api.runtime_snapshot import runtime_snapshot_loop
+from seeding_api.ws_hub import WsHub
 
 app = FastAPI(title="Torrent seeding API", version="0.2.0")
 
@@ -90,10 +92,11 @@ async def startup() -> None:
     redis_url = os.getenv("REDIS_URL")
     if redis_url:
         app.state.arq_pool = await create_pool(redis_settings_from_url(redis_url))
+    app.state.ws_hub = WsHub()
     app.state.engine_refresh_task = asyncio.create_task(_engine_refresh_loop(pool))
     app.state.alert_task = asyncio.create_task(alert_notifier_loop(app))
     app.state.runtime_snapshot_task = asyncio.create_task(
-        runtime_snapshot_loop(pool, app.state.session_factory)
+        runtime_snapshot_loop(pool, app.state.session_factory, hub=app.state.ws_hub)
     )
 
 
@@ -280,3 +283,5 @@ app.include_router(
 )
 # SSE: ключ проверяется внутри (query-параметр), т.к. EventSource не шлёт заголовки.
 app.include_router(stream_router.router, prefix="/api/v1")
+# WebSocket (Фаза 7, за флагом SEEDING_WS_ENABLED): авторизация внутри handshake.
+app.include_router(ws_router.router, prefix="/api/v1")

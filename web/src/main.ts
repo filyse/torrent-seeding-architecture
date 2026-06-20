@@ -1,5 +1,6 @@
 import "./style.css";
 import { WEB_VERSION } from "./version";
+import { onWsUnavailable, wsAvailable, wsSubscribe } from "./ws";
 
 const API = "/api/v1";
 
@@ -240,6 +241,8 @@ type DeleteTorrentChoice = "cancel" | "torrent_only" | "torrent_and_files";
 
 let listPollTimer: ReturnType<typeof setTimeout> | null = null;
 let listStream: EventSource | null = null;
+let listStatsUnsub: (() => void) | null = null;
+let listUnavailOff: (() => void) | null = null;
 let detailPollTimer: ReturnType<typeof setTimeout> | null = null;
 let settingsHealthTimer: ReturnType<typeof setTimeout> | null = null;
 let listAbort: AbortController | null = null;
@@ -413,6 +416,14 @@ function stopListStream(): void {
   if (listStream !== null) {
     listStream.close();
     listStream = null;
+  }
+  if (listStatsUnsub !== null) {
+    listStatsUnsub();
+    listStatsUnsub = null;
+  }
+  if (listUnavailOff !== null) {
+    listUnavailOff();
+    listUnavailOff = null;
   }
 }
 
@@ -1327,9 +1338,38 @@ function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLE
   wrap.append(label, track);
 
   let timer = 0;
+  let wsOff: (() => void) | null = null;
+  let finished = false;
   const stop = () => {
     if (timer) window.clearInterval(timer);
     timer = 0;
+    if (wsOff) {
+      wsOff();
+      wsOff = null;
+    }
+  };
+  // Отрисовка одного снимка прогресса (общая для WS-пуша и поллинга-страховки).
+  const render = (s: MigrateStatusOut) => {
+    const phase = s.phase || "migrating";
+    const pct = typeof s.progress === "number" ? Math.round(s.progress * 100) : null;
+    let text = MIGRATE_PHASE_LABELS[phase] ?? phase;
+    const tname: Record<string, string> = { media: "общий /media", http: "через оркестратор", direct: "напрямую" };
+    if (s.transport && phase !== "error" && phase !== "done") text += ` · ${tname[s.transport] ?? s.transport}`;
+    if (pct != null && (phase === "copying" || phase === "checking")) text += ` · ${pct}%`;
+    if (phase === "copying" && s.total) text += `  (${fmtBytes(s.copied)} / ${fmtBytes(s.total)})`;
+    if (phase === "copying" && s.speed) text += ` · ${fmtBytes(s.speed)}/с`;
+    if (phase === "copying" && s.eta) text += ` · ост. ${fmtEta(s.eta)}`;
+    if (phase === "error" && s.message) text += ` — ${s.message}`;
+    label.textContent = text;
+    const indeterminate = pct == null && phase !== "error" && phase !== "done";
+    wrap.classList.toggle("migrate-progress--indeterminate", indeterminate);
+    wrap.classList.toggle("migrate-progress--error", phase === "error");
+    fill.style.width = pct != null ? `${pct}%` : "100%";
+    if (s.active === false && !finished) {
+      finished = true;
+      stop();
+      window.setTimeout(() => onDone(), 1000);
+    }
   };
   const tick = async () => {
     if (!document.body.contains(wrap)) {
@@ -1337,32 +1377,23 @@ function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLE
       return;
     }
     try {
-      const s = await fetchJson<MigrateStatusOut>(`/torrents/${data.id}/migrate-status`);
-      const phase = s.phase || "migrating";
-      const pct = typeof s.progress === "number" ? Math.round(s.progress * 100) : null;
-      let text = MIGRATE_PHASE_LABELS[phase] ?? phase;
-      const tname: Record<string, string> = { media: "общий /media", http: "через оркестратор", direct: "напрямую" };
-      if (s.transport && phase !== "error" && phase !== "done") text += ` · ${tname[s.transport] ?? s.transport}`;
-      if (pct != null && (phase === "copying" || phase === "checking")) text += ` · ${pct}%`;
-      if (phase === "copying" && s.total) text += `  (${fmtBytes(s.copied)} / ${fmtBytes(s.total)})`;
-      if (phase === "copying" && s.speed) text += ` · ${fmtBytes(s.speed)}/с`;
-      if (phase === "copying" && s.eta) text += ` · ост. ${fmtEta(s.eta)}`;
-      if (phase === "error" && s.message) text += ` — ${s.message}`;
-      label.textContent = text;
-      const indeterminate = pct == null && phase !== "error" && phase !== "done";
-      wrap.classList.toggle("migrate-progress--indeterminate", indeterminate);
-      wrap.classList.toggle("migrate-progress--error", phase === "error");
-      fill.style.width = pct != null ? `${pct}%` : "100%";
-      if (!s.active) {
-        stop();
-        window.setTimeout(() => onDone(), 1000);
-      }
+      render(await fetchJson<MigrateStatusOut>(`/torrents/${data.id}/migrate-status`));
     } catch {
       // транзиентная ошибка опроса — попробуем на следующем тике
     }
   };
+  // WS (Фаза 7): мгновенные пуши прогресса; поллинг остаётся страховкой (реже при живом WS).
+  if (wsAvailable()) {
+    wsOff = wsSubscribe(`migrate:${data.id}`, (msg) => {
+      if (!document.body.contains(wrap)) {
+        stop();
+        return;
+      }
+      render(msg.data as MigrateStatusOut);
+    });
+  }
   void tick();
-  timer = window.setInterval(() => void tick(), 1000);
+  timer = window.setInterval(() => void tick(), wsAvailable() ? 4000 : 1000);
   return wrap;
 }
 
@@ -1880,9 +1911,14 @@ function scheduleListPoll(
   }, ms);
 }
 
-// Push-обновления через SSE. При успехе вытесняют поллинг; при ошибке — откат на поллинг.
-function startListStream(_refs: ListHostRefs, sessionBarHost: HTMLElement, onFallback: () => void): void {
-  stopListStream();
+// Живая панель сверху. Приоритет — WebSocket (Фаза 7); если фича выключена/недоступна —
+// откат на SSE; при ошибке SSE — откат на таймерный поллинг.
+function applySessionStats(sessionBarHost: HTMLElement, stats?: SessionStats | null): void {
+  if (parseRoute().view !== "list") return;
+  if (stats) sessionBarHost.replaceChildren(mountSessionBar(stats));
+}
+
+function startListSse(sessionBarHost: HTMLElement, onFallback: () => void): void {
   let url = `${API}/stream?interval=3`;
   try {
     const key = localStorage.getItem("seedingApiKey");
@@ -1904,7 +1940,7 @@ function startListStream(_refs: ListHostRefs, sessionBarHost: HTMLElement, onFal
       // Поток отдаёт только агрегаты для живой панели сверху. Список грузится постранично
       // отдельным поллингом (см. scheduleListPoll), поэтому здесь его НЕ трогаем.
       const data = JSON.parse((ev as MessageEvent).data) as { stats: SessionStats };
-      if (data.stats) sessionBarHost.replaceChildren(mountSessionBar(data.stats));
+      applySessionStats(sessionBarHost, data.stats);
     } catch {
       /* ignore malformed frame */
     }
@@ -1916,6 +1952,27 @@ function startListStream(_refs: ListHostRefs, sessionBarHost: HTMLElement, onFal
       onFallback();
     }
   };
+}
+
+function startListStream(_refs: ListHostRefs, sessionBarHost: HTMLElement, onFallback: () => void): void {
+  stopListStream();
+  if (wsAvailable()) {
+    listStatsUnsub = wsSubscribe("stats", (msg) => {
+      if (parseRoute().view !== "list") return;
+      const data = msg.data as { stats?: SessionStats } | undefined;
+      applySessionStats(sessionBarHost, data?.stats);
+    });
+    // Если WS окажется выключен/недоступен — переключаемся на SSE-поток.
+    listUnavailOff = onWsUnavailable(() => {
+      if (listStatsUnsub !== null) {
+        listStatsUnsub();
+        listStatsUnsub = null;
+      }
+      if (parseRoute().view === "list") startListSse(sessionBarHost, onFallback);
+    });
+    return;
+  }
+  startListSse(sessionBarHost, onFallback);
 }
 
 function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) => void): HTMLElement {
