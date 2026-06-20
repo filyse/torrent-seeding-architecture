@@ -667,6 +667,29 @@ body.layout-wide #app {
 /* ── Диалог «Обновить торрент» ─────────────────────────────────────────── */
 .update-panel {
   width: min(640px, 94vw);
+  max-width: min(640px, 94vw);
+}
+.update-intro {
+  margin: 0 0 0.9rem;
+  line-height: 1.45;
+}
+.update-panel input[type="file"] {
+  font-size: 0.85rem;
+  max-width: 100%;
+}
+
+.login-creds[hidden] {
+  display: none;
+}
+
+.add-submit {
+  width: 100%;
+}
+
+.ttable__date {
+  white-space: nowrap;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 .update-rows {
   display: flex;

@@ -553,6 +553,8 @@ const ICON_PATHS: Record<string, string> = {
   grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
   table:
     '<rect x="3" y="3" width="18" height="18" rx="1"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/>',
+  upload:
+    '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
   refresh:
     '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   settings:
@@ -637,6 +639,20 @@ function fmtRatio(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v) || v < 0) return "—";
   if (v >= 1000) return "∞";
   return v.toFixed(2);
+}
+
+function fmtAddedCell(iso: string | null | undefined): Node {
+  if (!iso) return document.createTextNode("—");
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return document.createTextNode("—");
+  const short = d.toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return el("span", { className: "ttable__date", title: d.toLocaleString("ru-RU") }, [short]);
 }
 
 function fmtEta(seconds: number | null | undefined): string {
@@ -1841,12 +1857,11 @@ function tableColumns(): TableColumn[] {
       },
     },
     { key: "uploaded", label: "Отдано", sort: "uploaded", num: true, cell: (t) => fmtBytes(t.runtime?.total_uploaded) },
-    { key: "ratio", label: "Ратио", sort: "ratio", num: true, cell: (t) => fmtRatio(t.runtime?.ratio) },
     { key: "down", label: "↓", sort: "down", num: true, cell: (t) => fmtRate(t.runtime?.download_rate) },
     { key: "up", label: "↑", sort: "up", num: true, cell: (t) => fmtRate(t.runtime?.upload_rate) },
     { key: "seeds", label: "Сиды", num: true, cell: (t) => String(t.runtime?.num_seeds ?? 0) },
     { key: "peers", label: "Пиры", sort: "peers", num: true, cell: (t) => String(t.runtime?.peers ?? 0) },
-    { key: "eta", label: "Осталось", num: true, cell: (t) => fmtEta(t.runtime?.eta) },
+    { key: "added", label: "Добавлен", sort: "added", cell: (t) => fmtAddedCell(t.created_at) },
     { key: "label", label: "Метка", cell: (t) => (t.label && t.label.trim() ? t.label : "—") },
   ];
 }
@@ -2185,16 +2200,14 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   const body = el("div", { className: "panel__body" });
 
   const tabs = el("div", { className: "tabs" });
-  const tabMagnet = el("button", { type: "button", className: "tab tab--active", "data-tab": "magnet" }, [
-    "Magnet",
-  ]);
+  const tabFile = el("button", { type: "button", className: "tab tab--active", "data-tab": "file" }, ["Файл"]);
+  const tabMagnet = el("button", { type: "button", className: "tab", "data-tab": "magnet" }, ["Magnet"]);
   const tabUrl = el("button", { type: "button", className: "tab", "data-tab": "url" }, ["URL"]);
-  const tabFile = el("button", { type: "button", className: "tab", "data-tab": "file" }, ["Файл"]);
-  tabs.append(tabMagnet, tabUrl, tabFile);
+  tabs.append(tabFile, tabMagnet, tabUrl);
 
-  const magnetPanel = el("div", { className: "tab-panel", "data-panel": "magnet" });
+  const magnetPanel = el("div", { className: "tab-panel", "data-panel": "magnet", hidden: "" });
   const urlPanel = el("div", { className: "tab-panel", "data-panel": "url", hidden: "" });
-  const filePanel = el("div", { className: "tab-panel", "data-panel": "file", hidden: "" });
+  const filePanel = el("div", { className: "tab-panel", "data-panel": "file" });
 
   const magnetInput = el("input", {
     type: "text",
@@ -2212,12 +2225,12 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     value: "",
   }) as HTMLInputElement;
   const labelInput = el("input", { type: "text", placeholder: "Метка (необязательно)" }) as HTMLInputElement;
-  const nameMagnet = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
-  const nameUrl = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
+  const nameInput = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
   const torrentFile = el("input", { type: "file", accept: ".torrent", multiple: "" }) as HTMLInputElement;
-  const nameFile = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
 
+  let activeTab: "magnet" | "url" | "file" = "file";
   const switchTab = (name: "magnet" | "url" | "file") => {
+    activeTab = name;
     tabMagnet.classList.toggle("tab--active", name === "magnet");
     tabUrl.classList.toggle("tab--active", name === "url");
     tabFile.classList.toggle("tab--active", name === "file");
@@ -2229,48 +2242,34 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   tabUrl.addEventListener("click", () => switchTab("url"));
   tabFile.addEventListener("click", () => switchTab("file"));
 
-  magnetPanel.append(
-    field("Magnet-ссылка", magnetInput),
-    field("Название", nameMagnet),
-    el("div", { className: "btn-row" }, [
-      el("button", { type: "button", className: "btn btn--primary", id: "btn-add-magnet" }, ["Добавить"]),
-    ]),
-  );
-
-  urlPanel.append(
-    field("URL .torrent", urlInput),
-    field("Название", nameUrl),
-    el("div", { className: "btn-row" }, [
-      el("button", { type: "button", className: "btn btn--primary", id: "btn-add-url" }, ["Загрузить по URL"]),
-    ]),
-  );
-
-  filePanel.append(
-    field("Файлы .torrent", torrentFile, "Можно выбрать сразу несколько файлов"),
-    field("Название", nameFile, "Используется только при загрузке одного файла"),
-    el("div", { className: "btn-row" }, [
-      el("button", { type: "button", className: "btn btn--primary", id: "btn-add-file" }, ["Загрузить"]),
-    ]),
-  );
+  magnetPanel.append(field("Magnet-ссылка", magnetInput));
+  urlPanel.append(field("Ссылка на .torrent", urlInput));
+  filePanel.append(field("Файлы .torrent", torrentFile, "Можно выбрать сразу несколько файлов"));
 
   const advanced = el("details", { className: "advanced" });
   advanced.append(
-    el("summary", {}, ["Дополнительно: свой путь"]),
+    el("summary", {}, ["Дополнительно"]),
+    field("Название", nameInput, "Если пусто — берётся из торрента"),
+    field("Метка", labelInput),
     field(
-      "Папка на сервере",
+      "Свой путь",
       customPathInput,
       "Если задано — переопределяет выбор движка. Обычно /data/b1 для движка b1.",
     ),
   );
 
+  const addBtn = el("button", { type: "button", className: "btn btn--primary add-submit" }, [
+    "Добавить",
+  ]) as HTMLButtonElement;
+
   body.append(
-    field("Движок", engineSelect, "Контент сохраняется в хранилище выбранного движка"),
-    advanced,
-    field("Метка", labelInput),
     tabs,
+    filePanel,
     magnetPanel,
     urlPanel,
-    filePanel,
+    field("Движок", engineSelect, "Куда сохранять — хранилище выбранного движка"),
+    advanced,
+    el("div", { className: "btn-row" }, [addBtn]),
   );
 
   void (async () => {
@@ -2317,7 +2316,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     return true;
   };
 
-  magnetPanel.querySelector("#btn-add-magnet")?.addEventListener("click", async () => {
+  const doMagnet = async () => {
     const magnet_uri = magnetInput.value.trim();
     if (!magnet_uri) {
       showToast("Укажите magnet", true);
@@ -2331,20 +2330,20 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
         body: JSON.stringify({
           magnet_uri,
           ...target,
-          display_name: nameMagnet.value.trim(),
+          display_name: nameInput.value.trim(),
           label: labelInput.value.trim(),
         }),
       });
       magnetInput.value = "";
-      nameMagnet.value = "";
+      nameInput.value = "";
       showToast("Торрент добавлен");
       onAdded(created);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), true);
     }
-  });
+  };
 
-  urlPanel.querySelector("#btn-add-url")?.addEventListener("click", async () => {
+  const doUrl = async () => {
     const url = urlInput.value.trim();
     if (!url) {
       showToast("Укажите URL", true);
@@ -2358,20 +2357,20 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
         body: JSON.stringify({
           url,
           ...target,
-          display_name: nameUrl.value.trim(),
+          display_name: nameInput.value.trim(),
           label: labelInput.value.trim(),
         }),
       });
       urlInput.value = "";
-      nameUrl.value = "";
+      nameInput.value = "";
       showToast("Торрент загружен по URL");
       onAdded(created);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), true);
     }
-  });
+  };
 
-  filePanel.querySelector("#btn-add-file")?.addEventListener("click", async () => {
+  const doFile = async () => {
     const files = torrentFile.files ? Array.from(torrentFile.files) : [];
     if (files.length === 0) {
       showToast("Выберите файл(ы)", true);
@@ -2382,13 +2381,13 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
         const body = new FormData();
         body.set("torrent_file", files[0], files[0].name);
         if (!applyTargetToForm(body)) return;
-        body.set("display_name", nameFile.value.trim());
+        body.set("display_name", nameInput.value.trim());
         body.set("label", labelInput.value.trim());
         const res = await fetch(`${API}/torrents/upload`, { method: "POST", headers: apiHeaders(false), body });
         await throwIfNotOk(res);
         const created = (await res.json()) as TorrentOut;
         torrentFile.value = "";
-        nameFile.value = "";
+        nameInput.value = "";
         showToast("Торрент загружен");
         onAdded(created);
         return;
@@ -2412,6 +2411,12 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), true);
     }
+  };
+
+  addBtn.addEventListener("click", () => {
+    if (activeTab === "magnet") void doMagnet();
+    else if (activeTab === "url") void doUrl();
+    else void doFile();
   });
 
   panel.append(body);
@@ -2615,8 +2620,10 @@ function showUpdateTorrentDialog(onDone: () => void): void {
   );
   closeBtn.addEventListener("click", close);
   panel.append(el("div", { className: "panel__head panel__head--with-action" }, ["Обновить торрент", closeBtn]));
-  panel.append(
-    el("p", { className: "field__hint" }, [
+  const body = el("div", { className: "panel__body" });
+  panel.append(body);
+  body.append(
+    el("p", { className: "field__hint update-intro" }, [
       "Загрузите новый .torrent (например, сезон с новой серией). Найду старую раздачу по имени " +
         "и заменю её — движок, путь и уже скачанное сохранятся, докачается только новое. " +
         "Если совпадение не найдено — выберите раздачу вручную.",
@@ -2624,16 +2631,16 @@ function showUpdateTorrentDialog(onDone: () => void): void {
   );
 
   const fileInput = el("input", { type: "file", accept: ".torrent", multiple: "" }) as HTMLInputElement;
-  panel.append(field("Новые .torrent-файлы", fileInput));
+  body.append(field("Новые .torrent-файлы", fileInput));
 
   const rowsHost = el("div", { className: "update-rows" });
-  panel.append(rowsHost);
+  body.append(rowsHost);
 
   const replaceBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, [
     "Заменить",
   ]) as HTMLButtonElement;
   replaceBtn.disabled = true;
-  panel.append(el("div", { className: "update-footer" }, [replaceBtn]));
+  body.append(el("div", { className: "update-footer" }, [replaceBtn]));
 
   let rows: { file: File; getTargetId: () => number | null }[] = [];
   const syncReplaceBtn = () => {
@@ -3026,7 +3033,7 @@ function mountListShell(root: HTMLElement): void {
   addTorrentBtn.addEventListener("click", () => showAddTorrentDialog("/data/b1", onAdded));
 
   const updateTorrentBtn = el("button", { type: "button", className: "btn btn--sm" }, [
-    icon("refresh"),
+    icon("upload"),
     "Обновить торрент",
   ]);
   updateTorrentBtn.addEventListener("click", () => showUpdateTorrentDialog(() => refresh({ afterAdd: true })));
@@ -4129,15 +4136,22 @@ function showLoginDialog(): void {
     value: getApiKey(),
   }) as HTMLInputElement;
   const keyWrap = el("div", { className: "login-keywrap", hidden: "" }, [field("API-ключ", keyInput)]);
+  const credsWrap = el("div", { className: "login-creds" }, [
+    field("Пользователь", userInput),
+    field("Пароль", passInput),
+  ]);
+  const subText = el("p", { className: "login-sub" }, ["Войдите по имени пользователя и паролю."]);
   const toggleKey = el("button", { type: "button", className: "btn btn--ghost login-alt" }, [
     "Войти по API-ключу",
   ]);
   toggleKey.addEventListener("click", () => {
     const show = keyWrap.hasAttribute("hidden");
-    if (show) keyWrap.removeAttribute("hidden");
-    else keyWrap.setAttribute("hidden", "");
-    toggleKey.textContent = show ? "Скрыть API-ключ" : "Войти по API-ключу";
+    keyWrap.toggleAttribute("hidden", !show);
+    credsWrap.toggleAttribute("hidden", show);
+    toggleKey.textContent = show ? "Войти по логину и паролю" : "Войти по API-ключу";
+    subText.textContent = show ? "Войдите по API-ключу." : "Войдите по имени пользователя и паролю.";
     if (show) keyInput.focus();
+    else userInput.focus();
   });
 
   const errLine = el("p", { className: "login-error", hidden: "" });
@@ -4193,11 +4207,10 @@ function showLoginDialog(): void {
   dialog.append(
     el("div", { className: "login-head" }, [
       el("h2", { className: "modal-title" }, ["Вход"]),
-      el("p", { className: "login-sub" }, ["Войдите по имени пользователя и паролю."]),
+      subText,
     ]),
     el("div", { className: "login-form" }, [
-      field("Пользователь", userInput),
-      field("Пароль", passInput),
+      credsWrap,
       keyWrap,
       errLine,
       submit,
