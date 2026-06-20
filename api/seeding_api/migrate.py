@@ -38,7 +38,11 @@ _SPEED_WINDOW = 1.0  # сек: окно усреднения скорости
 # (сотни раз/с), а прогресс-бару столько не нужно. Шлём по WS не чаще раза в N секунд, но
 # смену фазы и финал (done/error) — всегда сразу.
 _ws_last_push: dict[int, tuple[float, str]] = {}  # torrent_id -> (время, phase)
-_WS_PUSH_MIN_INTERVAL = 0.7
+_WS_PUSH_MIN_INTERVAL = 0.23  # ~3× чаще для плавного прогресс-бара
+
+# Как часто опрашиваем прогресс копирования у движка-приёмника (media/direct). Это потолок
+# частоты обновления GUI для этих транспортов — держим ~3× чаще секунды для плавности.
+_COPY_POLL_INTERVAL = 0.33
 
 
 def _update_speed(torrent_id: int, copied: int | None, now: float) -> float | None:
@@ -207,7 +211,7 @@ async def _run_import_with_progress(
             set_progress(store, torrent_id, phase, progress=pct, copied=copied, total=total)
             await on_progress(phase, copied, total)
         try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
+            await asyncio.wait_for(asyncio.shield(task), timeout=_COPY_POLL_INTERVAL)
         except asyncio.TimeoutError:
             continue
         except Exception:  # noqa: BLE001 — пробросим ниже через await task
