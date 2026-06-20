@@ -34,6 +34,12 @@ _speed_anchor: dict[int, tuple[float, int]] = {}  # torrent_id -> (время, c
 _speed_last: dict[int, float] = {}  # torrent_id -> Б/с (последняя оценка)
 _SPEED_WINDOW = 1.0  # сек: окно усреднения скорости
 
+# Троттлинг WS-пуша прогресса переноса: http-транспорт зовёт set_progress на каждый чанк
+# (сотни раз/с), а прогресс-бару столько не нужно. Шлём по WS не чаще раза в N секунд, но
+# смену фазы и финал (done/error) — всегда сразу.
+_ws_last_push: dict[int, tuple[float, str]] = {}  # torrent_id -> (время, phase)
+_WS_PUSH_MIN_INTERVAL = 0.7
+
 
 def _update_speed(torrent_id: int, copied: int | None, now: float) -> float | None:
     """Оценка скорости (Б/с) по дельте copied за окно ≥1с; устойчива к сбросу счётчика."""
@@ -55,6 +61,7 @@ def _update_speed(torrent_id: int, copied: int | None, now: float) -> float | No
 def _clear_speed(torrent_id: int) -> None:
     _speed_anchor.pop(torrent_id, None)
     _speed_last.pop(torrent_id, None)
+    _ws_last_push.pop(torrent_id, None)
 
 
 def set_progress(
@@ -91,12 +98,22 @@ def set_progress(
     }
     store[torrent_id] = snap
     # WS (Фаза 7): пушим прогресс переноса подписчикам migrate:{id}, если хаб привязан к стору.
+    # Троттлим проценты (≤1/_WS_PUSH_MIN_INTERVAL), но смену фазы и финал шлём всегда сразу.
     hub = store.get("__hub__")
     if hub is not None:
-        try:
-            hub.publish_sync(f"migrate:{torrent_id}", {"id": torrent_id, "active": phase not in ("done", "error"), **snap})
-        except Exception:  # noqa: BLE001 — пуш не должен ломать перенос
-            pass
+        terminal = phase in ("done", "error")
+        last = _ws_last_push.get(torrent_id)
+        phase_changed = last is None or last[1] != phase
+        due = last is None or (now - last[0]) >= _WS_PUSH_MIN_INTERVAL
+        if terminal or phase_changed or due:
+            _ws_last_push[torrent_id] = (now, phase)
+            try:
+                hub.publish_sync(
+                    f"migrate:{torrent_id}",
+                    {"id": torrent_id, "active": not terminal, **snap},
+                )
+            except Exception:  # noqa: BLE001 — пуш не должен ломать перенос
+                pass
 
 
 _CHECKING_STATES = {
