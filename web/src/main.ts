@@ -1345,6 +1345,7 @@ function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLE
   let wsOff: (() => void) | null = null;
   let finished = false;
   let lastSpeed: number | null = null;  // грэйс: держим последнюю скорость при кратком провале до 0
+  let lastWsMs = 0;  // время последнего WS-пуша: пока свежий — частый поллинг-бэкстоп отступает
   const stop = () => {
     if (timer) window.clearInterval(timer);
     timer = 0;
@@ -1391,24 +1392,27 @@ function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLE
       stop();
       return;
     }
+    // Пропускаем тик, если только что пришёл WS-пуш — тогда WS остаётся основным источником,
+    // а частый поллинг служит гарантией обновления (3×), если WS-канал молчит.
+    if (Date.now() - lastWsMs < 800) return;
     try {
       render(await fetchJson<MigrateStatusOut>(`/torrents/${data.id}/migrate-status`));
     } catch {
       // транзиентная ошибка опроса — попробуем на следующем тике
     }
   };
-  // WS (Фаза 7): мгновенные пуши прогресса; поллинг остаётся страховкой (реже при живом WS).
-  if (wsAvailable()) {
-    wsOff = wsSubscribe(`migrate:${data.id}`, (msg) => {
-      if (!document.body.contains(wrap)) {
-        stop();
-        return;
-      }
-      render(msg.data as MigrateStatusOut);
-    });
-  }
+  // WS (Фаза 7): мгновенные пуши прогресса. Поллинг ниже — частый бэкстоп (≈3×/с), который
+  // сам отступает, пока WS свежий, и подхватывает, если пуши не доходят.
+  wsOff = wsSubscribe(`migrate:${data.id}`, (msg) => {
+    lastWsMs = Date.now();
+    if (!document.body.contains(wrap)) {
+      stop();
+      return;
+    }
+    render(msg.data as MigrateStatusOut);
+  });
   void tick();
-  timer = window.setInterval(() => void tick(), wsAvailable() ? 4000 : 1000);
+  timer = window.setInterval(() => void tick(), 333);
   return wrap;
 }
 
