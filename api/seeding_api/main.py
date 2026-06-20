@@ -35,6 +35,7 @@ from seeding_api.routers import torrents as torrents_router
 from seeding_api.routers import ws as ws_router
 from seeding_api.runtime_snapshot import runtime_snapshot_loop
 from seeding_api.ws_hub import WsHub
+from seeding_api.ws_pollers import ws_pollers_loop
 
 app = FastAPI(title="Torrent seeding API", version="0.2.0")
 
@@ -98,11 +99,12 @@ async def startup() -> None:
     app.state.runtime_snapshot_task = asyncio.create_task(
         runtime_snapshot_loop(pool, app.state.session_factory, hub=app.state.ws_hub)
     )
+    app.state.ws_pollers_task = asyncio.create_task(ws_pollers_loop(app))
 
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    for attr in ("engine_refresh_task", "alert_task", "runtime_snapshot_task"):
+    for attr in ("engine_refresh_task", "alert_task", "runtime_snapshot_task", "ws_pollers_task"):
         task = getattr(app.state, attr, None)
         if task is not None:
             task.cancel()

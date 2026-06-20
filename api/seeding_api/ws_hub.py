@@ -155,6 +155,10 @@ class WsHub:
                 return True
         return False
 
+    def channels_with_prefix(self, prefix: str) -> list[str]:
+        """Список каналов с данным префиксом, у которых есть подписчики (для адресных пуллеров)."""
+        return [ch for ch, subs in self._subs.items() if subs and ch.startswith(prefix)]
+
     @property
     def metrics(self) -> dict[str, int]:
         return {"clients": len(self.clients), "channels": len(self._subs)}

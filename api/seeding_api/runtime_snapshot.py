@@ -106,16 +106,10 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                     }
                 )
 
+            # WS torrent:{id} — единый формат с адресным пуллером (ws_pollers): сырой handle
+            # движка в `runtime` + согласованный `status`. Деталь применяет это к живым полям.
             if hub is not None and hub.has_subscribers(f"torrent:{r.id}"):
-                ws_deltas[r.id] = {
-                    "id": r.id,
-                    "up_rate": up,
-                    "down_rate": down,
-                    "peers": peers,
-                    "progress": prog,
-                    "uploaded_total": upl,
-                    "size": sz,
-                }
+                ws_deltas[r.id] = {"id": r.id, "runtime": h, "status": r.status}
 
         for su in status_updates:
             if su["id"] in ws_deltas:

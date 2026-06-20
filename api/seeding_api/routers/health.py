@@ -22,11 +22,11 @@ def _ms(t0: float) -> float:
     return round((time.perf_counter() - t0) * 1000, 1)
 
 
-async def _check_database(request: Request) -> dict:
+async def _check_database(app) -> dict:
     comp = {"id": "database", "name": "PostgreSQL", "kind": "core", "status": "down"}
     t0 = time.perf_counter()
     try:
-        factory = request.app.state.session_factory
+        factory = app.state.session_factory
         async with factory() as s:
             await s.execute(text("SELECT 1"))
         comp.update(status="ok", latency_ms=_ms(t0), detail="Подключение в норме")
@@ -35,10 +35,10 @@ async def _check_database(request: Request) -> dict:
     return comp
 
 
-async def _check_redis_and_queue(request: Request) -> list[dict]:
+async def _check_redis_and_queue(app) -> list[dict]:
     redis = {"id": "redis", "name": "Redis", "kind": "core", "status": "down"}
     queue = {"id": "queue", "name": "Очередь (ARQ)", "kind": "core", "status": "down"}
-    arq = getattr(request.app.state, "arq_pool", None)
+    arq = getattr(app.state, "arq_pool", None)
     if arq is None:
         redis.update(status="warn", detail="REDIS_URL не задан")
         queue.update(status="warn", detail="Очередь не настроена")
@@ -136,9 +136,10 @@ async def _check_engine(pool: EnginePool, spec) -> dict:
     return comp
 
 
-@router.get("/health/full")
-async def health_full(request: Request):
-    pool: EnginePool = request.app.state.engine_pool
+async def build_health_full(app) -> dict:
+    """Сводный health всех компонентов. Вынесено из роута, чтобы переиспользовать в WS-пуллере
+    (канал ``engines``)."""
+    pool: EnginePool = app.state.engine_pool
     from seeding_api.buildinfo import version_info
 
     api_comp = {
@@ -150,8 +151,8 @@ async def health_full(request: Request):
         **version_info(),
     }
     db_comp, redisqueue, engine_comps = await asyncio.gather(
-        _check_database(request),
-        _check_redis_and_queue(request),
+        _check_database(app),
+        _check_redis_and_queue(app),
         asyncio.gather(*[_check_engine(pool, s) for s in pool.specs]),
     )
     components = [api_comp, db_comp, *redisqueue, *engine_comps]
@@ -174,6 +175,11 @@ async def health_full(request: Request):
         },
         "components": components,
     }
+
+
+@router.get("/health/full")
+async def health_full(request: Request):
+    return await build_health_full(request.app)
 
 
 @router.get("/alerts")

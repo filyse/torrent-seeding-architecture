@@ -245,8 +245,10 @@ let listStatsUnsub: (() => void) | null = null;
 let listUnavailOff: (() => void) | null = null;
 let detailPollTimer: ReturnType<typeof setTimeout> | null = null;
 let settingsHealthTimer: ReturnType<typeof setTimeout> | null = null;
+let settingsEnginesUnsub: (() => void) | null = null;
 let listAbort: AbortController | null = null;
 let detailAbort: AbortController | null = null;
+let detailWsOff: (() => void) | null = null;
 let listLoadGeneration = 0;
 let lastListItems: TorrentOut[] = [];
 const PAGE_SIZES = [20, 50, 100] as const;
@@ -441,10 +443,14 @@ function clearViewPolls(): void {
     clearTimeout(settingsHealthTimer);
     settingsHealthTimer = null;
   }
+  settingsEnginesUnsub?.();
+  settingsEnginesUnsub = null;
   listAbort?.abort();
   listAbort = null;
   detailAbort?.abort();
   detailAbort = null;
+  detailWsOff?.();
+  detailWsOff = null;
 }
 
 function apiHeaders(json = true): HeadersInit {
@@ -1113,6 +1119,9 @@ function pickListPollMs(items: TorrentOut[]): number {
 
 function pickDetailPollMs(data: TorrentDetailOut): number {
   if (document.hidden) return 0;
+  // При живом WS живые поля приходят пушем torrent:{id}; полную пересборку (пиры/файлы/трекеры)
+  // оставляем редким бэкстопом — реже моргает и меньше нагрузка.
+  if (wsAvailable()) return 10_000;
   if (isActivelyDownloading(data)) return POLL_MS.active;
   return POLL_MS.idle;
 }
@@ -2830,18 +2839,19 @@ async function loadDetail(
     const pct = Math.round(progress * 1000) / 10;
 
     if (container.childElementCount > 0) saveDetailSpoilerStateFromDom(container, id);
+    // Пересобираем дерево — снимаем прежнюю WS-подписку на эту раздачу (заведём новую ниже).
+    detailWsOff?.();
+    detailWsOff = null;
     container.replaceChildren();
     const hero = el("section", { className: "detail-hero panel" });
     const body = el("div", { className: "panel__body" });
     hero.append(body);
 
-    const bar = el("div", { className: "progress" });
-    bar.append(
-      el("div", {
-        className: `progress__bar${pct >= 100 ? " progress__bar--complete" : ""}`,
-        style: `width:${pct}%`,
-      }),
-    );
+    const barFill = el("div", {
+      className: `progress__bar${pct >= 100 ? " progress__bar--complete" : ""}`,
+      style: `width:${pct}%`,
+    });
+    const bar = el("div", { className: "progress" }, [barFill]);
 
     const backRefresh = () => loadDetail(id, container, metaEl, scheduleNext);
     const st = effectiveStatus(data);
@@ -2907,10 +2917,8 @@ async function loadDetail(
       titleWrap.append(editBtn);
     }
 
-    const head = el("div", { className: "detail-head" }, [
-      el("span", { className: badgeClass(st) }, [displayStatusLabel(data)]),
-      titleWrap,
-    ]);
+    const badgeEl = el("span", { className: badgeClass(st) }, [displayStatusLabel(data)]);
+    const head = el("div", { className: "detail-head" }, [badgeEl, titleWrap]);
 
     // Статичные факты — компактной подстрокой, без отдельных боксов.
     const subParts = [`#${data.id}`, `движок ${data.engine_id}`, fmtBytes(data.runtime?.size)];
@@ -2921,8 +2929,9 @@ async function loadDetail(
     }
     const sub = el("div", { className: "detail-sub" }, [subParts.join("  ·  ")]);
 
+    const pctEl = el("span", { className: "detail-progress__pct" }, [fmtPercent(progress)]);
     const progressWrap = el("div", { className: "detail-progress" });
-    progressWrap.append(bar, el("span", { className: "detail-progress__pct" }, [fmtPercent(progress)]));
+    progressWrap.append(bar, pctEl);
     if (st === "downloading") {
       const eta = fmtEta(data.runtime?.eta);
       if (eta !== "—") progressWrap.append(el("span", { className: "detail-progress__eta" }, [`ETA ${eta}`]));
@@ -2930,12 +2939,11 @@ async function loadDetail(
 
     // Живые показатели — чипами; «скачано» только если реально качали.
     const chips = el("div", { className: "detail-chips" });
-    chips.append(
-      statChip(`↓ ${fmtRate(data.runtime?.download_rate)}`, "Скачивание", "dl"),
-      statChip(`↑ ${fmtRate(data.runtime?.upload_rate)}`, "Отдача", "ul"),
-      statChip(`${data.runtime?.num_seeds ?? 0} / ${data.runtime?.peers ?? 0}`, "Сиды / пиры"),
-      statChip(fmtBytes(data.runtime?.total_uploaded), "Отдано всего"),
-    );
+    const dlChip = statChip(`↓ ${fmtRate(data.runtime?.download_rate)}`, "Скачивание", "dl");
+    const ulChip = statChip(`↑ ${fmtRate(data.runtime?.upload_rate)}`, "Отдача", "ul");
+    const peersChip = statChip(`${data.runtime?.num_seeds ?? 0} / ${data.runtime?.peers ?? 0}`, "Сиды / пиры");
+    const uploadedChip = statChip(fmtBytes(data.runtime?.total_uploaded), "Отдано всего");
+    chips.append(dlChip, ulChip, peersChip, uploadedChip);
     const dl = data.runtime?.downloaded ?? 0;
     if (dl > 0) chips.append(statChip(fmtBytes(dl), "Скачано всего"));
     if (data.runtime?.private === true) chips.append(statChip("Приватная", "DHT/PEX/LSD выключены"));
@@ -3097,6 +3105,36 @@ async function loadDetail(
       metaBlock,
     );
     container.append(hero);
+
+    // WS (Фаза 7, WS-4): живые поля раздачи приходят пушем torrent:{id} (бэкенд — адресный
+    // пуллер ws_pollers). Обновляем узлы на месте, без пересборки дерева. Полная пересборка
+    // (структура: пиры/файлы/трекеры) остаётся редким бэкстопом-поллингом.
+    const setChip = (chip: HTMLElement, text: string) => {
+      const v = chip.querySelector(".stat-chip__value");
+      if (v) v.textContent = text;
+    };
+    const applyLive = (rt: RuntimeOut | null | undefined, status?: string) => {
+      if (!document.body.contains(badgeEl)) return;
+      data.runtime = rt ?? null;
+      if (status) data.status = status;
+      const stLive = effectiveStatus(data);
+      badgeEl.className = badgeClass(stLive);
+      badgeEl.textContent = displayStatusLabel(data);
+      const prog = data.runtime?.progress ?? 0;
+      const pctNum = Math.round(prog * 1000) / 10;
+      barFill.className = `progress__bar${pctNum >= 100 ? " progress__bar--complete" : ""}`;
+      barFill.style.width = `${pctNum}%`;
+      pctEl.textContent = fmtPercent(prog);
+      setChip(dlChip, `↓ ${fmtRate(data.runtime?.download_rate)}`);
+      setChip(ulChip, `↑ ${fmtRate(data.runtime?.upload_rate)}`);
+      setChip(peersChip, `${data.runtime?.num_seeds ?? 0} / ${data.runtime?.peers ?? 0}`);
+      setChip(uploadedChip, fmtBytes(data.runtime?.total_uploaded));
+    };
+    detailWsOff = wsSubscribe(`torrent:${id}`, (msg) => {
+      const d = msg.data as { runtime?: RuntimeOut | null; status?: string } | undefined;
+      if (d && !migrating) applyLive(d.runtime, d.status);
+    });
+
     scheduleNext?.(data);
   } catch (e) {
     if (signal.aborted) return;
@@ -3536,13 +3574,21 @@ function mountHealthPanel(): HTMLElement {
       refreshBtn.classList.remove("is-spinning");
       if (settingsHealthTimer !== null) clearTimeout(settingsHealthTimer);
       if (parseRoute().view === "settings" && !document.hidden) {
-        settingsHealthTimer = setTimeout(() => void tick(), 5000);
+        // При живом WS канал engines пушит health сам — поллинг реже (бэкстоп).
+        settingsHealthTimer = setTimeout(() => void tick(), wsAvailable() ? 20000 : 5000);
       }
     }
   };
 
   refreshBtn.addEventListener("click", () => void tick(true));
   void ensureWebBuildTime().then(() => void tick());
+  // WS (Фаза 7, WS-4): health движков/ядра пушем через канал engines (бэкенд — ws_pollers).
+  settingsEnginesUnsub?.();
+  settingsEnginesUnsub = wsSubscribe("engines", (msg) => {
+    if (parseRoute().view !== "settings") return;
+    const d = msg.data as HealthFull | undefined;
+    if (d && Array.isArray(d.components)) paint(d);
+  });
   return panel;
 }
 
@@ -3994,14 +4040,38 @@ type BackupsOut = { dir: string; available: boolean; items: BackupItem[] };
 type JobEnqueueOut = { enqueued: boolean; job: string; job_id?: string | null };
 type JobResultOut = { job_id: string; status: string; success?: boolean; result?: unknown };
 
-async function pollJobResult(jobId: string, timeoutMs = 30000): Promise<JobResultOut | null> {
+function pollJobResult(jobId: string, timeoutMs = 30000): Promise<JobResultOut | null> {
+  // WS (Фаза 7, WS-4): результат джобы пушем через канал job:{id} (бэкенд — ws_pollers следит за
+  // arq). Поллинг остаётся фолбэком, если WS-канал молчит. Кто первый отдаст терминальный статус.
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const r = await fetchJson<JobResultOut>(`/jobs/result/${encodeURIComponent(jobId)}`);
-    if (r.status === "complete" || r.status === "not_found") return r;
-    await new Promise((res) => setTimeout(res, 1000));
-  }
-  return null;
+  return new Promise<JobResultOut | null>((resolve) => {
+    let done = false;
+    let off: (() => void) | null = null;
+    let timer = 0;
+    const finish = (r: JobResultOut | null) => {
+      if (done) return;
+      done = true;
+      off?.();
+      if (timer) window.clearTimeout(timer);
+      resolve(r);
+    };
+    const consider = (r: JobResultOut | undefined) => {
+      if (r && (r.status === "complete" || r.status === "not_found")) finish(r);
+    };
+    off = wsSubscribe(`job:${jobId}`, (msg) => consider(msg.data as JobResultOut));
+    const poll = async () => {
+      if (done) return;
+      if (Date.now() >= deadline) return finish(null);
+      try {
+        const r = await fetchJson<JobResultOut>(`/jobs/result/${encodeURIComponent(jobId)}`);
+        if (r.status === "complete" || r.status === "not_found") return finish(r);
+      } catch {
+        // транзиентная ошибка — повторим
+      }
+      timer = window.setTimeout(() => void poll(), 1500);
+    };
+    void poll();
+  });
 }
 
 function formatJobResult(job: string, res: JobResultOut): string {
