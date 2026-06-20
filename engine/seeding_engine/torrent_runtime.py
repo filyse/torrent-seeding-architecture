@@ -878,6 +878,9 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
 
         try:
             await asyncio.to_thread(_copy)
+            # Контент скопирован от root — вернуть владельца как у источника (1000:1000),
+            # иначе по FTP к перенесённым файлам не будет доступа.
+            await asyncio.to_thread(self._chown_tree, dst)
             self._migrate_progress[db_id] = {"phase": "checking", "copied": total, "total": total}
             handle = await self.add_torrent(db_id, None, save_path, torrent_data=torrent_data)
             # Перепроверяем скопированные данные: при совпадении пиров libtorrent поднимет до seeding.
@@ -942,10 +945,18 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         loop = asyncio.get_running_loop()
         rfd, wfd = os.pipe()
 
+        extracted_tops: set[str] = set()
+
         def _extract() -> None:
             with os.fdopen(rfd, "rb") as rf, tarfile.open(fileobj=rf, mode="r|") as tf:
                 # filter="data" блокирует path traversal и спец-файлы (Python 3.12+).
-                tf.extractall(save_path, filter="data")
+                # Идём по членам вручную (а не extractall) — чтобы запомнить top-level имена
+                # и потом выставить владельца только на перенесённое дерево.
+                for member in tf:
+                    tf.extract(member, save_path, filter="data")
+                    top = member.name.replace("\\", "/").lstrip("/").split("/", 1)[0].strip()
+                    if top and top not in (".", ".."):
+                        extracted_tops.add(top)
 
         extract_task = loop.run_in_executor(None, _extract)
         wf = os.fdopen(wfd, "wb")
@@ -963,6 +974,11 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             finally:
                 await extract_task
 
+        # Распаковано от root — вернуть владельца как у источника (1000:1000), иначе по FTP
+        # (uid 1000) к перенесённым файлам не будет доступа.
+        for top in extracted_tops:
+            await asyncio.to_thread(self._chown_tree, Path(save_path) / top)
+
         self._migrate_progress[db_id] = {
             "phase": "checking", "copied": int(content_total), "total": int(content_total),
         }
@@ -972,6 +988,47 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             return handle
         finally:
             self._migrate_progress.pop(db_id, None)
+
+    @staticmethod
+    def _content_owner() -> tuple[int, int]:
+        """uid:gid, которым должен принадлежать перенесённый контент. По умолчанию 1000:1000
+        (как у уже импортированных раздач и FTP-пользователя), переопределяется через env.
+        Значение -1 для компонента — «не менять» (os.chown игнорирует -1)."""
+        def _val(name: str, default: int) -> int:
+            raw = os.getenv(name, "").strip()
+            if raw == "":
+                return default
+            try:
+                return int(raw)
+            except ValueError:
+                return default
+        return _val("SEEDING_CONTENT_UID", 1000), _val("SEEDING_CONTENT_GID", 1000)
+
+    @classmethod
+    def _chown_tree(cls, root: Path) -> None:
+        """Выставить владельца (uid:gid из _content_owner) на дерево контента после переноса.
+        Движок в контейнере работает от root, поэтому extractall/copy создают файлы root:root —
+        без этого по FTP (uid 1000) к ним нет доступа. Ошибки (не root / иная ФС) глушим."""
+        uid, gid = cls._content_owner()
+        if uid < 0 and gid < 0:
+            return
+        try:
+            os.chown(root, uid, gid)
+        except OSError:
+            pass
+        if not root.is_dir():
+            return
+        for dpath, dirs, files in os.walk(root):
+            for name in dirs:
+                try:
+                    os.chown(os.path.join(dpath, name), uid, gid)
+                except OSError:
+                    pass
+            for name in files:
+                try:
+                    os.chown(os.path.join(dpath, name), uid, gid)
+                except OSError:
+                    pass
 
     @staticmethod
     def _dir_size(src: Path) -> int:
