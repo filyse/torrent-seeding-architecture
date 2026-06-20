@@ -329,6 +329,7 @@ type ListSort = (typeof SORT_VALUES)[number];
 const STATE_VALUES = ["", "active", "peers", "idle", "incomplete", "error"] as const;
 type ListState = (typeof STATE_VALUES)[number];
 type ListDensity = "comfortable" | "compact";
+type ListView = "cards" | "table";
 type ThemeMode = "auto" | "light" | "dark";
 
 let listSearch = lsGet("ui.search") ?? "";
@@ -343,6 +344,7 @@ let listSort: ListSort = ((): ListSort => {
   return (SORT_VALUES as readonly string[]).includes(v) ? (v as ListSort) : "name";
 })();
 let listDensity: ListDensity = lsGet("ui.density") === "compact" ? "compact" : "comfortable";
+let listView: ListView = lsGet("ui.view") === "table" ? "table" : "cards";
 
 function getThemeMode(): ThemeMode {
   const v = lsGet("ui.theme");
@@ -547,6 +549,8 @@ const ICON_PATHS: Record<string, string> = {
   filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
   rows: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
   grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
+  table:
+    '<rect x="3" y="3" width="18" height="18" rx="1"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/>',
   refresh:
     '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   settings:
@@ -1784,6 +1788,164 @@ function renderTorrentCard(
   return card;
 }
 
+type TableColumn = {
+  key: string;
+  label: string;
+  sort?: ListSort;
+  num?: boolean;
+  cell: (t: TorrentOut) => Node | string;
+};
+
+function tableColumns(): TableColumn[] {
+  return [
+    {
+      key: "name",
+      label: "Имя",
+      sort: "name",
+      cell: (t) => {
+        const fullName = t.display_name || `Торрент #${t.id}`;
+        const shownName = fullName.replace(/\.torrent$/i, "") || fullName;
+        const a = el("a", { href: `/torrent/${t.id}`, title: fullName }, [shownName]);
+        a.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          setHashDetail(t.id);
+          window.dispatchEvent(new HashChangeEvent("hashchange"));
+        });
+        return a;
+      },
+    },
+    {
+      key: "status",
+      label: "Статус",
+      cell: (t) => el("span", { className: badgeClass(effectiveStatus(t)) }, [displayStatusLabel(t)]),
+    },
+    { key: "size", label: "Размер", sort: "size", num: true, cell: (t) => fmtBytes(t.runtime?.size) },
+    {
+      key: "progress",
+      label: "Готово",
+      sort: "progress",
+      cell: (t) => {
+        const pct = Math.max(0, Math.min(100, (t.runtime?.progress ?? 0) * 100));
+        const wrap = el("div", { className: "ttable__progress" });
+        const bar = el("div", { className: "progress" });
+        bar.append(
+          el("div", {
+            className: `progress__bar${pct >= 99.95 ? " progress__bar--complete" : ""}`,
+            style: `width:${pct}%`,
+          }),
+        );
+        wrap.append(bar, el("span", { className: "ttable__progress-val" }, [`${pct.toFixed(0)}%`]));
+        return wrap;
+      },
+    },
+    { key: "uploaded", label: "Отдано", sort: "uploaded", num: true, cell: (t) => fmtBytes(t.runtime?.total_uploaded) },
+    { key: "ratio", label: "Ратио", sort: "ratio", num: true, cell: (t) => fmtRatio(t.runtime?.ratio) },
+    { key: "down", label: "↓", sort: "down", num: true, cell: (t) => fmtRate(t.runtime?.download_rate) },
+    { key: "up", label: "↑", sort: "up", num: true, cell: (t) => fmtRate(t.runtime?.upload_rate) },
+    { key: "seeds", label: "Сиды", num: true, cell: (t) => String(t.runtime?.num_seeds ?? 0) },
+    { key: "peers", label: "Пиры", sort: "peers", num: true, cell: (t) => String(t.runtime?.peers ?? 0) },
+    { key: "eta", label: "Осталось", num: true, cell: (t) => fmtEta(t.runtime?.eta) },
+    { key: "label", label: "Метка", cell: (t) => (t.label && t.label.trim() ? t.label : "—") },
+  ];
+}
+
+function sortByHeader(sort: ListSort): void {
+  if (listSort === sort) return;
+  listSort = sort;
+  lsSet("ui.sort", listSort);
+  listPage = 0;
+  listReload?.();
+}
+
+function renderTorrentTable(
+  items: TorrentOut[],
+  onChange: () => void,
+  onSelectToggle: (id: number, checked: boolean) => void,
+): HTMLElement {
+  const cols = tableColumns();
+  const writable = canWrite();
+  const checks: HTMLInputElement[] = [];
+
+  const headCells: HTMLElement[] = [];
+  if (writable) {
+    const selectAll = el("input", { type: "checkbox" }) as HTMLInputElement;
+    selectAll.addEventListener("change", () => {
+      for (const cb of checks) {
+        if (cb.checked !== selectAll.checked) {
+          cb.checked = selectAll.checked;
+          onSelectToggle(Number(cb.dataset.id), cb.checked);
+        }
+      }
+    });
+    headCells.push(el("th", { className: "ttable__check" }, [selectAll]));
+  }
+  for (const c of cols) {
+    const cls = `${c.num ? "ttable__num" : ""}${c.sort ? " ttable__sortable" : ""}`.trim();
+    const th = el("th", cls ? { className: cls } : {});
+    if (c.sort) {
+      const active = listSort === c.sort;
+      th.append(c.label);
+      if (active) th.append(el("span", { className: "ttable__sort-ind" }, ["▼"]));
+      th.addEventListener("click", () => sortByHeader(c.sort as ListSort));
+      th.title = "Сортировать";
+    } else {
+      th.append(c.label);
+    }
+    headCells.push(th);
+  }
+  if (writable) headCells.push(el("th", { className: "ttable__actions-h" }, [""]));
+
+  const thead = el("thead", {}, [el("tr", {}, headCells)]);
+  const tbody = el("tbody");
+
+  for (const t of items) {
+    const cells: HTMLElement[] = [];
+    if (writable) {
+      const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
+      cb.dataset.id = String(t.id);
+      cb.checked = selectedIds.has(t.id);
+      cb.addEventListener("change", () => onSelectToggle(t.id, cb.checked));
+      checks.push(cb);
+      cells.push(el("td", { className: "ttable__check" }, [cb]));
+    }
+    for (const c of cols) {
+      const td = el("td", c.num ? { className: "ttable__num" } : {});
+      if (c.key === "name") td.classList.add("ttable__name");
+      td.append(c.cell(t));
+      cells.push(td);
+    }
+    if (writable) {
+      const isPaused = t.status === "paused";
+      const toggle = el("button", {
+        type: "button",
+        className: "btn btn--ghost btn--xs",
+        title: isPaused ? "Старт" : "Пауза",
+      }, [isPaused ? "▶" : "⏸"]);
+      toggle.addEventListener("click", async () => {
+        try {
+          await fetchJson(`/torrents/${t.id}/${isPaused ? "resume" : "pause"}`, { method: "POST" });
+          await onChange();
+        } catch (e) {
+          showToast(e instanceof Error ? e.message : String(e), true);
+        }
+      });
+      const del = el("button", {
+        type: "button",
+        className: "btn btn--ghost btn--xs btn--danger-ghost",
+        title: "Удалить",
+      }, ["🗑"]);
+      del.addEventListener("click", () => {
+        void deleteTorrentWithDialog({ id: t.id, display_name: t.display_name }, onChange);
+      });
+      cells.push(el("td", { className: "ttable__actions" }, [toggle, del]));
+    }
+    tbody.append(el("tr", {}, cells));
+  }
+
+  const table = el("table", { className: "ttable" }, [thead, tbody]);
+  return el("div", { className: "ttable-wrap" }, [table]);
+}
+
 function updateLiveMeta(metaEl: HTMLElement, items: TorrentOut[]): void {
   const active = items.some(isActivelyDownloading);
   metaEl.replaceChildren(
@@ -1813,7 +1975,6 @@ function paintTorrentList(refs: ListHostRefs, items: TorrentOut[]): void {
     return;
   }
 
-  const ul = el("ul", { className: "torrent-list" });
   const refresh = () =>
     void loadTorrents(refs.listEl, refs.countEl, refs.metaEl, {
       silent: true,
@@ -1824,8 +1985,13 @@ function paintTorrentList(refs: ListHostRefs, items: TorrentOut[]): void {
     else selectedIds.delete(id);
     selectionChanged?.();
   };
-  for (const t of shown) ul.append(renderTorrentCard(t, refresh, onSelectToggle));
-  listEl.append(ul);
+  if (listView === "table") {
+    listEl.append(renderTorrentTable(shown, refresh, onSelectToggle));
+  } else {
+    const ul = el("ul", { className: "torrent-list" });
+    for (const t of shown) ul.append(renderTorrentCard(t, refresh, onSelectToggle));
+    listEl.append(ul);
+  }
   renderPager();
 }
 
@@ -2491,6 +2657,27 @@ function mountListShell(root: HTMLElement): void {
     applyDensity();
   });
 
+  // Переключатель вида: карточки ↔ таблица (как в ruTorrent). Плотность применима
+  // только к карточкам, поэтому в табличном виде кнопка плотности скрыта.
+  const viewBtn = el("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm list-controls__icon",
+  }) as HTMLButtonElement;
+  const applyView = () => {
+    const table = listView === "table";
+    listHost.classList.toggle("torrent-list--table", table);
+    viewBtn.replaceChildren(icon(table ? "grid" : "table"));
+    viewBtn.title = table ? "Показать карточками" : "Показать таблицей";
+    viewBtn.setAttribute("aria-label", viewBtn.title);
+    densityBtn.hidden = table;
+  };
+  viewBtn.addEventListener("click", () => {
+    listView = listView === "table" ? "cards" : "table";
+    lsSet("ui.view", listView);
+    applyView();
+    repaint();
+  });
+
   const bulkPause = el("button", { type: "button", className: "btn btn--sm" }, ["⏸ Пауза"]);
   const bulkResume = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["▶ Старт"]);
   const bulkDel = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["🗑 Удалить"]);
@@ -2723,10 +2910,11 @@ function mountListShell(root: HTMLElement): void {
   const searchField = el("div", { className: "list-controls__search" }, [icon("search"), searchInput]);
   const filters = el("div", { className: "list-controls" }, [
     searchField,
-    el("div", { className: "list-controls__actions" }, [filterWrap, sortSelect, densityBtn, refreshBtn]),
+    el("div", { className: "list-controls__actions" }, [filterWrap, sortSelect, viewBtn, densityBtn, refreshBtn]),
     labelSuggestions,
   ]);
   applyDensity();
+  applyView();
 
   // Контекстная панель массовых действий: видна только когда что-то выбрано.
   const bulkCount = el("span", { className: "bulk-bar__count" });

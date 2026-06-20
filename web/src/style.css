@@ -519,6 +519,112 @@ body {
   padding: 0.3rem 0.4rem;
 }
 
+/* ── Табличный вид списка (стиль ruTorrent) ───────────────────────────── */
+.ttable-wrap {
+  width: 100%;
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.ttable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.ttable th,
+.ttable td {
+  padding: 0.32rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+.ttable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+.ttable tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+.ttable tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.ttable tbody tr:last-child td {
+  border-bottom: none;
+}
+.ttable__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ttable__sortable {
+  cursor: pointer;
+}
+.ttable__sortable:hover {
+  color: var(--text);
+}
+.ttable__sort-ind {
+  margin-left: 0.25rem;
+  font-size: 0.6rem;
+  color: var(--accent);
+}
+.ttable__name {
+  max-width: 32rem;
+  min-width: 14rem;
+}
+.ttable__name a {
+  color: inherit;
+  text-decoration: none;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ttable__name a:hover {
+  color: var(--accent);
+}
+.ttable__check {
+  width: 1px;
+  padding-right: 0.25rem;
+}
+.ttable__progress {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 6.5rem;
+}
+.ttable__progress .progress {
+  flex: 1;
+  margin: 0;
+  height: 6px;
+}
+.ttable__progress-val {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  min-width: 2.6rem;
+  text-align: right;
+}
+.ttable__actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.btn--xs {
+  font-size: 0.85rem;
+  padding: 0.15rem 0.35rem;
+  line-height: 1;
+}
+.btn--danger-ghost:hover {
+  color: var(--danger);
+}
+
 .progress {
   height: 6px;
   background: var(--border);
