@@ -1,2 +1,2 @@
 // Версия веб-интерфейса. Бампим вручную при заметных изменениях UI.
-export const WEB_VERSION = "1.1.0";
+export const WEB_VERSION = "1.2.0";
