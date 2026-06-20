@@ -189,6 +189,21 @@ class BatchUploadResult(BaseModel):
     items: list[BatchUploadItem]
 
 
+class UpdateMatchRequest(BaseModel):
+    """Поиск существующих раздач для замены по именам новых .torrent-файлов."""
+
+    filenames: list[str] = Field(default_factory=list)
+
+
+class UpdateMatchItem(BaseModel):
+    filename: str
+    candidates: list[TorrentOut] = Field(default_factory=list)
+
+
+class UpdateMatchResult(BaseModel):
+    items: list[UpdateMatchItem]
+
+
 class TorrentDetailOut(TorrentOut):
     runtime: TorrentRuntimeOut | None = None
     peer_list: list[TorrentPeerOut] = Field(default_factory=list)

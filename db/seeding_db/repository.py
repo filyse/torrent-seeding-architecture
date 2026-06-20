@@ -57,6 +57,16 @@ class TorrentRepository:
         result = await self._session.execute(select(TorrentRecord).order_by(TorrentRecord.id))
         return list(result.scalars())
 
+    async def find_by_display_names(self, names: list[str]) -> list[TorrentRecord]:
+        """Найти раздачи по точному совпадению display_name (без учёта регистра).
+        Принимает список вариантов имён (например, с суффиксом .torrent и без него)."""
+        variants = sorted({n.strip().lower() for n in names if n and n.strip()})
+        if not variants:
+            return []
+        stmt = select(TorrentRecord).where(func.lower(TorrentRecord.display_name).in_(variants))
+        result = await self._session.execute(stmt)
+        return list(result.scalars())
+
     async def list_page(
         self,
         *,

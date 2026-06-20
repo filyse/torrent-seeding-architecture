@@ -236,6 +236,8 @@ type HealthFull = {
 
 type TorrentDetailOut = TorrentOut & { runtime: RuntimeOut | null; peer_list?: TorrentPeerOut[] };
 type TorrentPageOut = { items: TorrentOut[]; total: number; limit: number; offset: number };
+type UpdateMatchItem = { filename: string; candidates: TorrentOut[] };
+type UpdateMatchResult = { items: UpdateMatchItem[] };
 type Route = { view: "list" } | { view: "detail"; id: number } | { view: "settings" };
 type DeleteTorrentChoice = "cancel" | "torrent_only" | "torrent_and_files";
 
@@ -2460,6 +2462,267 @@ function field(label: string, input: HTMLElement, hint?: string): HTMLElement {
   return f;
 }
 
+const stripTorrentExt = (n: string): string => n.replace(/\.torrent$/i, "");
+
+/** Поиск раздачи для замены: поле ввода + выпадающий список результатов из /torrents. */
+function buildTorrentPicker(
+  initialQuery: string,
+  onChange: () => void,
+): { el: HTMLElement; getId: () => number | null } {
+  const wrap = el("div", { className: "torrent-picker" });
+  const input = el("input", {
+    type: "search",
+    className: "list-filter__search",
+    placeholder: "Поиск раздачи для замены…",
+    value: initialQuery,
+  }) as HTMLInputElement;
+  const results = el("div", { className: "torrent-picker__results", hidden: "" });
+  const chosenLbl = el("div", { className: "torrent-picker__chosen", hidden: "" });
+  wrap.append(input, results, chosenLbl);
+  let chosenId: number | null = null;
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+
+  const candLine = (t: TorrentOut) => `${t.display_name} · ${t.engine_id} · ${t.save_path}`;
+
+  const runSearch = async () => {
+    const q = input.value.trim();
+    if (!q) {
+      results.hidden = true;
+      results.replaceChildren();
+      return;
+    }
+    try {
+      const page = await fetchJson<TorrentPageOut>(
+        `/torrents?q=${encodeURIComponent(q)}&limit=8&sort=name`,
+      );
+      results.replaceChildren();
+      if (page.items.length === 0) {
+        results.append(el("div", { className: "torrent-picker__empty" }, ["Ничего не найдено"]));
+      } else {
+        for (const t of page.items) {
+          const opt = el("button", { type: "button", className: "torrent-picker__item" }, [candLine(t)]);
+          opt.addEventListener("click", () => {
+            chosenId = t.id;
+            chosenLbl.replaceChildren(
+              el("span", { className: "badge badge--seeding" }, ["выбрано"]),
+              document.createTextNode(` ${t.display_name} · ${t.engine_id}`),
+            );
+            chosenLbl.hidden = false;
+            results.hidden = true;
+            input.value = t.display_name;
+            onChange();
+          });
+          results.append(opt);
+        }
+      }
+      results.hidden = false;
+    } catch (e) {
+      results.replaceChildren(
+        el("div", { className: "torrent-picker__empty" }, [e instanceof Error ? e.message : String(e)]),
+      );
+      results.hidden = false;
+    }
+  };
+
+  input.addEventListener("input", () => {
+    chosenId = null;
+    chosenLbl.hidden = true;
+    onChange();
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => void runSearch(), 300);
+  });
+  void runSearch();
+
+  return { el: wrap, getId: () => chosenId };
+}
+
+/** Строка одного файла в диалоге обновления: автосовпадение / выбор / ручной поиск. */
+function buildUpdateRow(
+  file: File,
+  candidates: TorrentOut[],
+  onChange: () => void,
+): { el: HTMLElement; getTargetId: () => number | null } {
+  const row = el("div", { className: "update-row" });
+  row.append(el("div", { className: "update-row__file" }, [file.name]));
+  const targetHost = el("div", { className: "update-row__target" });
+  row.append(targetHost);
+
+  const candLine = (t: TorrentOut) => `${t.display_name} · ${t.engine_id} · ${t.save_path}`;
+  let getId: () => number | null = () => null;
+
+  const showPicker = () => {
+    const picker = buildTorrentPicker(stripTorrentExt(file.name), onChange);
+    targetHost.replaceChildren(
+      el("span", { className: "update-row__match" }, ["Выберите раздачу для замены:"]),
+      picker.el,
+    );
+    getId = picker.getId;
+    onChange();
+  };
+
+  if (candidates.length === 1) {
+    const t = candidates[0];
+    const changeLink = el("a", { href: "#", className: "update-row__change" }, ["изменить"]);
+    changeLink.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      showPicker();
+    });
+    targetHost.append(
+      el("span", { className: "badge badge--seeding" }, ["найдено"]),
+      el("span", { className: "update-row__match" }, [`→ ${candLine(t)}`]),
+      changeLink,
+    );
+    getId = () => t.id;
+  } else if (candidates.length > 1) {
+    const sel = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
+    for (const t of candidates) sel.append(el("option", { value: String(t.id) }, [candLine(t)]));
+    const changeLink = el("a", { href: "#", className: "update-row__change" }, ["вручную"]);
+    changeLink.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      showPicker();
+    });
+    targetHost.append(
+      el("span", { className: "badge badge--queued" }, [`совпадений: ${candidates.length}`]),
+      sel,
+      changeLink,
+    );
+    getId = () => (sel.value ? Number(sel.value) : null);
+  } else {
+    targetHost.append(el("span", { className: "badge badge--paused" }, ["не найдено"]));
+    showPicker();
+  }
+
+  return { el: row, getTargetId: () => getId() };
+}
+
+/** Диалог «Обновить торрент»: загрузка новых .torrent и замена существующих раздач
+    с сохранением движка/пути/скачанного (recheck докачивает только новое). */
+function showUpdateTorrentDialog(onDone: () => void): void {
+  const overlay = el("div", { className: "modal-overlay" });
+  const onKey = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape") close();
+  };
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+
+  const panel = el("div", { className: "panel modal-panel update-panel" });
+  const closeBtn = el(
+    "button",
+    { type: "button", className: "btn btn--ghost btn--sm modal-close", "aria-label": "Закрыть" },
+    ["✕"],
+  );
+  closeBtn.addEventListener("click", close);
+  panel.append(el("div", { className: "panel__head panel__head--with-action" }, ["Обновить торрент", closeBtn]));
+  panel.append(
+    el("p", { className: "field__hint" }, [
+      "Загрузите новый .torrent (например, сезон с новой серией). Найду старую раздачу по имени " +
+        "и заменю её — движок, путь и уже скачанное сохранятся, докачается только новое. " +
+        "Если совпадение не найдено — выберите раздачу вручную.",
+    ]),
+  );
+
+  const fileInput = el("input", { type: "file", accept: ".torrent", multiple: "" }) as HTMLInputElement;
+  panel.append(field("Новые .torrent-файлы", fileInput));
+
+  const rowsHost = el("div", { className: "update-rows" });
+  panel.append(rowsHost);
+
+  const replaceBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, [
+    "Заменить",
+  ]) as HTMLButtonElement;
+  replaceBtn.disabled = true;
+  panel.append(el("div", { className: "update-footer" }, [replaceBtn]));
+
+  let rows: { file: File; getTargetId: () => number | null }[] = [];
+  const syncReplaceBtn = () => {
+    replaceBtn.disabled = rows.length === 0 || !rows.some((r) => r.getTargetId() != null);
+  };
+
+  fileInput.addEventListener("change", async () => {
+    const files = fileInput.files ? Array.from(fileInput.files) : [];
+    rows = [];
+    rowsHost.replaceChildren();
+    if (files.length === 0) {
+      syncReplaceBtn();
+      return;
+    }
+    const bad = files.filter((f) => !f.name.toLowerCase().endsWith(".torrent"));
+    if (bad.length > 0) {
+      showToast("Поддерживаются только .torrent-файлы", true);
+    }
+    const good = files.filter((f) => f.name.toLowerCase().endsWith(".torrent"));
+    if (good.length === 0) {
+      syncReplaceBtn();
+      return;
+    }
+    rowsHost.append(el("p", { className: "field__hint" }, ["Поиск совпадений…"]));
+    let result: UpdateMatchResult;
+    try {
+      result = await fetchJson<UpdateMatchResult>("/torrents/update/match", {
+        method: "POST",
+        body: JSON.stringify({ filenames: good.map((f) => f.name) }),
+      });
+    } catch (e) {
+      rowsHost.replaceChildren(
+        el("p", { className: "field__hint" }, [e instanceof Error ? e.message : String(e)]),
+      );
+      return;
+    }
+    rowsHost.replaceChildren();
+    good.forEach((f, i) => {
+      const ctl = buildUpdateRow(f, result.items[i]?.candidates ?? [], syncReplaceBtn);
+      rows.push({ file: f, getTargetId: ctl.getTargetId });
+      rowsHost.append(ctl.el);
+    });
+    syncReplaceBtn();
+  });
+
+  replaceBtn.addEventListener("click", async () => {
+    const tasks = rows
+      .map((r) => ({ file: r.file, id: r.getTargetId() }))
+      .filter((t): t is { file: File; id: number } => t.id != null);
+    if (tasks.length === 0) {
+      showToast("Не выбрана раздача для замены", true);
+      return;
+    }
+    replaceBtn.disabled = true;
+    replaceBtn.textContent = "Заменяю…";
+    let ok = 0;
+    const errors: string[] = [];
+    for (const t of tasks) {
+      try {
+        const body = new FormData();
+        body.set("torrent_file", t.file, t.file.name);
+        const res = await fetch(`${API}/torrents/${t.id}/replace`, {
+          method: "POST",
+          headers: apiHeaders(false),
+          body,
+        });
+        await throwIfNotOk(res);
+        ok += 1;
+      } catch (e) {
+        errors.push(`${t.file.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (ok > 0) {
+      showToast(`Обновлено: ${ok}${errors.length ? `, ошибок: ${errors.length}` : ""}`, errors.length > 0);
+    } else {
+      showToast(errors[0] ?? "Не удалось обновить", true);
+    }
+    close();
+    onDone();
+  });
+
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) close();
+  });
+  document.addEventListener("keydown", onKey);
+  overlay.append(panel);
+  document.body.append(overlay);
+}
+
 function mountListShell(root: HTMLElement): void {
   const metaEl = el("div", { className: "app-header__meta" });
   const listHost = el("div", { id: "torrent-list-host" });
@@ -2762,6 +3025,12 @@ function mountListShell(root: HTMLElement): void {
   const addTorrentBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, ["+ Добавить торрент"]);
   addTorrentBtn.addEventListener("click", () => showAddTorrentDialog("/data/b1", onAdded));
 
+  const updateTorrentBtn = el("button", { type: "button", className: "btn btn--sm" }, [
+    icon("refresh"),
+    "Обновить торрент",
+  ]);
+  updateTorrentBtn.addEventListener("click", () => showUpdateTorrentDialog(() => refresh({ afterAdd: true })));
+
   const settingsLink = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, [icon("settings"), "Настройки"]);
   settingsLink.addEventListener("click", () => {
     setHashSettings();
@@ -2769,7 +3038,7 @@ function mountListShell(root: HTMLElement): void {
   });
 
   const headerActions = el("div", { className: "app-header__actions" });
-  if (canWrite()) headerActions.append(addTorrentBtn);
+  if (canWrite()) headerActions.append(addTorrentBtn, updateTorrentBtn);
   headerActions.append(settingsLink, metaEl);
   const header = el("header", { className: "app-header" }, [
     el("div", {}, [el("h1", {}, ["Раздача"]), el("p", { className: "field__hint" }, ["Управление торрентами"])]),

@@ -29,6 +29,9 @@ from seeding_api.schemas import (
     TorrentTrackerOut,
     TorrentUrlCreate,
     TrackerAddIn,
+    UpdateMatchItem,
+    UpdateMatchRequest,
+    UpdateMatchResult,
 )
 
 log = logging.getLogger(__name__)
@@ -279,6 +282,115 @@ async def upload_torrent_files(
             items.append(BatchUploadItem(filename=filename or "(без имени)", ok=False, error=detail))
 
     return BatchUploadResult(total=len(torrent_files), ok=ok, failed=len(torrent_files) - ok, items=items)
+
+
+def _norm_torrent_name(name: str) -> str:
+    """Нормализация имени для сопоставления: убрать суффикс .torrent, обрезать, lower()."""
+    n = (name or "").strip()
+    if n.lower().endswith(".torrent"):
+        n = n[: -len(".torrent")]
+    return n.strip().lower()
+
+
+@router.post("/update/match", response_model=UpdateMatchResult)
+async def match_for_update(body: UpdateMatchRequest, session: DbSession):
+    """По именам новых .torrent найти существующие раздачи-кандидаты для замены
+    (точное совпадение display_name без учёта регистра, с .torrent и без)."""
+    repo = TorrentRepository(session)
+    variants: set[str] = set()
+    keyed: list[tuple[str, str]] = []
+    for fn in body.filenames:
+        k = _norm_torrent_name(fn)
+        keyed.append((fn, k))
+        if k:
+            variants.add(k)
+            variants.add(k + ".torrent")
+    rows = await repo.find_by_display_names(list(variants))
+    by_key: dict[str, list] = {}
+    for r in rows:
+        by_key.setdefault(_norm_torrent_name(r.display_name), []).append(r)
+    items = [
+        UpdateMatchItem(
+            filename=fn,
+            candidates=[TorrentOut.model_validate(c) for c in by_key.get(k, [])],
+        )
+        for fn, k in keyed
+    ]
+    return UpdateMatchResult(items=items)
+
+
+@router.post("/{torrent_id}/replace", response_model=TorrentOut)
+async def replace_torrent(
+    torrent_id: int,
+    session: DbSession,
+    pool: EnginePoolDep,
+    torrent_file: UploadFile = File(...),
+    display_name: str = Form(""),
+    label: str = Form(""),
+):
+    """Заменить существующую раздачу новым .torrent, сохранив движок/путь и контент.
+
+    Сценарий «новая серия в сезонном паке»: старая раздача снимается с раздачи БЕЗ
+    удаления файлов, новый .torrent добавляется в тот же путь с recheck — уже скачанные
+    серии засчитываются, докачивается только новое, затем встаёт на раздачу. Движок и
+    путь наследуются от заменяемой раздачи (выбирать вручную не нужно)."""
+    filename = (torrent_file.filename or "").strip()
+    if not filename.lower().endswith(".torrent"):
+        raise HTTPException(status_code=422, detail="only .torrent files are supported")
+    payload = await torrent_file.read()
+    if not payload:
+        raise HTTPException(status_code=422, detail="torrent file is empty")
+
+    repo = TorrentRepository(session)
+    old = await repo.get_by_id(torrent_id)
+    if old is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+
+    engine_id = old.engine_id
+    save_path = old.save_path
+    keep_label = old.label
+    old_display = old.display_name
+
+    # 1) Снять старую раздачу с раздачи; КОНТЕНТ на диске оставить (delete_files=False),
+    #    чтобы новый .torrent при recheck засчитал уже скачанные файлы.
+    try:
+        await pool.client_for_row(old).remove_from_runtime(
+            torrent_id,
+            delete_files=False,
+            save_path=save_path,
+            display_name=old_display,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    await repo.delete(torrent_id)
+
+    # 2) Завести новую запись с тем же движком/путём/меткой.
+    new_label = label.strip() or keep_label
+    new_display = display_name.strip() or (filename[: -len(".torrent")] or filename)
+    row = await repo.create(
+        display_name=new_display,
+        save_path=save_path,
+        magnet_uri=None,
+        engine_id=engine_id,
+        label=new_label,
+    )
+    await session.flush()
+    await session.refresh(row)
+
+    # 3) Добавить новый .torrent в тот же путь (seed_mode=False → recheck подхватит скачанное).
+    try:
+        await pool.client_for(engine_id).register_torrent_file(
+            row.id, payload, save_path, seed_mode=False
+        )
+    except httpx.HTTPError as exc:
+        await repo.delete(row.id)
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    except ValueError as exc:
+        await repo.delete(row.id)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await repo.update_status(row.id, TorrentStatus.downloading.value)
+    await session.refresh(row)
+    return row
 
 
 @router.post("/url", response_model=TorrentOut, status_code=201)

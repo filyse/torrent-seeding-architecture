@@ -664,6 +664,89 @@ body.layout-wide #app {
   color: #fff;
 }
 
+/* ── Диалог «Обновить торрент» ─────────────────────────────────────────── */
+.update-panel {
+  width: min(640px, 94vw);
+}
+.update-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0.6rem 0;
+}
+.update-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  background: var(--surface-2);
+}
+.update-row__file {
+  font-weight: 600;
+  font-size: 0.85rem;
+  word-break: break-all;
+  margin-bottom: 0.4rem;
+}
+.update-row__target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+.update-row__match {
+  color: var(--muted);
+  word-break: break-all;
+}
+.update-row__change {
+  font-size: 0.78rem;
+  color: var(--accent);
+}
+.update-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+.torrent-picker {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.torrent-picker__results {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 12rem;
+  overflow-y: auto;
+  background: var(--surface);
+}
+.torrent-picker__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+.torrent-picker__item:last-child {
+  border-bottom: none;
+}
+.torrent-picker__item:hover {
+  background: var(--surface-2);
+}
+.torrent-picker__empty {
+  padding: 0.4rem 0.5rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.torrent-picker__chosen {
+  font-size: 0.78rem;
+}
+
 .progress {
   height: 6px;
   background: var(--border);
