@@ -193,12 +193,16 @@ def test_jobs_sync_runtime_503_without_redis(api_module):
 
 
 def test_jobs_sync_runtime_enqueued_when_queue_available(api_module):
+    class DummyJob:
+        job_id = "sync-runtime-to-db"
+
     class DummyPool:
         def __init__(self):
             self.calls = []
 
         async def enqueue_job(self, name, *args, **kwargs):
             self.calls.append((name, args, kwargs))
+            return DummyJob()
 
         async def close(self):
             return None

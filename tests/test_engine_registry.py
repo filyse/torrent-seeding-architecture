@@ -84,6 +84,13 @@ def test_load_engine_specs_fallback(monkeypatch):
 
 
 def test_load_engine_specs_invalid(monkeypatch):
-    monkeypatch.setenv("ENGINES_CONFIG", "[]")
+    # Не-массив JSON недопустим. (Пустой массив [] допустим: движки
+    # регистрируются динамически по heartbeat'у — см. _parse_specs.)
+    monkeypatch.setenv("ENGINES_CONFIG", "{}")
     with pytest.raises(ValueError):
         load_engine_specs()
+
+
+def test_load_engine_specs_empty_array_ok(monkeypatch):
+    monkeypatch.setenv("ENGINES_CONFIG", "[]")
+    assert load_engine_specs() == []
