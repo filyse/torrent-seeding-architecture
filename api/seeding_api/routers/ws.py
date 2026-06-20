@@ -38,6 +38,14 @@ _AUTH_TIMEOUT = 10.0
 
 
 def _parse_subprotocols(ws: WebSocket) -> list[str]:
+    # Предложенные клиентом сабпротоколы канонично лежат в ASGI-scope. Под uvicorn+wsproto
+    # заголовок `sec-websocket-protocol` в scope["headers"] может отсутствовать — тогда чтение
+    # заголовка вернёт пусто и авторизация по `bearer.<key>` молча сломается (был баг: WS
+    # уходил в анонимную ветку → 4401 → бесконечный reconnect, верхняя панель не обновлялась).
+    # Поэтому берём из scope, а заголовок оставляем как фолбэк.
+    protos = [p.strip() for p in (ws.scope.get("subprotocols") or []) if p and p.strip()]
+    if protos:
+        return protos
     raw = ws.headers.get("sec-websocket-protocol", "")
     return [p.strip() for p in raw.split(",") if p.strip()]
 

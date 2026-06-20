@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 
 _BASE_INTERVAL = 2.0  # сек: тик детали и джоб
 _ENGINES_EVERY = 3  # каждые N тиков (~6с) пушим health движков
+_STATS_EVERY = 2  # каждые N тиков (~4с) пушим агрегаты сессии для верхней панели
 
 
 def _ids_from_channels(channels: list[str]) -> list[int]:
@@ -86,6 +87,17 @@ async def _poll_jobs(app, hub) -> None:
             log.debug("ws job poll %s failed: %s", ch, exc)
 
 
+async def _poll_stats(app, hub) -> None:
+    """Агрегаты сессии (раздачи, скорость, отдано, движки) для живой панели сверху (`stats`).
+
+    Та же форма, что у SSE `/stream` и `GET /session/stats`, чтобы фронт обновлял верхние
+    карточки одинаково независимо от транспорта (WS/SSE)."""
+    pool = app.state.engine_pool
+    by_engine = await pool.session_stats_all()
+    stats = pool.aggregate_session_stats(by_engine)
+    await hub.publish("stats", {"stats": stats})
+
+
 async def ws_pollers_loop(app) -> None:
     hub = getattr(app.state, "ws_hub", None)
     if hub is None:
@@ -108,6 +120,13 @@ async def ws_pollers_loop(app) -> None:
                 raise
             except Exception as exc:  # noqa: BLE001
                 log.debug("ws jobs poll failed: %s", exc)
+            if tick % _STATS_EVERY == 0 and hub.has_subscribers("stats"):
+                try:
+                    await _poll_stats(app, hub)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("ws stats publish failed: %s", exc)
             if tick % _ENGINES_EVERY == 0 and hub.has_subscribers("engines"):
                 try:
                     from seeding_api.routers.health import build_health_full

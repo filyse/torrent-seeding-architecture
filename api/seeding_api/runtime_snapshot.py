@@ -143,15 +143,8 @@ async def runtime_snapshot_loop(pool, session_factory, hub=None) -> None:
                 raise
             except Exception as exc:  # noqa: BLE001
                 log.warning("runtime snapshot failed: %s", exc)
-
-            # WS-канал агрегатов сессии: публикуем только если кто-то смотрит панель.
-            if hub is not None and hub.has_subscribers("stats"):
-                try:
-                    by_engine = await pool.session_stats_all()
-                    await hub.publish("stats", {"stats": pool.aggregate_session_stats(by_engine)})
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # noqa: BLE001
-                    log.debug("ws stats publish failed: %s", exc)
+            # Агрегаты сессии для верхней панели (WS-канал `stats`) публикует лёгкий цикл
+            # ws_pollers (каждые ~4с, только session_stats_all) — не зависит от тяжёлого
+            # полного снапшота рантайма, который на больших инсталляциях идёт дольше интервала.
     except asyncio.CancelledError:
         raise

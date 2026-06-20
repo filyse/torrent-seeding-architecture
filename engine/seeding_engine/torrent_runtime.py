@@ -1930,8 +1930,15 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
 
         def _collect(handles_inner=handles, ses_inner=ses) -> dict[str, object]:
             ss = ses_inner.status() if callable(getattr(ses_inner, "status", None)) else ses_inner.status
-            dl_rate = int(getattr(ss, "download_rate", 0) or getattr(ss, "payload_download_rate", 0) or 0)
-            up_rate = int(getattr(ss, "upload_rate", 0) or getattr(ss, "payload_upload_rate", 0) or 0)
+            # Показываем ТОЛЬКО payload (полезные данные), без протокольного оверхеда
+            # (DHT/трекеры/запросы кусков/uTP-ACK/ip-overhead): при чистой раздаче «Скачивание»
+            # должно быть ~0, а не пара МБ/с встречного служебного трафика. На total
+            # (download_rate/upload_rate) откатываемся, только если биндинг не отдаёт payload-поля
+            # (тогда getattr вернёт None — отличаем от законного 0).
+            dl_pl = getattr(ss, "payload_download_rate", None)
+            up_pl = getattr(ss, "payload_upload_rate", None)
+            dl_rate = int((dl_pl if dl_pl is not None else getattr(ss, "download_rate", 0)) or 0)
+            up_rate = int((up_pl if up_pl is not None else getattr(ss, "upload_rate", 0)) or 0)
             total_up = 0
             total_dl = 0
             active = 0
