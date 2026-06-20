@@ -1547,7 +1547,6 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         h.resume()
 
     async def pause(self, db_id: int) -> RuntimeHandle | None:
-        lt = self._lt
         async with self._lock:
             h = self._handles.get(db_id)
         if h is None:
@@ -1693,7 +1692,6 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             h = self._handles.get(db_id)
         if h is None:
             return False
-        lt = self._lt
 
         def _apply() -> bool:
             ti = h.torrent_file() if callable(getattr(h, "torrent_file", None)) else None
@@ -1788,7 +1786,6 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             h = self._handles.get(db_id)
         if h is None:
             return None
-        lt = self._lt
 
         def _apply():
             if download_limit is not None and hasattr(h, "set_download_limit"):

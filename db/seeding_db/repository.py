@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import update as sa_update
 from sqlalchemy import func, nullslast, or_, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seeding_db.models import (

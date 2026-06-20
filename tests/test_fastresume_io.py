@@ -1,4 +1,3 @@
-import os
 
 from seeding_engine.fastresume_io import (
     delete_fastresume,

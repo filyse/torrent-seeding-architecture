@@ -10,8 +10,8 @@ from arq.connections import RedisSettings
 from seeding_db.config import get_database_url
 from seeding_db.models import TorrentStatus
 from seeding_db.repository import QuotaRepository, TorrentRepository
-from seeding_db.status_from_runtime import status_from_runtime
 from seeding_db.session import create_engine, create_session_factory
+from seeding_db.status_from_runtime import status_from_runtime
 
 from seeding_queue.engine_util import (
     check_all_engines_health,
