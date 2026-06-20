@@ -118,6 +118,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
                     client.send_raw("__err__", {"type": "error", "error": f"bad channel: {channel}"})
                     continue
                 await hub.subscribe(client, channel)
+                log.info("ws subscribe %s by %s (role=%s)", channel, principal.name, principal.role)
                 try:
                     snap = await initial_snapshot(ws.app, channel)
                 except Exception as exc:  # noqa: BLE001

@@ -32,7 +32,7 @@ _DB_PROGRESS_INTERVAL = 3.0
 # Скорость переноса считаем по дельте скопированных байт на стороне оркестратора.
 _speed_anchor: dict[int, tuple[float, int]] = {}  # torrent_id -> (время, copied)
 _speed_last: dict[int, float] = {}  # torrent_id -> Б/с (последняя оценка)
-_SPEED_WINDOW = 1.0  # сек: окно усреднения скорости
+_SPEED_WINDOW = 0.4  # сек: окно усреднения скорости (мельче → чаще обновляется; шум гасит EMA)
 
 # Троттлинг WS-пуша прогресса переноса: http-транспорт зовёт set_progress на каждый чанк
 # (сотни раз/с), а прогресс-бару столько не нужно. Шлём по WS не чаще раза в N секунд, но
@@ -117,10 +117,12 @@ def set_progress(
         if terminal or phase_changed or due:
             _ws_last_push[torrent_id] = (now, phase)
             try:
-                hub.publish_sync(
+                n = hub.publish_sync(
                     f"migrate:{torrent_id}",
                     {"id": torrent_id, "active": not terminal, **snap},
                 )
+                if phase_changed or terminal:
+                    log.info("ws migrate push id=%s phase=%s subscribers=%d", torrent_id, phase, n)
             except Exception:  # noqa: BLE001 — пуш не должен ломать перенос
                 pass
 
