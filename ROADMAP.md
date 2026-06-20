@@ -446,6 +446,12 @@
   Грабли: удалять fastresume «снаружи» бесполезно — graceful-shutdown движка
   пере-сохраняет его для всего, что ещё в runtime; сперва убирать из runtime.
 
+### Фаза 8 — Веб-UX 2.0 🟢
+Журнал изменений ведётся в [`CHANGELOG.md`](CHANGELOG.md) (фиксы по версиям компонентов).
+- ✅ Чистые URL без `#` (web 1.3.1): роутинг на History API вместо hash-routing —
+  `…/torrent/123` / `…/settings`, работают кнопки браузера и прямые ссылки
+  (nginx SPA-fallback `try_files … /index.html`).
+
 ---
 
 ## Известные нюансы (technical debt)

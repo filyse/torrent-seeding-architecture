@@ -562,28 +562,36 @@ function icon(name: keyof typeof ICON_PATHS): HTMLElement {
   return span;
 }
 
+// Роутинг через History API (чистые пути, без "#"). nginx отдаёт index.html на любой путь
+// (try_files … /index.html), поэтому /torrent/1 и /settings работают и при перезагрузке.
 function parseRoute(): Route {
-  const hash = window.location.hash || "";
-  const m = /^#\/torrent\/(\d+)$/.exec(hash);
+  const path = window.location.pathname;
+  const m = /^\/torrent\/(\d+)\/?$/.exec(path);
   if (m) return { view: "detail", id: Number(m[1]) };
-  if (hash === "#/settings") return { view: "settings" };
+  if (path === "/settings" || path === "/settings/") return { view: "settings" };
   return { view: "list" };
 }
 
+function pushPath(path: string): void {
+  if (window.location.pathname !== path) {
+    window.history.pushState(null, "", path);
+  }
+}
+
 function setHashList(): void {
-  window.location.hash = "";
+  pushPath("/");
 }
 
 function setHashDetail(id: number): void {
-  window.location.hash = `#/torrent/${id}`;
+  pushPath(`/torrent/${id}`);
 }
 
 function setHashSettings(): void {
-  window.location.hash = "#/settings";
+  pushPath("/settings");
 }
 
 function navLink(label: string, onClick: () => void): HTMLElement {
-  const a = el("a", { href: "#", className: "back-link" }, [label]);
+  const a = el("a", { href: "/", className: "back-link" }, [label]);
   a.addEventListener("click", (ev) => {
     ev.preventDefault();
     onClick();
@@ -1705,7 +1713,7 @@ function renderTorrentCard(
       (() => {
         const fullName = t.display_name || `Торрент #${t.id}`;
         const shownName = fullName.replace(/\.torrent$/i, "") || fullName;
-        const a = el("a", { href: `#/torrent/${t.id}`, title: fullName }, [shownName]);
+        const a = el("a", { href: `/torrent/${t.id}`, title: fullName }, [shownName]);
         a.addEventListener("click", (ev) => {
           ev.preventDefault();
           setHashDetail(t.id);
@@ -3162,7 +3170,7 @@ function mountDetailShell(root: HTMLElement, id: number): void {
   const metaEl = el("div", { className: "app-header__meta" });
   const main = el("div", { className: "detail-body" });
 
-  const back = el("a", { href: "#", className: "back-link" }, ["← Назад к списку"]);
+  const back = el("a", { href: "/", className: "back-link" }, ["← Назад к списку"]);
   back.addEventListener("click", (ev) => {
     ev.preventDefault();
     setHashList();
@@ -4911,5 +4919,8 @@ async function bootstrap(): Promise<void> {
 
 document.title = "Раздача";
 applyTheme(getThemeMode());
+// Кнопки «назад/вперёд» браузера (History API) → перерисовка.
+window.addEventListener("popstate", () => render());
+// Внутренняя навигация шлёт это событие вручную после pushState (см. pushPath).
 window.addEventListener("hashchange", () => render());
 void bootstrap();
