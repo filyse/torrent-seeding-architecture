@@ -1331,6 +1331,10 @@ const MIGRATE_PHASE_LABELS: Record<string, string> = {
 
 function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLElement {
   const wrap = el("div", { className: "migrate-progress migrate-progress--indeterminate" });
+  // Флаг «перенос ещё живёт»: loadDetail не пересобирает деталь, пока он "1", иначе на фазе
+  // finalizing (статус в БД уже seeding) панель перерисовалась бы и вместо завершения показала
+  // селектор движка. Снимаем флаг только когда виджет реально закончил (active=false).
+  wrap.dataset.active = "1";
   const label = el("div", { className: "migrate-progress__label" }, ["Подготовка…"]);
   const track = el("div", { className: "progress" });
   const fill = el("div", { className: "progress__bar" });
@@ -1340,6 +1344,7 @@ function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLE
   let timer = 0;
   let wsOff: (() => void) | null = null;
   let finished = false;
+  let lastSpeed: number | null = null;  // грэйс: держим последнюю скорость при кратком провале до 0
   const stop = () => {
     if (timer) window.clearInterval(timer);
     timer = 0;
@@ -1357,7 +1362,16 @@ function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLE
     if (s.transport && phase !== "error" && phase !== "done") text += ` · ${tname[s.transport] ?? s.transport}`;
     if (pct != null && (phase === "copying" || phase === "checking")) text += ` · ${pct}%`;
     if (phase === "copying" && s.total) text += `  (${fmtBytes(s.copied)} / ${fmtBytes(s.total)})`;
-    if (phase === "copying" && s.speed) text += ` · ${fmtBytes(s.speed)}/с`;
+    // Скорость: при копировании держим последнее значение, если в текущем снимке её нет (краткий
+    // провал до 0 на стороне движка), чтобы строка не мигала; сбрасываем при смене фазы.
+    if (phase === "copying") {
+      const cur = typeof s.speed === "number" && s.speed > 0 ? s.speed : null;
+      if (cur != null) lastSpeed = cur;
+      const shown = cur ?? lastSpeed;
+      if (shown) text += ` · ${fmtBytes(shown)}/с`;
+    } else {
+      lastSpeed = null;
+    }
     if (phase === "copying" && s.eta) text += ` · ост. ${fmtEta(s.eta)}`;
     if (phase === "error" && s.message) text += ` — ${s.message}`;
     label.textContent = text;
@@ -1367,6 +1381,7 @@ function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLE
     fill.style.width = pct != null ? `${pct}%` : "100%";
     if (s.active === false && !finished) {
       finished = true;
+      wrap.dataset.active = "0";  // разрешаем loadDetail пересобрать деталь после завершения
       stop();
       window.setTimeout(() => onDone(), 1000);
     }
@@ -2796,12 +2811,12 @@ async function loadDetail(
       return;
     }
 
-    // Пока идёт перенос — карточка прогресса живёт сама (WS-пуши + свой поллинг-страховка).
-    // Не пересобираем деталь на каждом тике, иначе виджет пересоздаётся с нуля и мигает «Подготовка…».
+    // Пока живёт карточка переноса (её флаг data-active="1") — не пересобираем деталь, иначе
+    // виджет пересоздаётся (мигает «Подготовка…») или на фазе finalizing (в БД уже seeding)
+    // вместо завершения показался бы селектор движка. Виджет сам снимет флаг по active=false.
     if (
-      data.status === "migrating" &&
       container.childElementCount > 0 &&
-      container.querySelector(".migrate-progress")
+      container.querySelector(".migrate-progress[data-active='1']")
     ) {
       scheduleNext?.(data);
       return;

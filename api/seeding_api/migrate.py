@@ -52,6 +52,11 @@ def _update_speed(torrent_id: int, copied: int | None, now: float) -> float | No
     dt = now - anchor[0]
     if dt >= _SPEED_WINDOW:
         spd = max(0.0, (copied - anchor[1]) / dt)
+        prev = _speed_last.get(torrent_id)
+        # EMA-сглаживание: гасит скачки и кратковременные провалы до 0 (буфер/сброс на диск),
+        # из-за которых скорость в UI то пропадала, то прыгала. Полный стоп всё равно затухает к ~0.
+        if prev is not None and prev > 0:
+            spd = prev * 0.6 + spd * 0.4
         _speed_last[torrent_id] = spd
         _speed_anchor[torrent_id] = (now, copied)
         return spd
