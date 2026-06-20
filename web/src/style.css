@@ -76,6 +76,12 @@ body {
   padding: 1.25rem 1rem 2.5rem;
 }
 
+/* Табличный вид списка разворачивает контент на (почти) всю ширину окна, чтобы
+   колонки таблицы не обрезались. Применяется только на экране списка в режиме «Таблица». */
+body.layout-wide #app {
+  max-width: min(118rem, 100%);
+}
+
 /* —— layout —— */
 
 .app-header {
@@ -623,6 +629,39 @@ body {
 }
 .btn--danger-ghost:hover {
   color: var(--danger);
+}
+
+/* Сегментированный переключатель вида списка: Плитка / Карточки / Таблица. */
+.view-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  flex: none;
+}
+.view-switch__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.34rem 0.55rem;
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.view-switch__btn:last-child {
+  border-right: none;
+}
+.view-switch__btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.view-switch__btn.is-active {
+  background: var(--accent);
+  color: #fff;
 }
 
 .progress {

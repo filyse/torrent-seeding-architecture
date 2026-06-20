@@ -2639,44 +2639,55 @@ function mountListShell(root: HTMLElement): void {
     }
   }
 
-  const densityBtn = el("button", {
-    type: "button",
-    className: "btn btn--ghost btn--sm list-controls__icon",
-  }) as HTMLButtonElement;
-  const applyDensity = () => {
-    const compact = listDensity === "compact";
-    listHost.classList.toggle("torrent-list--compact", compact);
-    // Иконка показывает, на какой вид переключит клик.
-    densityBtn.replaceChildren(icon(compact ? "rows" : "grid"));
-    densityBtn.title = compact ? "Показать списком" : "Показать плиткой";
-    densityBtn.setAttribute("aria-label", densityBtn.title);
-  };
-  densityBtn.addEventListener("click", () => {
-    listDensity = listDensity === "compact" ? "comfortable" : "compact";
-    lsSet("ui.density", listDensity);
-    applyDensity();
+  // Единый сегментированный переключатель вида: Плитка / Карточки / Таблица.
+  // Заменяет прежние две отдельные иконки (вид + плотность) — один клик сразу
+  // выбирает нужный режим, активный сегмент подсвечен.
+  type ViewPreset = "grid" | "list" | "table";
+  const presets: { p: ViewPreset; ic: keyof typeof ICON_PATHS; title: string }[] = [
+    { p: "grid", ic: "grid", title: "Плитка" },
+    { p: "list", ic: "rows", title: "Карточки" },
+    { p: "table", ic: "table", title: "Таблица" },
+  ];
+  const currentPreset = (): ViewPreset =>
+    listView === "table" ? "table" : listDensity === "compact" ? "grid" : "list";
+  const segBtns = presets.map((s) => {
+    const b = el("button", {
+      type: "button",
+      className: "view-switch__btn",
+      title: s.title,
+      "aria-label": s.title,
+    }, [icon(s.ic)]) as HTMLButtonElement;
+    b.addEventListener("click", () => setPreset(s.p));
+    return { p: s.p, b };
   });
-
-  // Переключатель вида: карточки ↔ таблица (как в ruTorrent). Плотность применима
-  // только к карточкам, поэтому в табличном виде кнопка плотности скрыта.
-  const viewBtn = el("button", {
-    type: "button",
-    className: "btn btn--ghost btn--sm list-controls__icon",
-  }) as HTMLButtonElement;
+  const viewSwitch = el("div", { className: "view-switch", role: "group", "aria-label": "Вид списка" },
+    segBtns.map((x) => x.b));
   const applyView = () => {
     const table = listView === "table";
     listHost.classList.toggle("torrent-list--table", table);
-    viewBtn.replaceChildren(icon(table ? "grid" : "table"));
-    viewBtn.title = table ? "Показать карточками" : "Показать таблицей";
-    viewBtn.setAttribute("aria-label", viewBtn.title);
-    densityBtn.hidden = table;
+    listHost.classList.toggle("torrent-list--compact", !table && listDensity === "compact");
+    // Табличный вид разворачиваем на всю ширину страницы — иначе колонки режутся.
+    document.body.classList.toggle("layout-wide", table);
+    const active = currentPreset();
+    for (const x of segBtns) {
+      const on = x.p === active;
+      x.b.classList.toggle("is-active", on);
+      x.b.setAttribute("aria-pressed", String(on));
+    }
   };
-  viewBtn.addEventListener("click", () => {
-    listView = listView === "table" ? "cards" : "table";
+  function setPreset(p: ViewPreset): void {
+    if (p === currentPreset()) return;
+    if (p === "table") {
+      listView = "table";
+    } else {
+      listView = "cards";
+      listDensity = p === "grid" ? "compact" : "comfortable";
+      lsSet("ui.density", listDensity);
+    }
     lsSet("ui.view", listView);
     applyView();
     repaint();
-  });
+  }
 
   const bulkPause = el("button", { type: "button", className: "btn btn--sm" }, ["⏸ Пауза"]);
   const bulkResume = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["▶ Старт"]);
@@ -2910,10 +2921,9 @@ function mountListShell(root: HTMLElement): void {
   const searchField = el("div", { className: "list-controls__search" }, [icon("search"), searchInput]);
   const filters = el("div", { className: "list-controls" }, [
     searchField,
-    el("div", { className: "list-controls__actions" }, [filterWrap, sortSelect, viewBtn, densityBtn, refreshBtn]),
+    el("div", { className: "list-controls__actions" }, [filterWrap, sortSelect, viewSwitch, refreshBtn]),
     labelSuggestions,
   ]);
-  applyDensity();
   applyView();
 
   // Контекстная панель массовых действий: видна только когда что-то выбрано.
@@ -5090,6 +5100,8 @@ function render(): void {
   const root = document.getElementById("app");
   if (!root) return;
   root.replaceChildren();
+  // Широкая раскладка — только для табличного вида списка; на других экранах сбрасываем.
+  document.body.classList.remove("layout-wide");
   const route = parseRoute();
   if (route.view === "list") mountListShell(root);
   else if (route.view === "settings") mountSettingsShell(root);
