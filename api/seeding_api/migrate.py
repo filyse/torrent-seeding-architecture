@@ -155,14 +155,14 @@ async def _wait_until_checked(
     результат только когда он устаканился: либо progress полный (>=0.999), либо мы уже
     видели проверку и несколько опросов подряд дают одинаковый не-checking progress.
     """
-    interval = 3
+    interval = 1  # 1с: прогресс recheck в UI обновляется чаще (≈3× к прежним 3с)
     last: dict | None = None
     waited = 0
     seen_checking = False
     stable_prog: float | None = None
     stable_n = 0
-    settle_polls = 3  # ~9с стабильного не-checking прежде чем поверить в «неполную» копию
-    start_grace = 21  # ждём появления checking хотя бы столько, прежде чем доверять не-checking
+    settle_polls = 9  # ~9с стабильного не-checking прежде чем поверить в «неполную» копию (9×1с)
+    start_grace = 21  # ждём появления checking хотя бы столько (сек), прежде чем доверять не-checking
     while waited <= timeout:
         try:
             snap = await client.runtime_snapshot(db_id)
