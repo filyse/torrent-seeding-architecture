@@ -2796,6 +2796,17 @@ async function loadDetail(
       return;
     }
 
+    // Пока идёт перенос — карточка прогресса живёт сама (WS-пуши + свой поллинг-страховка).
+    // Не пересобираем деталь на каждом тике, иначе виджет пересоздаётся с нуля и мигает «Подготовка…».
+    if (
+      data.status === "migrating" &&
+      container.childElementCount > 0 &&
+      container.querySelector(".migrate-progress")
+    ) {
+      scheduleNext?.(data);
+      return;
+    }
+
     const progress = data.runtime?.progress ?? 0;
     const pct = Math.round(progress * 1000) / 10;
 
