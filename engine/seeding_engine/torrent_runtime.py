@@ -1188,6 +1188,15 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         handle = await self.add_torrent(
             db_id, None, staged["save_path"], torrent_data=staged["torrent_data"]
         )
+        # Контент собран пофайлово от root — вернуть владельца (1000:1000) для доступа по FTP.
+        try:
+            name = await asyncio.to_thread(
+                self._torrent_name_from_data, self._lt, staged["torrent_data"]
+            )
+            if name:
+                await asyncio.to_thread(self._chown_tree, Path(staged["save_path"]) / name)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("chown after import_finalize failed for db_id=%s: %s", db_id, exc)
         await self.recheck(db_id)
         return handle
 
@@ -1276,6 +1285,10 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                             prog["copied"] = prog.get("copied", 0) + len(chunk)
                     finally:
                         await loop.run_in_executor(None, fobj.close)
+
+        # Контент скачан напрямую у движка-источника от root — вернуть владельца (1000:1000),
+        # иначе по FTP (uid 1000) к перенесённой раздаче не будет доступа.
+        await asyncio.to_thread(self._chown_tree, base)
 
         self._migrate_progress[db_id] = {"phase": "checking", "copied": total, "total": total}
         try:
