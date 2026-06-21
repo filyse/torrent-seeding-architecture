@@ -53,6 +53,13 @@ class TorrentRepository:
     async def get_by_id(self, torrent_id: int) -> TorrentRecord | None:
         return await self._session.get(TorrentRecord, torrent_id)
 
+    async def get_by_info_hash(self, info_hash: str) -> TorrentRecord | None:
+        """Найти раздачу по info_hash (он уникален в БД)."""
+        result = await self._session.execute(
+            select(TorrentRecord).where(TorrentRecord.info_hash == info_hash)
+        )
+        return result.scalar_one_or_none()
+
     async def list_all(self) -> list[TorrentRecord]:
         result = await self._session.execute(select(TorrentRecord).order_by(TorrentRecord.id))
         return list(result.scalars())

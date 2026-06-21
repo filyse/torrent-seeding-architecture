@@ -784,8 +784,20 @@ async def get_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDep):
     if runtime and row.info_hash is None:
         ih = runtime.get("info_hash")
         if isinstance(ih, str) and ih and ih != "0" * 40:
-            await repo.update_info_hash(torrent_id, ih)
-            await session.refresh(row)
+            # info_hash уникален в БД. Та же раздача может крутиться на нескольких
+            # движках (напр. после переноса осталась копия) — тогда хэш уже занят
+            # другой записью. В этом случае НЕ пишем (иначе IntegrityError → 500),
+            # просто показываем страницу.
+            existing = await repo.get_by_info_hash(ih)
+            if existing is None:
+                await repo.update_info_hash(torrent_id, ih)
+                await session.refresh(row)
+            elif existing.id != torrent_id:
+                log.warning(
+                    "info_hash %s уже у раздачи id=%s (%s/%s) — не пишу для id=%s "
+                    "(дубликат контента на разных движках)",
+                    ih, existing.id, existing.engine_id, existing.label, torrent_id,
+                )
     status = await merge_runtime_into_row(repo, row, runtime)
     peer_list: list = []
     if runtime is not None:
