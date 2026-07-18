@@ -2224,6 +2224,103 @@ function startListStream(_refs: ListHostRefs, sessionBarHost: HTMLElement, onFal
   startListSse(sessionBarHost, onFallback);
 }
 
+interface LabelCombo {
+  /** Контрол для вставки в форму (селект + инлайн-поле «Новая метка»). */
+  control: HTMLElement;
+  /** Текущее значение метки (пусто, если «Без метки»). */
+  value: () => string;
+  /** Загрузить список меток с сервера и восстановить сохранённый выбор. */
+  refresh: () => Promise<void>;
+}
+
+// Комбобокс метки: выпадающий список готовых меток + пункт «Новая метка…», при
+// выборе которого список в той же строке превращается в поле ввода (кнопка ↩ —
+// назад к списку). Опционально запоминает выбор в localStorage. Общий для окон
+// «Добавить торрент» и «Создать торрент».
+function createLabelCombo(opts?: { storageKey?: string; persist?: boolean }): LabelCombo {
+  const NEW_LABEL = "__new__";
+  const storageKey = opts?.storageKey ?? "ui.addLabel";
+  const persist = opts?.persist ?? true;
+
+  const select = el("select", { className: "select" }) as HTMLSelectElement;
+  const input = el("input", {
+    type: "text",
+    placeholder: "Новая метка",
+    className: "label-combo__input",
+  }) as HTMLInputElement;
+  const back = el("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm label-combo__back",
+    title: "Выбрать из списка",
+  }, ["↩"]) as HTMLButtonElement;
+  const editWrap = el("div", { className: "label-combo__edit" }, [input, back]);
+  editWrap.hidden = true;
+  const control = el("div", { className: "label-combo" }, [select, editWrap]);
+
+  let newMode = false;
+  const value = () => (newMode ? input.value.trim() : select.value);
+  const remember = () => {
+    if (persist) lsSet(storageKey, value());
+  };
+  const showInput = () => {
+    newMode = true;
+    select.hidden = true;
+    editWrap.hidden = false;
+    input.focus();
+  };
+  const showSelect = () => {
+    newMode = false;
+    editWrap.hidden = true;
+    select.hidden = false;
+    if (select.value === NEW_LABEL) select.value = "";
+    remember();
+  };
+  select.addEventListener("change", () => {
+    if (select.value === NEW_LABEL) showInput();
+    else remember();
+  });
+  input.addEventListener("input", remember);
+  back.addEventListener("click", () => {
+    input.value = "";
+    showSelect();
+  });
+
+  const refresh = async () => {
+    const saved = persist ? lsGet(storageKey) ?? "" : "";
+    let labels: string[] = [];
+    try {
+      labels = await fetchJson<string[]>("/labels");
+    } catch {
+      /* список меток необязателен */
+    }
+    select.replaceChildren(
+      el("option", { value: "" }, ["Без метки"]),
+      ...labels.map((lb) => el("option", { value: lb }, [lb])),
+      el("option", { value: NEW_LABEL }, ["Новая метка…"]),
+    );
+    if (saved && labels.includes(saved)) {
+      select.value = saved;
+      showSelectSilently();
+    } else if (saved) {
+      input.value = saved;
+      select.value = NEW_LABEL;
+      newMode = true;
+      select.hidden = true;
+      editWrap.hidden = false;
+    } else {
+      showSelectSilently();
+    }
+  };
+  // Как showSelect, но без записи в localStorage (используется при восстановлении).
+  const showSelectSilently = () => {
+    newMode = false;
+    editWrap.hidden = true;
+    select.hidden = false;
+  };
+
+  return { control, value, refresh };
+}
+
 function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) => void): HTMLElement {
   const panel = el("section", { className: "panel" });
   panel.append(el("div", { className: "panel__head" }, ["Добавить торрент"]));
@@ -2254,49 +2351,8 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     placeholder: `Напр. ${savePathDefault || "/data/b1"}/movies`,
     value: "",
   }) as HTMLInputElement;
-  // Метка: выпадающий список готовых меток (как «Движок») + пункт «Новая метка…».
-  // При выборе «Новая метка…» список в той же строке превращается в поле ввода
-  // (справа кнопка ↩ — вернуться к списку). Последний выбор запоминается.
-  const NEW_LABEL = "__new__";
-  const labelSelect = el("select", { className: "select" }) as HTMLSelectElement;
-  const labelInput = el("input", { type: "text", placeholder: "Новая метка", className: "label-combo__input" }) as HTMLInputElement;
-  const labelBack = el("button", {
-    type: "button",
-    className: "btn btn--ghost btn--sm label-combo__back",
-    title: "Выбрать из списка",
-  }, ["↩"]) as HTMLButtonElement;
-  const labelInputWrap = el("div", { className: "label-combo__edit" }, [labelInput, labelBack]);
-  labelInputWrap.hidden = true;
-  const labelControl = el("div", { className: "label-combo" }, [labelSelect, labelInputWrap]);
-  let labelNewMode = false;
-  const currentLabel = (): string =>
-    labelNewMode ? labelInput.value.trim() : labelSelect.value;
-  const rememberLabel = () => lsSet("ui.addLabel", currentLabel());
-  const showLabelInput = () => {
-    labelNewMode = true;
-    labelSelect.hidden = true;
-    labelInputWrap.hidden = false;
-    labelInput.focus();
-  };
-  const showLabelSelect = () => {
-    labelNewMode = false;
-    labelInputWrap.hidden = true;
-    labelSelect.hidden = false;
-    if (labelSelect.value === NEW_LABEL) labelSelect.value = "";
-    rememberLabel();
-  };
-  labelSelect.addEventListener("change", () => {
-    if (labelSelect.value === NEW_LABEL) {
-      showLabelInput();
-    } else {
-      rememberLabel();
-    }
-  });
-  labelInput.addEventListener("input", rememberLabel);
-  labelBack.addEventListener("click", () => {
-    labelInput.value = "";
-    showLabelSelect();
-  });
+  // Метка: общий комбобокс (готовые метки + «Новая метка…»), помнит выбор в ui.addLabel.
+  const labelCombo = createLabelCombo({ storageKey: "ui.addLabel" });
   const nameInput = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
   const torrentFile = el("input", { type: "file", accept: ".torrent", multiple: "" }) as HTMLInputElement;
 
@@ -2322,7 +2378,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   advanced.append(
     el("summary", {}, ["Дополнительно"]),
     field("Название", nameInput, "Если пусто — берётся из торрента"),
-    field("Метка", labelControl, "Выберите готовую или «Новая метка…» для своей"),
+    field("Метка", labelCombo.control, "Выберите готовую или «Новая метка…» для своей"),
     field(
       "Свой путь",
       customPathInput,
@@ -2369,31 +2425,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     }
   })();
 
-  void (async () => {
-    const saved = lsGet("ui.addLabel") ?? "";
-    let labels: string[] = [];
-    try {
-      labels = await fetchJson<string[]>("/labels");
-    } catch {
-      /* список меток необязателен */
-    }
-    labelSelect.replaceChildren(
-      el("option", { value: "" }, ["Без метки"]),
-      ...labels.map((lb) => el("option", { value: lb }, [lb])),
-      el("option", { value: NEW_LABEL }, ["Новая метка…"]),
-    );
-    // Восстанавливаем прошлый выбор: если такая метка есть в списке — выбираем её,
-    // иначе (своя метка) — режим «Новая метка…» с подставленным текстом.
-    if (saved && labels.includes(saved)) {
-      labelSelect.value = saved;
-    } else if (saved) {
-      labelInput.value = saved;
-      labelSelect.value = NEW_LABEL;
-      labelNewMode = true;
-      labelSelect.hidden = true;
-      labelInputWrap.hidden = false;
-    }
-  })();
+  void labelCombo.refresh();
 
   // Куда добавлять: свой путь (если задан) приоритетнее выбора движка.
   const targetJson = (): { engine_id?: string; save_path?: string } | null => {
@@ -2429,7 +2461,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
           magnet_uri,
           ...target,
           display_name: nameInput.value.trim(),
-          label: currentLabel(),
+          label: labelCombo.value(),
         }),
       });
       magnetInput.value = "";
@@ -2456,7 +2488,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
           url,
           ...target,
           display_name: nameInput.value.trim(),
-          label: currentLabel(),
+          label: labelCombo.value(),
         }),
       });
       urlInput.value = "";
@@ -2480,7 +2512,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
         body.set("torrent_file", files[0], files[0].name);
         if (!applyTargetToForm(body)) return;
         body.set("display_name", nameInput.value.trim());
-        body.set("label", currentLabel());
+        body.set("label", labelCombo.value());
         const res = await fetch(`${API}/torrents/upload`, { method: "POST", headers: apiHeaders(false), body });
         await throwIfNotOk(res);
         const created = (await res.json()) as TorrentOut;
@@ -2494,7 +2526,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
       const body = new FormData();
       for (const f of files) body.append("torrent_files", f, f.name);
       if (!applyTargetToForm(body)) return;
-      body.set("label", currentLabel());
+      body.set("label", labelCombo.value());
       const res = await fetch(`${API}/torrents/upload-batch`, { method: "POST", headers: apiHeaders(false), body });
       await throwIfNotOk(res);
       const result = (await res.json()) as BatchUploadResult;
@@ -4298,7 +4330,7 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
   const listBox = el("div", { className: "creator-browser" });
   const selectionInfo = el("span", { className: "field__hint" }, ["Ничего не выбрано"]);
 
-  const labelInput = el("input", { type: "text", placeholder: "Метка (необязательно)" }) as HTMLInputElement;
+  const labelCombo = createLabelCombo({ storageKey: "ui.createLabel" });
   const nameInput = el("input", { type: "text", placeholder: "Название (только для одиночного)" }) as HTMLInputElement;
 
   const modeSeed = el("input", { type: "radio", name: "create-mode", value: "seed" }) as HTMLInputElement;
@@ -4310,9 +4342,10 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
   ]);
   // Метка и название — только для режима «Создать и раздавать».
   const seedFields = el("div", { className: "creator-seed-fields" }, [
-    field("Метка", labelInput),
+    field("Метка", labelCombo.control, "Выберите готовую или «Новая метка…» для своей"),
     field("Название", nameInput),
   ]);
+  void labelCombo.refresh();
   const syncModeFields = () => {
     seedFields.hidden = !modeSeed.checked;
   };
@@ -4487,7 +4520,7 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
             await fetchJson<TorrentOut>(`/creator/tasks/${task.engine_id}/${task.id}/seed`, {
               method: "POST",
               body: JSON.stringify({
-                label: labelInput.value.trim(),
+                label: labelCombo.value(),
                 display_name: paths.length === 1 ? nameInput.value.trim() : "",
               }),
             });
