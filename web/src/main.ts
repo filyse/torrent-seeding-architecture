@@ -355,6 +355,7 @@ type ThemeMode = "auto" | "light" | "dark";
 let listSearch = lsGet("ui.search") ?? "";
 let listStatusFilter = lsGet("ui.status") ?? "";
 let listLabelFilter = lsGet("ui.label") ?? "";
+let listEngineFilter = lsGet("ui.engine") ?? "";
 let listState: ListState = ((): ListState => {
   const v = lsGet("ui.state") ?? "";
   return (STATE_VALUES as readonly string[]).includes(v) ? (v as ListState) : "";
@@ -2007,7 +2008,7 @@ function paintTorrentList(refs: ListHostRefs, items: TorrentOut[]): void {
   updateLiveMeta(metaEl, items);
   listEl.replaceChildren();
   if (shown.length === 0) {
-    const hasFilter = Boolean(listSearch || listStatusFilter || listLabelFilter);
+    const hasFilter = Boolean(listSearch || listStatusFilter || listLabelFilter || listEngineFilter);
     listEl.append(
       el("div", { className: "empty-state" }, [
         el("p", {}, [listTotal === 0 && !hasFilter ? "Пока пусто" : "Ничего не найдено"]),
@@ -2116,6 +2117,7 @@ async function loadTorrents(
     if (q) params.set("q", q);
     if (listStatusFilter) params.set("status", listStatusFilter);
     if (listLabelFilter) params.set("label", listLabelFilter);
+    if (listEngineFilter) params.set("engine_id", listEngineFilter);
     if (listState) params.set("state", listState);
     params.set("sort", listSort);
     const page = await fetchJson<TorrentPageOut>(`/torrents?${params.toString()}`, { signal });
@@ -2857,6 +2859,30 @@ function mountListShell(root: HTMLElement): void {
     syncReset();
   });
 
+  const engineSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
+  // Опции движков динамические — берём из facets.engines (id → кол-во раздач).
+  const reloadEngines = (): void => {
+    const allOpt = el("option", { value: "" }, ["Все движки"]) as HTMLOptionElement;
+    allOpt.dataset.base = "Все движки";
+    engineSelect.replaceChildren(allOpt);
+    const ids = facets ? Object.keys(facets.engines).sort() : [];
+    // Выбранный движок мог пропасть из facets (0 раздач) — покажем его всё равно.
+    if (listEngineFilter && !ids.includes(listEngineFilter)) ids.push(listEngineFilter);
+    for (const id of ids) {
+      const o = el("option", { value: id }, [id]) as HTMLOptionElement;
+      o.dataset.base = id;
+      if (id === listEngineFilter) o.selected = true;
+      engineSelect.append(o);
+    }
+    applyFacetCounts();
+  };
+  engineSelect.addEventListener("change", () => {
+    listEngineFilter = engineSelect.value;
+    lsSet("ui.engine", listEngineFilter);
+    reloadFromFilters();
+    syncReset();
+  });
+
   const sortSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
   for (const [val, label] of [
     ["name", "Сорт: имя"],
@@ -2924,6 +2950,7 @@ function mountListShell(root: HTMLElement): void {
     applyCountsTo(statusSelect, facets.statuses);
     applyCountsTo(stateSelect, facets.states);
     applyCountsTo(labelSelect, facets.labels);
+    applyCountsTo(engineSelect, facets.engines);
   }
   async function refreshFacets(): Promise<void> {
     const now = Date.now();
@@ -2931,7 +2958,7 @@ function mountListShell(root: HTMLElement): void {
     lastFacetsAt = now;
     try {
       facets = await fetchJson<ListFacets>("/torrents/facets");
-      applyFacetCounts();
+      reloadEngines();
     } catch {
       /* счётчики необязательны — молча игнорируем */
     }
@@ -3100,13 +3127,15 @@ function mountListShell(root: HTMLElement): void {
     listSearch = "";
     listStatusFilter = "";
     listLabelFilter = "";
+    listEngineFilter = "";
     listState = "";
     listSort = "name";
-    for (const k of ["ui.search", "ui.status", "ui.label", "ui.state", "ui.sort"]) lsSet(k, "");
+    for (const k of ["ui.search", "ui.status", "ui.label", "ui.engine", "ui.state", "ui.sort"]) lsSet(k, "");
     searchInput.value = "";
     statusSelect.value = "";
     stateSelect.value = "";
     labelSelect.value = "";
+    engineSelect.value = "";
     sortSelect.value = "name";
     closePopover();
     reloadFromFilters();
@@ -3127,6 +3156,7 @@ function mountListShell(root: HTMLElement): void {
     el("label", { className: "filter-popover__field" }, [el("span", {}, ["Статус"]), statusSelect]),
     el("label", { className: "filter-popover__field" }, [el("span", {}, ["Состояние"]), stateSelect]),
     el("label", { className: "filter-popover__field" }, [el("span", {}, ["Метка"]), labelSelect]),
+    el("label", { className: "filter-popover__field" }, [el("span", {}, ["Движок"]), engineSelect]),
   ]);
   const filterBadge = el("span", { className: "filter-btn__badge", hidden: "" });
   const filterBtn = el("button", {
@@ -3187,7 +3217,7 @@ function mountListShell(root: HTMLElement): void {
 
   // syncReset обновляет всё состояние UI фильтров: бейдж на кнопке, чипсы, кнопку сброса.
   function syncReset(): void {
-    const count = [listStatusFilter, listState, listLabelFilter].filter(Boolean).length;
+    const count = [listStatusFilter, listState, listLabelFilter, listEngineFilter].filter(Boolean).length;
     filterBadge.hidden = count === 0;
     filterBadge.textContent = String(count);
     filterBtn.classList.toggle("filter-btn--has", count > 0);
@@ -3226,9 +3256,21 @@ function mountListShell(root: HTMLElement): void {
         }),
       );
     }
+    if (listEngineFilter) {
+      chips.push(
+        makeChip(`Движок: ${listEngineFilter}`, () => {
+          listEngineFilter = "";
+          engineSelect.value = "";
+          lsSet("ui.engine", "");
+          reloadFromFilters();
+          syncReset();
+        }),
+      );
+    }
 
     const anyActive =
-      Boolean(listSearch || listStatusFilter || listLabelFilter || listState) || listSort !== "name";
+      Boolean(listSearch || listStatusFilter || listLabelFilter || listEngineFilter || listState) ||
+      listSort !== "name";
     chipsRow.replaceChildren(...chips);
     if (anyActive) chipsRow.append(resetFilters);
     chipsRow.hidden = !anyActive;
@@ -3282,6 +3324,7 @@ function mountListShell(root: HTMLElement): void {
   );
   syncReset();
 
+  reloadEngines();
   void reloadLabels();
   void loadSessionStats().then((s) => {
     sessionBarHost.replaceChildren(mountSessionBar(s));
