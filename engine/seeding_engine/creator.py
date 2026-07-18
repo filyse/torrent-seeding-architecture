@@ -40,6 +40,16 @@ def _default_workers() -> int:
     except ValueError:
         return 1
 
+
+def _task_ttl() -> int:
+    """Сколько секунд задача создания живёт в памяти движка, после чего автоудаляется.
+
+    По умолчанию 24 часа. Переопределяется env ``SEEDING_CREATOR_TASK_TTL`` (секунды)."""
+    try:
+        return max(60, int(os.getenv("SEEDING_CREATOR_TASK_TTL", str(24 * 3600))))
+    except ValueError:
+        return 24 * 3600
+
 VIDEO_EXTENSIONS = {
     ".mkv",
     ".mp4",
@@ -279,7 +289,7 @@ class TaskCancelled(Exception):
 class CreatorService:
     """Управление задачами создания торрентов (in-memory, эфемерно)."""
 
-    def __init__(self, max_workers: int | None = None) -> None:
+    def __init__(self, max_workers: int | None = None, task_ttl: int | None = None) -> None:
         self._tasks: dict[int, CreateTask] = {}
         self._cancelled: set[int] = set()
         self._counter = 0
@@ -288,19 +298,56 @@ class CreatorService:
         # Потоки-надзиратели: каждый управляет одним дочерним процессом хеширования и
         # лишь перекачивает прогресс (в основном спит на queue.get → GIL свободен).
         self._executor = ThreadPoolExecutor(max_workers=workers)
+        # Автоочистка: задача (и её .torrent в памяти) живёт не дольше TTL.
+        self._ttl = task_ttl if task_ttl is not None else _task_ttl()
+        self._stop = threading.Event()
+        self._reaper = threading.Thread(
+            target=self._reap_loop, name="creator-reaper", daemon=True
+        )
+        self._reaper.start()
 
     def shutdown(self) -> None:
+        self._stop.set()
         self._executor.shutdown(wait=False, cancel_futures=True)
+
+    def _prune_locked(self, now: float | None = None) -> None:
+        """Удалить задачи старше TTL. Вызывать под self._lock."""
+        now = now if now is not None else time.time()
+        stale = [tid for tid, t in self._tasks.items() if now - t.created_at > self._ttl]
+        for tid in stale:
+            self._tasks.pop(tid, None)
+            self._cancelled.discard(tid)
+
+    def _reap_loop(self) -> None:
+        # Проверяем не реже раза в 10 минут (и не реже TTL).
+        interval = min(self._ttl, 600)
+        while not self._stop.wait(interval):
+            with self._lock:
+                self._prune_locked()
 
     def get(self, task_id: int) -> CreateTask | None:
         with self._lock:
+            self._prune_locked()
             return self._tasks.get(task_id)
 
     def list_all(self) -> list[dict[str, object]]:
         """Все задачи (свежие сверху) — для очереди создания в UI."""
         with self._lock:
+            self._prune_locked()
             tasks = sorted(self._tasks.values(), key=lambda t: t.id, reverse=True)
         return [t.to_public() for t in tasks]
+
+    def delete(self, task_id: int) -> bool:
+        """Удалить задачу из очереди (и её .torrent из памяти).
+
+        Если задача ещё выполняется — сигналим дочернему процессу остановиться."""
+        with self._lock:
+            task = self._tasks.pop(task_id, None)
+            if task is None:
+                return False
+            if task.status in (CreateStatus.QUEUED, CreateStatus.PROCESSING):
+                self._cancelled.add(task_id)
+        return True
 
     def create(self, source_path: str, skip_episode_check: bool = False) -> CreateTask:
         if _try_import_libtorrent() is None:

@@ -580,6 +580,8 @@ const ICON_PATHS: Record<string, string> = {
   download:
     '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/>',
   x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  trash:
+    '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
   play: '<polygon points="5 3 19 12 5 21 5 3"/>',
   refresh:
     '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
@@ -4499,6 +4501,20 @@ function openCreatorQueueDialog(onSeeded: () => void): void {
     }
   };
 
+  const deleteTask = async (t: CreatorTaskOut) => {
+    const active = t.status === "queued" || t.status === "processing";
+    const question = active
+      ? `Прервать и удалить задачу «${t.name || t.source_path}»?`
+      : `Удалить задачу «${t.name || t.source_path}» из очереди?`;
+    if (!window.confirm(question)) return;
+    try {
+      await fetchJson(`/creator/tasks/${t.engine_id}/${t.id}`, { method: "DELETE" });
+      void load();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    }
+  };
+
   const render = (tasks: CreatorTaskOut[]) => {
     listBox.replaceChildren();
     if (tasks.length === 0) {
@@ -4533,6 +4549,12 @@ function openCreatorQueueDialog(onSeeded: () => void): void {
         seed.addEventListener("click", () => void seedTask(t));
         actions.append(seed);
       }
+      const del = el("button", { type: "button", className: "btn btn--sm btn--danger creator-task__btn" }, [
+        icon("trash"),
+        "Удалить",
+      ]);
+      del.addEventListener("click", () => void deleteTask(t));
+      actions.append(del);
       row.append(info, actions);
       listBox.append(row);
     }
@@ -4560,7 +4582,8 @@ function openCreatorQueueDialog(onSeeded: () => void): void {
   dialog.append(
     el("h2", { id: "creator-queue-title", className: "modal-title" }, ["Очередь создания торрентов"]),
     el("p", { className: "field__hint" }, [
-      "Задачи создания на всех движках. Хранятся в памяти движка и очищаются при его перезапуске.",
+      "Задачи создания на всех движках. Хранятся в памяти движка, автоудаляются через 24 часа " +
+        "и очищаются при его перезапуске.",
     ]),
     listBox,
     (() => {

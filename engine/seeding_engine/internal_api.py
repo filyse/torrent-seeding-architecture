@@ -248,6 +248,17 @@ async def cancel_create_task(
     return {"ok": True}
 
 
+@router.delete("/creator/tasks/{task_id}")
+async def delete_create_task(
+    task_id: int,
+    svc: creator_mod.CreatorService = Depends(get_creator),
+):
+    """Удалить задачу из очереди (и её .torrent из памяти движка)."""
+    if not svc.delete(task_id):
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"ok": True}
+
+
 @router.get("/creator/tasks/{task_id}/torrent")
 async def get_created_torrent(
     task_id: int,

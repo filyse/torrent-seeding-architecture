@@ -142,6 +142,14 @@ class EngineClient:
         r.raise_for_status()
         return True
 
+    async def delete_create_task(self, task_id: int) -> bool:
+        """Удалить задачу создания с движка (из очереди и памяти)."""
+        r = await self._client.delete(f"/internal/v1/creator/tasks/{task_id}")
+        if r.status_code == 404:
+            return False
+        r.raise_for_status()
+        return True
+
     async def get_created_torrent_bytes(self, task_id: int) -> bytes | None:
         r = await self._client.get(f"/internal/v1/creator/tasks/{task_id}/torrent")
         if r.status_code in (404, 409):

@@ -120,6 +120,19 @@ async def cancel_task(engine_id: str, task_id: int, pool: EnginePoolDep):
     return {"ok": True}
 
 
+@router.delete("/tasks/{engine_id}/{task_id}")
+async def delete_task(engine_id: str, task_id: int, pool: EnginePoolDep):
+    """Удалить задачу создания из очереди движка (и её .torrent из памяти)."""
+    client = _client(pool, engine_id)
+    try:
+        ok = await client.delete_create_task(task_id)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    if not ok:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"ok": True}
+
+
 @router.get("/tasks/{engine_id}/{task_id}/download")
 async def download_task(engine_id: str, task_id: int, pool: EnginePoolDep):
     client = _client(pool, engine_id)

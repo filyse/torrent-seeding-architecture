@@ -65,6 +65,39 @@ def test_engine_list_tasks_reports_created(engine_app):
         assert ids == [1, 0]  # свежие сверху
 
 
+def test_engine_delete_removes_task(engine_app):
+    with TestClient(engine_app) as client:
+        svc = engine_app.state.creator
+        from seeding_engine.creator import CreateStatus, CreateTask
+
+        svc._tasks[0] = CreateTask(
+            id=0, source_path="b1/movie.mp4", name="movie", status=CreateStatus.COMPLETED
+        )
+        r = client.delete("/internal/v1/creator/tasks/0")
+        assert r.status_code == 200, r.text
+        assert client.get("/internal/v1/creator/tasks").json() == []
+        # повторное удаление — уже нет
+        assert client.delete("/internal/v1/creator/tasks/0").status_code == 404
+
+
+def test_creator_service_ttl_prunes_on_access(tmp_path):
+    import time
+
+    from seeding_engine.creator import CreateStatus, CreateTask, CreatorService
+
+    svc = CreatorService(task_ttl=1)
+    try:
+        old = CreateTask(
+            id=0, source_path="b1/x", name="x", status=CreateStatus.COMPLETED
+        )
+        old.created_at = time.time() - 5
+        svc._tasks[0] = old
+        assert svc.list_all() == []  # прунится при обращении
+        assert svc.get(0) is None
+    finally:
+        svc.shutdown()
+
+
 def test_engine_browse_rejects_traversal(engine_app):
     with TestClient(engine_app) as client:
         r = client.get("/internal/v1/fs/browse", params={"path": "../.."})
@@ -240,6 +273,30 @@ def test_creator_list_tasks_aggregates(api_module):
             assert len(body) == 1
             assert body[0]["engine_id"] == "default"
             assert body[0]["id"] == 0
+
+
+def test_creator_delete_task_proxies(api_module):
+    with respx.mock(assert_all_called=False) as mock:
+        _wire_health(mock)
+        route = mock.delete(f"{ENGINE}/internal/v1/creator/tasks/0").mock(
+            return_value=httpx.Response(200, json={"ok": True})
+        )
+        with TestClient(api_module.app) as client:
+            r = client.delete("/api/v1/creator/tasks/default/0")
+            assert r.status_code == 200, r.text
+            assert r.json()["ok"] is True
+            assert route.called
+
+
+def test_creator_delete_task_not_found(api_module):
+    with respx.mock(assert_all_called=False) as mock:
+        _wire_health(mock)
+        mock.delete(f"{ENGINE}/internal/v1/creator/tasks/9").mock(
+            return_value=httpx.Response(404, json={"detail": "task not found"})
+        )
+        with TestClient(api_module.app) as client:
+            r = client.delete("/api/v1/creator/tasks/default/9")
+            assert r.status_code == 404
 
 
 def test_creator_seed_registers_torrent(api_module):
