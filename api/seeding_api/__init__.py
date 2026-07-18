@@ -1,3 +1,3 @@
 """Public HTTP API for clients."""
 
-__version__ = "1.5.3"
+__version__ = "1.5.4"

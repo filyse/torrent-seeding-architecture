@@ -3077,11 +3077,14 @@ function mountListShell(root: HTMLElement): void {
     statuses: Record<string, number>;
     labels: Record<string, number>;
     engines: Record<string, number>;
+    engine_sizes: Record<string, number>;
     states: Record<string, number>;
   };
   let facets: ListFacets | null = null;
   let lastFacetsAt = 0;
   const fmtCount = (n: number) => ` (${n.toLocaleString("ru-RU")} шт)`;
+  const fmtCountSize = (n: number, bytes: number) =>
+    ` (${n.toLocaleString("ru-RU")} шт · ${fmtBytes(bytes)})`;
   function applyCountsTo(sel: HTMLSelectElement, counts: Record<string, number>): void {
     for (const o of Array.from(sel.options)) {
       const base = o.dataset.base ?? o.textContent ?? "";
@@ -3089,12 +3092,27 @@ function mountListShell(root: HTMLElement): void {
       o.textContent = c == null ? base : base + fmtCount(c);
     }
   }
+  // У движков к счётчику добавляем суммарный объём раздач: «b5 (1 659 шт · 12.3 TB)».
+  function applyEngineCounts(): void {
+    if (!facets) return;
+    const sizes = facets.engine_sizes ?? {};
+    const totalSize = Object.values(sizes).reduce((a, b) => a + b, 0);
+    for (const o of Array.from(engineSelect.options)) {
+      const base = o.dataset.base ?? o.textContent ?? "";
+      if (o.value === "") {
+        o.textContent = base + fmtCountSize(facets.total, totalSize);
+      } else {
+        const c = facets.engines[o.value];
+        o.textContent = c == null ? base : base + fmtCountSize(c, sizes[o.value] ?? 0);
+      }
+    }
+  }
   function applyFacetCounts(): void {
     if (!facets) return;
     applyCountsTo(statusSelect, facets.statuses);
     applyCountsTo(stateSelect, facets.states);
     applyCountsTo(labelSelect, facets.labels);
-    applyCountsTo(engineSelect, facets.engines);
+    applyEngineCounts();
   }
   async function refreshFacets(): Promise<void> {
     const now = Date.now();

@@ -260,4 +260,6 @@ class TorrentFacetsOut(BaseModel):
     statuses: dict[str, int]
     labels: dict[str, int]
     engines: dict[str, int]
+    # Суммарный объём раздач по движку (в байтах) — для подписи рядом со счётчиком.
+    engine_sizes: dict[str, int]
     states: dict[str, int]

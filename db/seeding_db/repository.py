@@ -196,7 +196,11 @@ class TorrentRepository:
         ).all()
         engine_rows = (
             await self._session.execute(
-                select(TorrentRecord.engine_id, func.count()).group_by(TorrentRecord.engine_id)
+                select(
+                    TorrentRecord.engine_id,
+                    func.count(),
+                    func.coalesce(func.sum(TorrentRecord.size), 0),
+                ).group_by(TorrentRecord.engine_id)
             )
         ).all()
         # Все состояния одним запросом через агрегаты с FILTER.
@@ -220,7 +224,8 @@ class TorrentRepository:
             "total": int(total),
             "statuses": {str(s): int(c) for s, c in status_rows},
             "labels": {str(lb): int(c) for lb, c in label_rows if lb},
-            "engines": {str(e): int(c) for e, c in engine_rows if e},
+            "engines": {str(e): int(c) for e, c, _s in engine_rows if e},
+            "engine_sizes": {str(e): int(s) for e, _c, s in engine_rows if e},
             "states": {
                 "active": int(active),
                 "peers": int(peers),
