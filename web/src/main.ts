@@ -621,7 +621,7 @@ function brandLockup(): HTMLElement {
   return el("div", { className: "brand" }, [
     brandMark(),
     el("div", { className: "brand__text" }, [
-      el("h1", { className: "brand__name" }, ["Раздача"]),
+      el("h1", { className: "brand__name" }, ["RelaySeed"]),
       el("p", { className: "brand__tag" }, ["Управление торрентами"]),
     ]),
   ]);
@@ -6076,7 +6076,7 @@ async function bootstrap(): Promise<void> {
   render();
 }
 
-document.title = "Раздача";
+document.title = "RelaySeed";
 applyTheme(getThemeMode());
 // Кнопки «назад/вперёд» браузера (History API) → перерисовка.
 window.addEventListener("popstate", () => render());
