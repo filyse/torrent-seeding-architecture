@@ -587,6 +587,11 @@ const ICON_PATHS: Record<string, string> = {
   trash:
     '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
   play: '<polygon points="5 3 19 12 5 21 5 3"/>',
+  pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+  tag:
+    '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
+  swap:
+    '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
   refresh:
     '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   settings:
@@ -3249,9 +3254,9 @@ function mountListShell(root: HTMLElement): void {
     repaint();
   }
 
-  const bulkPause = el("button", { type: "button", className: "btn btn--sm" }, ["⏸ Пауза"]);
-  const bulkResume = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["▶ Старт"]);
-  const bulkDel = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["🗑 Удалить"]);
+  const bulkPause = el("button", { type: "button", className: "btn btn--sm" }, [icon("pause"), "Пауза"]);
+  const bulkResume = el("button", { type: "button", className: "btn btn--sm btn--primary" }, [icon("play"), "Старт"]);
+  const bulkDel = el("button", { type: "button", className: "btn btn--sm btn--danger" }, [icon("trash"), "Удалить"]);
   const runBulk = async (path: string) => {
     const ids = [...selectedIds];
     if (ids.length === 0) {
@@ -3277,7 +3282,7 @@ function mountListShell(root: HTMLElement): void {
     placeholder: "Метка…",
     list: "label-suggestions",
   }) as HTMLInputElement;
-  const bulkLabelBtn = el("button", { type: "button", className: "btn btn--sm" }, ["🏷 Метка"]);
+  const bulkLabelBtn = el("button", { type: "button", className: "btn btn--sm" }, [icon("tag"), "Метка"]);
   const applyBulkLabel = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) {
@@ -3326,9 +3331,10 @@ function mountListShell(root: HTMLElement): void {
     className: "list-filter__select bulk-bar__migrate",
     title: "Целевой движок для переноса",
   }) as HTMLSelectElement;
-  bulkMigrateSelect.append(el("option", { value: "" }, ["⇄ Перенести на…"]));
+  bulkMigrateSelect.append(el("option", { value: "" }, ["Перенести на…"]));
   bulkMigrateSelect.disabled = true;
   const bulkMigrateBtn = el("button", { type: "button", className: "btn btn--sm" }, [
+    icon("swap"),
     "Перенести",
   ]) as HTMLButtonElement;
   bulkMigrateBtn.disabled = true;
@@ -3338,7 +3344,7 @@ function mountListShell(root: HTMLElement): void {
     try {
       const engines = await fetchJson<EngineOut[]>("/engines");
       engines.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-      bulkMigrateSelect.replaceChildren(el("option", { value: "" }, ["⇄ Перенести на…"]));
+      bulkMigrateSelect.replaceChildren(el("option", { value: "" }, ["Перенести на…"]));
       for (const e of engines) {
         const free = e.disk_free != null ? `своб. ${fmtBytes(e.disk_free)}` : "место неизв.";
         const off = e.online === false ? " — офлайн" : "";
@@ -3619,6 +3625,7 @@ function mountListShell(root: HTMLElement): void {
     bulkLabelBtn,
     bulkMigrateSelect,
     bulkMigrateBtn,
+    el("span", { className: "bulk-bar__sep" }),
     bulkDel,
     el("span", { className: "bulk-bar__spacer" }),
     clearSelBtn,

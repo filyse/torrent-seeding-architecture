@@ -2126,12 +2126,60 @@ body.layout-wide #app {
   margin-bottom: 0.75rem;
   padding: 0.5rem 0.7rem;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  border-radius: var(--radius);
+  border-radius: calc(var(--radius) + 2px);
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
 }
 
 .bulk-bar[hidden] {
   display: none;
+}
+
+/* Единый размер и вид всех контролов панели — иначе кнопки/поля/селекты разной высоты. */
+.bulk-bar > .btn,
+.bulk-bar > select,
+.bulk-bar > input {
+  height: 2rem;
+  min-height: 2rem;
+  margin: 0;
+  font-size: 0.8rem;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.bulk-bar > .btn {
+  padding: 0 0.7rem;
+  white-space: nowrap;
+}
+
+.bulk-bar > .btn .icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.bulk-bar > input {
+  width: 9rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.bulk-bar > input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.bulk-bar > select {
+  max-width: 12rem;
+  padding: 0 1.8rem 0 0.6rem;
+}
+
+/* Тонкий разделитель перед деструктивным действием, чтобы «Удалить» не сливалось. */
+.bulk-bar__sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 0.15rem 0.2rem;
+  background: color-mix(in srgb, var(--accent) 25%, var(--border));
 }
 
 .list-pager {
@@ -2191,10 +2239,6 @@ body.layout-wide #app {
 
 .bulk-bar__spacer {
   margin-left: auto;
-}
-
-.bulk-bar__migrate {
-  max-width: 12rem;
 }
 
 .torrent-card__check {
