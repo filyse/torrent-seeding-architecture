@@ -6232,7 +6232,16 @@ function mountSettingsShell(root: HTMLElement): void {
   root.append(back, header, tabBar, paneWrap);
   selectTab(activeSettingsTab);
 
-  void loadSessionStats().then((s) => {
+  // Общий объём раздач берётся из facets (не из live-сессии), поэтому тянем его отдельно,
+  // иначе на вкладке «Информация» карточки «Объём раздач» не будет.
+  void Promise.all([
+    loadSessionStats(),
+    fetchJson<{ total_size?: number | null }>("/torrents/facets").catch(() => null),
+  ]).then(([s, facets]) => {
+    if (s && facets?.total_size != null) {
+      s.total_size = facets.total_size;
+      lastTotalContentSize = facets.total_size;
+    }
     statsHost.replaceChildren(mountSessionBar(s));
   });
 }
