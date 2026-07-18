@@ -1833,10 +1833,22 @@ input.file-input::file-selector-button:hover {
 }
 
 .session-bar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.6rem;
   margin-bottom: 0.85rem;
+}
+
+@media (max-width: 720px) {
+  .session-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 440px) {
+  .session-bar {
+    grid-template-columns: 1fr;
+  }
 }
 
 .session-bar__muted {
