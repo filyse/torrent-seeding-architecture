@@ -9,7 +9,9 @@ libtorrent 2.0 (v1-only). Работает поверх SEEDING_DATA_ROOT — т
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import os
+import queue
 import re
 import threading
 import time
@@ -20,6 +22,23 @@ from enum import Enum
 log = logging.getLogger(__name__)
 
 PIECE_SIZE = 16 * 1024 * 1024  # 16 МБ, как в оригинальном torrent_api
+
+# Хеширование выносим в ОТДЕЛЬНЫЙ процесс (start method "spawn"), чтобы CPU/IO-bound
+# работа libtorrent не держала GIL и не блокировала событийный цикл движка. spawn
+# (а не fork) — безопасно форкать многопоточный процесс движка нельзя.
+_MP_CTX = multiprocessing.get_context("spawn")
+
+
+def _default_workers() -> int:
+    """Сколько задач создания хешировать одновременно на движке.
+
+    На HDD параллельное хеширование двух папок вызывает seek-thrashing и замедляет
+    обе — поэтому по умолчанию 1 (последовательно). Переопределяется env
+    ``SEEDING_CREATOR_WORKERS`` (например, 2+ на SSD/NVMe-движках)."""
+    try:
+        return max(1, int(os.getenv("SEEDING_CREATOR_WORKERS", "1")))
+    except ValueError:
+        return 1
 
 VIDEO_EXTENSIONS = {
     ".mkv",
@@ -154,6 +173,65 @@ def validate_episode_sequence(abs_path: str) -> dict[str, object]:
     }
 
 
+class _WorkerCancelled(Exception):
+    """Отмена, поднимаемая внутри дочернего процесса хеширования."""
+
+
+def _hash_worker(abs_src: str, piece_size: int, progress_q, cancel_ev) -> None:
+    """Собрать .torrent целиком в ОТДЕЛЬНОМ процессе (spawn).
+
+    Прогресс и результат отдаются через ``progress_q``:
+      ("progress", pct) — очередной процент; ("done", bytes) — готовый torrent;
+      ("cancelled", None) — отменено; ("error", str) — ошибка.
+    Отмена приходит через ``cancel_ev`` (multiprocessing.Event)."""
+    try:
+        import libtorrent as lt  # noqa: PLC0415
+
+        src = abs_src.replace("\\", "/")
+        parent_dir = os.path.dirname(src)
+        base_name = os.path.basename(src)
+
+        fs = lt.file_storage()
+        fs.set_name(base_name)
+        lt.add_files(fs, src.encode("utf-8"))
+        if fs.num_files() == 0:
+            progress_q.put(("error", "no files to add"))
+            return
+
+        # v1-only: совместимость с оригинальным torrent_api и трекерами.
+        flags = getattr(lt.create_torrent, "v1_only", 0)
+        ct = lt.create_torrent(fs, piece_size, flags=flags)
+        ct.set_creator("RelaySeed")
+        ct.set_comment("Created by RelaySeed")
+
+        num_pieces = ct.num_pieces() or 1
+        last_report = [0.0]
+
+        def hash_cb(idx: int) -> None:
+            if cancel_ev.is_set():
+                raise _WorkerCancelled()
+            now = time.time()
+            if now - last_report[0] >= 0.5:
+                pct = int((idx + 1) * 100 / num_pieces)
+                progress_q.put(("progress", min(pct, 99)))
+                last_report[0] = now
+
+        lt.set_piece_hashes(ct, parent_dir, hash_cb)
+        if cancel_ev.is_set():
+            progress_q.put(("cancelled", None))
+            return
+
+        entry = ct.generate()
+        if not entry or b"info" not in entry:
+            progress_q.put(("error", "torrent generation failed (no info dict)"))
+            return
+        progress_q.put(("done", lt.bencode(entry)))
+    except _WorkerCancelled:
+        progress_q.put(("cancelled", None))
+    except Exception as exc:  # noqa: BLE001
+        progress_q.put(("error", str(exc)))
+
+
 class CreateStatus(str, Enum):
     QUEUED = "queued"
     PROCESSING = "processing"
@@ -201,12 +279,15 @@ class TaskCancelled(Exception):
 class CreatorService:
     """Управление задачами создания торрентов (in-memory, эфемерно)."""
 
-    def __init__(self, max_workers: int = 2) -> None:
+    def __init__(self, max_workers: int | None = None) -> None:
         self._tasks: dict[int, CreateTask] = {}
         self._cancelled: set[int] = set()
         self._counter = 0
         self._lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        workers = max_workers if max_workers is not None else _default_workers()
+        # Потоки-надзиратели: каждый управляет одним дочерним процессом хеширования и
+        # лишь перекачивает прогресс (в основном спит на queue.get → GIL свободен).
+        self._executor = ThreadPoolExecutor(max_workers=workers)
 
     def shutdown(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)
@@ -275,8 +356,7 @@ class CreatorService:
             task.updated_at = time.time()
 
     def _run(self, task_id: int, abs_src: str) -> None:
-        lt = _try_import_libtorrent()
-        if lt is None:
+        if _try_import_libtorrent() is None:
             self._update(
                 task_id,
                 status=CreateStatus.FAILED,
@@ -293,7 +373,7 @@ class CreatorService:
                 message="Создание торрента",
                 progress=0,
             )
-            data = self._build_torrent(lt, task_id, abs_src)
+            data = self._build_torrent(task_id, abs_src)
             if task_id in self._cancelled:
                 raise TaskCancelled()
             self._update(
@@ -321,46 +401,54 @@ class CreatorService:
             with self._lock:
                 self._cancelled.discard(task_id)
 
-    def _build_torrent(self, lt, task_id: int, abs_src: str) -> bytes:
-        abs_src = abs_src.replace("\\", "/")
-        parent_dir = os.path.dirname(abs_src)
-        base_name = os.path.basename(abs_src)
+    def _build_torrent(self, task_id: int, abs_src: str) -> bytes:
+        """Запустить хеширование в дочернем процессе и качать прогресс через очередь.
 
-        fs = lt.file_storage()
-        fs.set_name(base_name)
-        lt.add_files(fs, abs_src.encode("utf-8"))
-        if fs.num_files() == 0:
-            raise RuntimeError("no files to add")
+        Сам этот метод крутится в потоке-надзирателе: почти всё время спит на
+        ``queue.get`` (GIL свободен) — событийный цикл движка не блокируется."""
+        progress_q = _MP_CTX.Queue()
+        cancel_ev = _MP_CTX.Event()
+        proc = _MP_CTX.Process(
+            target=_hash_worker,
+            args=(abs_src, PIECE_SIZE, progress_q, cancel_ev),
+            daemon=True,
+        )
+        proc.start()
+        result: bytes | None = None
+        try:
+            while True:
+                if task_id in self._cancelled and not cancel_ev.is_set():
+                    cancel_ev.set()
+                try:
+                    kind, payload = progress_q.get(timeout=0.5)
+                except queue.Empty:
+                    if not proc.is_alive():
+                        break
+                    continue
+                if kind == "progress":
+                    pct = min(int(payload), 99)
+                    self._update(
+                        task_id,
+                        progress=pct,
+                        message=f"Хеширование: {pct}%",
+                    )
+                elif kind == "done":
+                    result = payload
+                    break
+                elif kind == "cancelled":
+                    raise TaskCancelled()
+                elif kind == "error":
+                    raise RuntimeError(str(payload))
+        finally:
+            cancel_ev.set()
+            if proc.is_alive():
+                proc.terminate()
+            proc.join(timeout=5)
 
-        # v1-only: сохраняем совместимость с оригинальным torrent_api и трекерами.
-        flags = getattr(lt.create_torrent, "v1_only", 0)
-        ct = lt.create_torrent(fs, PIECE_SIZE, flags=flags)
-        ct.set_creator("RelaySeed")
-        ct.set_comment("Created by RelaySeed")
-
-        num_pieces = ct.num_pieces() or 1
-        last_report = 0.0
-
-        def hash_cb(idx: int) -> None:
-            nonlocal last_report
+        if result is None:
             if task_id in self._cancelled:
                 raise TaskCancelled()
-            now = time.time()
-            if now - last_report >= 0.5:
-                pct = int((idx + 1) * 100 / num_pieces)
-                self._update(
-                    task_id,
-                    progress=min(pct, 99),
-                    message=f"Хеширование: {min(pct, 99)}%",
-                )
-                last_report = now
-
-        lt.set_piece_hashes(ct, parent_dir, hash_cb)
-
-        if task_id in self._cancelled:
-            raise TaskCancelled()
-
-        entry = ct.generate()
-        if not entry or b"info" not in entry:
-            raise RuntimeError("torrent generation failed (no info dict)")
-        return lt.bencode(entry)
+            raise RuntimeError(
+                f"hash worker exited unexpectedly (code={proc.exitcode})"
+            )
+        return result

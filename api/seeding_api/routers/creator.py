@@ -5,6 +5,7 @@
 раздачу (режим «создать и раздавать»).
 """
 
+import asyncio
 import os
 from urllib.parse import quote
 
@@ -55,19 +56,24 @@ async def creator_browse(
 
 @router.get("/tasks", response_model=list[CreatorTaskOut])
 async def list_tasks(pool: EnginePoolDep):
-    """Очередь создания: агрегирует задачи со всех движков (свежие сверху)."""
-    out: list[CreatorTaskOut] = []
-    for spec in pool.specs:
+    """Очередь создания: агрегирует задачи со всех движков (свежие сверху).
+
+    Движки опрашиваются ПАРАЛЛЕЛЬНО (asyncio.gather): один занятый HDD-движок больше
+    не тормозит обновление всей очереди в UI."""
+
+    async def _fetch(engine_id: str) -> list[CreatorTaskOut]:
         try:
-            client = pool.client_for(spec.id)
+            client = pool.client_for(engine_id)
         except KeyError:
-            continue
+            return []
         try:
             tasks = await client.list_create_tasks()
         except httpx.HTTPError:
-            continue
-        for data in tasks:
-            out.append(_task_out(spec.id, data))
+            return []
+        return [_task_out(engine_id, data) for data in tasks]
+
+    results = await asyncio.gather(*[_fetch(spec.id) for spec in pool.specs])
+    out: list[CreatorTaskOut] = [task for sub in results for task in sub]
     out.sort(key=lambda t: t.updated_at, reverse=True)
     return out
 
