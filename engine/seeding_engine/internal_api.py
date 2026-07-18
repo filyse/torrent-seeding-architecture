@@ -6,8 +6,10 @@ import tarfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+
+from seeding_engine import creator as creator_mod
 
 
 def _expected_token() -> str:
@@ -149,6 +151,107 @@ class ImportDirectIn(BaseModel):
 
 def get_runtime(request: Request):
     return request.app.state.torrent_runtime
+
+
+class BrowseItemOut(BaseModel):
+    name: str
+    path: str
+    is_dir: bool
+    size: int
+    modified: float
+
+
+class CreateTaskIn(BaseModel):
+    source_path: str = Field(..., min_length=1)
+    skip_episode_check: bool = False
+
+
+class CreateTaskOut(BaseModel):
+    id: int
+    source_path: str
+    save_path: str
+    status: str
+    progress: int
+    message: str
+    error: str | None = None
+    name: str
+    file_count: int
+    created_at: float
+    updated_at: float
+    has_torrent: bool
+
+
+def get_creator(request: Request) -> creator_mod.CreatorService:
+    svc = getattr(request.app.state, "creator", None)
+    if svc is None:
+        svc = creator_mod.CreatorService()
+        request.app.state.creator = svc
+    return svc
+
+
+@router.get("/fs/browse", response_model=list[BrowseItemOut])
+async def fs_browse(path: str = Query("")):
+    """Листинг каталога относительно SEEDING_DATA_ROOT (для выбора контента в UI)."""
+    try:
+        items = creator_mod.browse(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except NotADirectoryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [BrowseItemOut.model_validate(i) for i in items]
+
+
+@router.post("/creator/tasks", response_model=CreateTaskOut)
+async def create_torrent_task(
+    body: CreateTaskIn,
+    svc: creator_mod.CreatorService = Depends(get_creator),
+):
+    try:
+        task = svc.create(body.source_path, skip_episode_check=body.skip_episode_check)
+    except RuntimeError as exc:
+        # libtorrent недоступен — фича не поддерживается на этом движке.
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CreateTaskOut.model_validate(task.to_public())
+
+
+@router.get("/creator/tasks/{task_id}", response_model=CreateTaskOut)
+async def get_create_task(
+    task_id: int,
+    svc: creator_mod.CreatorService = Depends(get_creator),
+):
+    task = svc.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return CreateTaskOut.model_validate(task.to_public())
+
+
+@router.post("/creator/tasks/{task_id}/cancel")
+async def cancel_create_task(
+    task_id: int,
+    svc: creator_mod.CreatorService = Depends(get_creator),
+):
+    if not svc.cancel(task_id):
+        raise HTTPException(status_code=404, detail="task not found or not cancellable")
+    return {"ok": True}
+
+
+@router.get("/creator/tasks/{task_id}/torrent")
+async def get_created_torrent(
+    task_id: int,
+    svc: creator_mod.CreatorService = Depends(get_creator),
+):
+    task = svc.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    if task.torrent_bytes is None:
+        raise HTTPException(status_code=409, detail="torrent not ready")
+    return Response(content=task.torrent_bytes, media_type="application/x-bittorrent")
 
 
 @router.get("/health")

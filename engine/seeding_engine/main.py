@@ -94,6 +94,9 @@ async def startup() -> None:
     app.state.torrent_runtime = rt
     await rt.start()
     log.info("engine runtime=%s", rt.backend_name)
+    from seeding_engine.creator import CreatorService
+
+    app.state.creator = CreatorService()
     app.state.register_task = asyncio.create_task(_self_register_loop())
 
 
@@ -106,6 +109,9 @@ async def shutdown() -> None:
             await task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
+    creator = getattr(app.state, "creator", None)
+    if creator is not None:
+        creator.shutdown()
     rt = getattr(app.state, "torrent_runtime", None)
     if rt is not None:
         await rt.stop()

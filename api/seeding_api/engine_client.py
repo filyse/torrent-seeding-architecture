@@ -105,6 +105,43 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def browse(self, path: str = "") -> list[dict]:
+        """Листинг каталога на движке относительно его SEEDING_DATA_ROOT (выбор контента)."""
+        r = await self._client.get("/internal/v1/fs/browse", params={"path": path})
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else []
+
+    async def create_torrent_task(self, source_path: str, skip_episode_check: bool) -> dict:
+        """Поставить задачу создания .torrent из контента на диске движка."""
+        r = await self._client.post(
+            "/internal/v1/creator/tasks",
+            json={"source_path": source_path, "skip_episode_check": skip_episode_check},
+        )
+        r.raise_for_status()
+        return r.json()
+
+    async def get_create_task(self, task_id: int) -> dict | None:
+        r = await self._client.get(f"/internal/v1/creator/tasks/{task_id}")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
+    async def cancel_create_task(self, task_id: int) -> bool:
+        r = await self._client.post(f"/internal/v1/creator/tasks/{task_id}/cancel")
+        if r.status_code == 404:
+            return False
+        r.raise_for_status()
+        return True
+
+    async def get_created_torrent_bytes(self, task_id: int) -> bytes | None:
+        r = await self._client.get(f"/internal/v1/creator/tasks/{task_id}/torrent")
+        if r.status_code in (404, 409):
+            return None
+        r.raise_for_status()
+        return r.content
+
     async def pause(self, db_id: int) -> dict:
         r = await self._client.post(f"/internal/v1/torrents/{db_id}/pause")
         r.raise_for_status()

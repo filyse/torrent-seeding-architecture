@@ -96,6 +96,41 @@ class TorrentOut(BaseModel):
     created_at: datetime
 
 
+class CreatorBrowseItem(BaseModel):
+    name: str
+    path: str
+    is_dir: bool
+    size: int
+    modified: float
+
+
+class CreatorTaskCreate(BaseModel):
+    engine_id: str = Field(..., min_length=1, max_length=64)
+    source_path: str = Field(..., min_length=1)
+    skip_episode_check: bool = False
+
+
+class CreatorTaskOut(BaseModel):
+    engine_id: str
+    id: int
+    source_path: str
+    save_path: str
+    status: str
+    progress: int
+    message: str
+    error: str | None = None
+    name: str
+    file_count: int
+    created_at: float
+    updated_at: float
+    has_torrent: bool
+
+
+class CreatorSeedIn(BaseModel):
+    label: str = Field(default="", max_length=128)
+    display_name: str = Field(default="", max_length=512)
+
+
 class TorrentPeerOut(BaseModel):
     endpoint: str
     client: str | None = None

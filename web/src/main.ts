@@ -58,6 +58,24 @@ type EngineOut = {
   upload_limit?: number | null;
 };
 
+type CreatorBrowseItem = { name: string; path: string; is_dir: boolean; size: number; modified: number };
+type CreatorTaskOut = {
+  engine_id: string;
+  id: number;
+  source_path: string;
+  save_path: string;
+  status: string;
+  progress: number;
+  message: string;
+  error: string | null;
+  name: string;
+  file_count: number;
+  created_at: number;
+  updated_at: number;
+  has_torrent: boolean;
+};
+type CreateMode = "seed" | "download";
+
 type EngineRegistryItem = {
   id: string;
   url: string;
@@ -3032,6 +3050,11 @@ function mountListShell(root: HTMLElement): void {
   const addTorrentBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, ["+ Добавить торрент"]);
   addTorrentBtn.addEventListener("click", () => showAddTorrentDialog("/data/b1", onAdded));
 
+  const createTorrentBtn = el("button", { type: "button", className: "btn btn--sm" }, [
+    "Создать торрент",
+  ]);
+  createTorrentBtn.addEventListener("click", () => openCreateTorrentDialog(() => void refresh({ afterAdd: true })));
+
   const updateTorrentBtn = el("button", { type: "button", className: "btn btn--sm" }, [
     icon("upload"),
     "Обновить торрент",
@@ -3045,7 +3068,7 @@ function mountListShell(root: HTMLElement): void {
   });
 
   const headerActions = el("div", { className: "app-header__actions" });
-  if (canWrite()) headerActions.append(addTorrentBtn, updateTorrentBtn);
+  if (canWrite()) headerActions.append(addTorrentBtn, createTorrentBtn, updateTorrentBtn);
   headerActions.append(settingsLink, metaEl);
   const header = el("header", { className: "app-header" }, [
     el("div", {}, [el("h1", {}, ["Раздача"]), el("p", { className: "field__hint" }, ["Управление торрентами"])]),
@@ -4109,6 +4132,264 @@ async function loginWithPassword(username: string, password: string): Promise<vo
   }
   const data = (await res.json()) as { token: string };
   setApiKey(data.token);
+}
+
+const CREATE_POLL_MS = 1500;
+const TERMINAL_CREATE_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
+async function downloadCreatedTorrent(task: CreatorTaskOut): Promise<void> {
+  const res = await fetch(`${API}/creator/tasks/${task.engine_id}/${task.id}/download`, {
+    headers: apiHeaders(false),
+  });
+  await throwIfNotOk(res);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: `${task.name || "torrent"}.torrent` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function openCreateTorrentDialog(onSeeded: () => void): void {
+  const overlay = el("div", { className: "modal-overlay" });
+  const dialog = el("div", {
+    className: "modal-dialog modal-dialog--wide",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "create-dialog-title",
+  });
+
+  let engines: EngineOut[] = [];
+  let currentEngine = "";
+  let currentPath = "";
+  const selected = new Set<string>();
+
+  const engineSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
+  const breadcrumb = el("div", { className: "creator-breadcrumb" });
+  const listBox = el("div", { className: "creator-browser" });
+  const selectionInfo = el("span", { className: "field__hint" }, ["Ничего не выбрано"]);
+
+  const labelInput = el("input", { type: "text", placeholder: "Метка (необязательно)" }) as HTMLInputElement;
+  const nameInput = el("input", { type: "text", placeholder: "Название (только для одиночного)" }) as HTMLInputElement;
+
+  const modeSeed = el("input", { type: "radio", name: "create-mode", value: "seed" }) as HTMLInputElement;
+  modeSeed.checked = true;
+  const modeDownload = el("input", { type: "radio", name: "create-mode", value: "download" }) as HTMLInputElement;
+  const modeRow = el("div", { className: "creator-modes" }, [
+    el("label", {}, [modeSeed, " Создать и раздавать"]),
+    el("label", {}, [modeDownload, " Только создать (.torrent)"]),
+  ]);
+
+  const episodeCheck = el("input", { type: "checkbox" }) as HTMLInputElement;
+  const episodeRow = el("label", { className: "creator-check" }, [episodeCheck, " Проверять последовательность серий"]);
+
+  const progressBox = el("div", { className: "creator-progress" });
+
+  const createBtn = el("button", { type: "button", className: "btn btn--primary" }, ["Создать"]);
+  const closeBtn = el("button", { type: "button", className: "btn btn--ghost" }, ["Закрыть"]);
+
+  const updateSelectionInfo = () => {
+    selectionInfo.textContent =
+      selected.size === 0 ? "Ничего не выбрано" : `Выбрано: ${selected.size}`;
+    createBtn.disabled = selected.size === 0;
+  };
+
+  const renderBreadcrumb = () => {
+    breadcrumb.replaceChildren();
+    const parts = currentPath ? currentPath.split("/") : [];
+    const rootLink = el("button", { type: "button", className: "creator-crumb" }, ["/ (диск)"]);
+    rootLink.addEventListener("click", () => void navigate(""));
+    breadcrumb.append(rootLink);
+    let acc = "";
+    for (const p of parts) {
+      acc = acc ? `${acc}/${p}` : p;
+      const target = acc;
+      breadcrumb.append(document.createTextNode(" / "));
+      const link = el("button", { type: "button", className: "creator-crumb" }, [p]);
+      link.addEventListener("click", () => void navigate(target));
+      breadcrumb.append(link);
+    }
+  };
+
+  const renderItems = (items: CreatorBrowseItem[]) => {
+    listBox.replaceChildren();
+    if (items.length === 0) {
+      listBox.append(el("div", { className: "creator-empty" }, ["Пусто"]));
+      return;
+    }
+    for (const item of items) {
+      const row = el("div", { className: "creator-row" });
+      const check = el("input", { type: "checkbox" }) as HTMLInputElement;
+      check.checked = selected.has(item.path);
+      check.addEventListener("change", () => {
+        if (check.checked) selected.add(item.path);
+        else selected.delete(item.path);
+        updateSelectionInfo();
+      });
+      const ic = item.is_dir ? "📁" : "📄";
+      const nameEl = item.is_dir
+        ? el("button", { type: "button", className: "creator-name creator-name--dir" }, [`${ic} ${item.name}`])
+        : el("span", { className: "creator-name" }, [`${ic} ${item.name}`]);
+      if (item.is_dir) {
+        (nameEl as HTMLButtonElement).addEventListener("click", () => void navigate(item.path));
+      }
+      const meta = el("span", { className: "creator-row__meta" }, [
+        item.is_dir ? "" : fmtBytes(item.size),
+      ]);
+      row.append(check, nameEl, meta);
+      listBox.append(row);
+    }
+  };
+
+  const navigate = async (path: string) => {
+    currentPath = path;
+    renderBreadcrumb();
+    listBox.replaceChildren(el("div", { className: "creator-empty" }, ["Загрузка…"]));
+    try {
+      const items = await fetchJson<CreatorBrowseItem[]>(
+        `/creator/browse?engine_id=${encodeURIComponent(currentEngine)}&path=${encodeURIComponent(path)}`,
+      );
+      renderItems(items);
+    } catch (e) {
+      listBox.replaceChildren(
+        el("div", { className: "creator-empty" }, [e instanceof Error ? e.message : String(e)]),
+      );
+    }
+  };
+
+  engineSelect.addEventListener("change", () => {
+    currentEngine = engineSelect.value;
+    selected.clear();
+    updateSelectionInfo();
+    void navigate("");
+  });
+
+  const finish = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape") finish();
+  };
+  closeBtn.addEventListener("click", finish);
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) finish();
+  });
+  document.addEventListener("keydown", onKey);
+
+  createBtn.addEventListener("click", async () => {
+    const paths = [...selected];
+    if (paths.length === 0) return;
+    const mode = (modeSeed.checked ? "seed" : "download") as CreateMode;
+    const skipEpisode = !episodeCheck.checked;
+    createBtn.disabled = true;
+    progressBox.replaceChildren();
+    let anyFailed = false;
+
+    await Promise.all(
+      paths.map(async (sourcePath) => {
+        const row = el("div", { className: "creator-task" });
+        const label = el("span", { className: "creator-task__name" }, [sourcePath]);
+        const status = el("span", { className: "creator-task__status" }, ["Постановка в очередь…"]);
+        row.append(label, status);
+        progressBox.append(row);
+        try {
+          const created = await fetchJson<CreatorTaskOut>("/creator/tasks", {
+            method: "POST",
+            body: JSON.stringify({
+              engine_id: currentEngine,
+              source_path: sourcePath,
+              skip_episode_check: skipEpisode,
+            }),
+          });
+          const poll = async () => {
+            for (;;) {
+              const task = await fetchJson<CreatorTaskOut>(
+                `/creator/tasks/${created.engine_id}/${created.id}`,
+              );
+              status.textContent = `${task.message} (${task.progress}%)`;
+              if (TERMINAL_CREATE_STATUSES.has(task.status)) return task;
+              await new Promise((r) => setTimeout(r, CREATE_POLL_MS));
+            }
+          };
+          const task = await poll();
+          if (task.status !== "completed") {
+            anyFailed = true;
+            status.textContent = `✗ ${task.message}`;
+            row.classList.add("creator-task--fail");
+            return;
+          }
+          if (mode === "download") {
+            await downloadCreatedTorrent(task);
+            status.textContent = "✓ Готово (.torrent скачан)";
+          } else {
+            await fetchJson<TorrentOut>(`/creator/tasks/${task.engine_id}/${task.id}/seed`, {
+              method: "POST",
+              body: JSON.stringify({
+                label: labelInput.value.trim(),
+                display_name: paths.length === 1 ? nameInput.value.trim() : "",
+              }),
+            });
+            status.textContent = "✓ Создан и поставлен на раздачу";
+          }
+          row.classList.add("creator-task--ok");
+        } catch (e) {
+          anyFailed = true;
+          status.textContent = `✗ ${e instanceof Error ? e.message : String(e)}`;
+          row.classList.add("creator-task--fail");
+        }
+      }),
+    );
+
+    showToast(anyFailed ? "Завершено с ошибками" : "Готово", anyFailed);
+    if (mode === "seed") onSeeded();
+    createBtn.disabled = false;
+    selected.clear();
+    updateSelectionInfo();
+    void navigate(currentPath);
+  });
+
+  dialog.append(
+    el("h2", { id: "create-dialog-title", className: "modal-title" }, ["Создать торрент"]),
+    field("Диск (движок)", engineSelect),
+    breadcrumb,
+    listBox,
+    el("div", { className: "creator-selection" }, [selectionInfo]),
+    modeRow,
+    episodeRow,
+    field("Метка", labelInput),
+    field("Название", nameInput),
+    progressBox,
+    (() => {
+      const actions = el("div", { className: "modal-actions modal-actions--row" });
+      actions.append(closeBtn, createBtn);
+      return actions;
+    })(),
+  );
+  overlay.append(dialog);
+  document.body.append(overlay);
+
+  createBtn.disabled = true;
+  void (async () => {
+    try {
+      engines = await fetchJson<EngineOut[]>("/engines");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+      return;
+    }
+    engineSelect.replaceChildren();
+    for (const eng of engines) {
+      engineSelect.append(el("option", { value: eng.id }, [`${eng.id} (${eng.storage_prefix})`]));
+    }
+    if (engines.length > 0) {
+      currentEngine = engines[0].id;
+      engineSelect.value = currentEngine;
+      void navigate("");
+    } else {
+      listBox.append(el("div", { className: "creator-empty" }, ["Нет доступных движков"]));
+    }
+  })();
 }
 
 function showLoginDialog(): void {
