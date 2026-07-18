@@ -591,6 +591,10 @@ const ICON_PATHS: Record<string, string> = {
     '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   settings:
     '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  server:
+    '<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>',
+  inbox:
+    '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
 };
 
 /** Инлайновая SVG-иконка (Feather-стиль), наследует цвет текста кнопки. */
@@ -762,36 +766,144 @@ async function loadSessionStats(): Promise<SessionStats | null> {
   }
 }
 
-function statChip(value: string, label: string, accent?: "dl" | "ul"): HTMLElement {
-  return el("div", { className: `stat-chip${accent ? ` stat-chip--${accent}` : ""}` }, [
-    el("div", { className: "stat-chip__value" }, [value]),
-    el("div", { className: "stat-chip__label" }, [label]),
-  ]);
+function statChip(value: string, label: string, accent?: "dl" | "ul", flash?: boolean): HTMLElement {
+  return el(
+    "div",
+    { className: `stat-chip${accent ? ` stat-chip--${accent}` : ""}${flash ? " stat-chip--flash" : ""}` },
+    [el("div", { className: "stat-chip__value" }, [value]), el("div", { className: "stat-chip__label" }, [label])],
+  );
 }
 
-function mountSessionBar(stats: SessionStats | null): HTMLElement {
+// `changed` — набор ключей чипов, чьё значение изменилось с прошлого рендера: их подсвечиваем.
+function mountSessionBar(stats: SessionStats | null, changed?: Set<string>): HTMLElement {
   const bar = el("div", { className: "session-bar" });
   if (!stats) {
     bar.append(el("span", { className: "session-bar__muted" }, ["Статистика недоступна"]));
     return bar;
   }
+  const f = (k: string) => Boolean(changed?.has(k));
   const enginesNote =
     stats.engines_total != null
       ? `${stats.engines_ok ?? 0}/${stats.engines_total} движков`
       : "";
   bar.append(
-    statChip(`${stats.torrents}`, `Раздач · ${stats.torrents_active} актив.`),
+    statChip(`${stats.torrents}`, `Раздач · ${stats.torrents_active} актив.`, undefined, f("torrents")),
   );
   if (stats.total_size != null) {
-    bar.append(statChip(fmtBytes(stats.total_size), "Объём раздач"));
+    bar.append(statChip(fmtBytes(stats.total_size), "Объём раздач", undefined, f("size")));
   }
   bar.append(
-    statChip(`↓ ${fmtRate(stats.download_rate)}`, "Скачивание", "dl"),
-    statChip(`↑ ${fmtRate(stats.upload_rate)}`, "Отдача", "ul"),
-    statChip(fmtBytes(stats.total_uploaded), "Всего отдано"),
+    statChip(`↓ ${fmtRate(stats.download_rate)}`, "Скачивание", "dl", f("dl")),
+    statChip(`↑ ${fmtRate(stats.upload_rate)}`, "Отдача", "ul", f("ul")),
+    statChip(fmtBytes(stats.total_uploaded), "Всего отдано", undefined, f("uploaded")),
   );
-  if (enginesNote) bar.append(statChip(enginesNote, "Онлайн"));
+  if (enginesNote) bar.append(statChip(enginesNote, "Онлайн", undefined, f("engines")));
   return bar;
+}
+
+/** Карточка одного движка: статус онлайн + полоса заполнения диска. */
+function renderEngineCard(e: EngineOut): HTMLElement {
+  const off = e.online === false;
+  const total = e.disk_total ?? null;
+  const free = e.disk_free ?? null;
+  const used = total != null && free != null ? Math.max(0, total - free) : null;
+  const usedPct =
+    total && total > 0 && used != null ? Math.min(100, Math.max(0, (used / total) * 100)) : null;
+
+  const dot = el("span", {
+    className: `engine-card__dot${off ? " engine-card__dot--off" : ""}`,
+    title: off ? "офлайн" : "онлайн",
+  });
+  const head = el("div", { className: "engine-card__head" }, [
+    dot,
+    el("span", { className: "engine-card__name" }, [e.id]),
+  ]);
+
+  const children: (string | Node)[] = [head];
+  if (usedPct != null) {
+    const grade = usedPct >= 90 ? " engine-card__fill--crit" : usedPct >= 75 ? " engine-card__fill--warn" : "";
+    const fill = el("div", { className: `engine-card__fill${grade}` });
+    fill.style.width = `${usedPct.toFixed(1)}%`;
+    children.push(
+      el("div", { className: "engine-card__bar" }, [fill]),
+      el("div", { className: "engine-card__meta" }, [
+        el("span", {}, [`${fmtBytes(used)} / ${fmtBytes(total)}`]),
+        el("span", { className: "engine-card__free" }, [`своб. ${fmtBytes(free)}`]),
+      ]),
+    );
+  } else {
+    children.push(
+      el("div", { className: "engine-card__meta" }, [
+        el("span", { className: "engine-card__free" }, [off ? "офлайн" : "место неизв."]),
+      ]),
+    );
+  }
+  return el("div", { className: `engine-card${off ? " engine-card--off" : ""}` }, children);
+}
+
+/** Сворачиваемая панель со списком движков (статус + диск). Состояние — в localStorage. */
+function mountEnginesPanel(): { node: HTMLElement; reload: () => void } {
+  const grid = el("div", { className: "engines-grid" });
+  const count = el("span", { className: "engines-panel__count" });
+  const chevron = el("span", { className: "engines-panel__chevron", "aria-hidden": "true" }, ["▸"]);
+  const toggle = el("button", { type: "button", className: "engines-panel__toggle" }, [
+    icon("server"),
+    el("span", {}, ["Движки"]),
+    count,
+    chevron,
+  ]) as HTMLButtonElement;
+  const body = el("div", { className: "engines-panel__body" }, [grid]);
+  const panel = el("section", { className: "engines-panel" }, [toggle, body]);
+
+  let open = lsGet("ui.enginesOpen") !== "0";
+  const applyOpen = () => {
+    panel.classList.toggle("engines-panel--open", open);
+    body.hidden = !open;
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+  toggle.addEventListener("click", () => {
+    open = !open;
+    lsSet("ui.enginesOpen", open ? "1" : "0");
+    applyOpen();
+  });
+  applyOpen();
+
+  let loading = false;
+  const reload = async (): Promise<void> => {
+    if (loading) return;
+    loading = true;
+    try {
+      const engines = await fetchJson<EngineOut[]>("/engines");
+      engines.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      count.textContent = ` (${engines.length})`;
+      grid.replaceChildren();
+      if (engines.length === 0) {
+        grid.append(el("p", { className: "engines-panel__empty" }, ["Движков нет"]));
+        return;
+      }
+      for (const e of engines) grid.append(renderEngineCard(e));
+    } catch {
+      /* панель необязательная — молча игнорируем сбой */
+    } finally {
+      loading = false;
+    }
+  };
+  return { node: panel, reload: () => void reload() };
+}
+
+/** Скелетоны на время первой загрузки списка — вместо пустоты/скачка. */
+function renderSkeletons(listEl: HTMLElement, n = 6): void {
+  const box = el("div", { className: "skeleton-list", "aria-hidden": "true" });
+  for (let i = 0; i < n; i++) {
+    box.append(
+      el("div", { className: "skeleton-card" }, [
+        el("div", { className: "skeleton-line skeleton-line--title" }),
+        el("div", { className: "skeleton-line skeleton-line--sub" }),
+        el("div", { className: "skeleton-bar" }),
+      ]),
+    );
+  }
+  listEl.replaceChildren(box);
 }
 
 function mountGlobalLimitsPanel(): HTMLElement {
@@ -2052,7 +2164,7 @@ function updateLiveMeta(metaEl: HTMLElement, items: TorrentOut[]): void {
   );
 }
 
-function paintTorrentList(refs: ListHostRefs, items: TorrentOut[]): void {
+function paintTorrentList(refs: ListHostRefs, items: TorrentOut[], animate = false): void {
   const { listEl, countEl, metaEl } = refs;
   // Фильтрация/сортировка/пагинация — целиком на сервере (в т.ч. по «живым» полям из снимка).
   const shown = items;
@@ -2063,7 +2175,10 @@ function paintTorrentList(refs: ListHostRefs, items: TorrentOut[]): void {
     const hasFilter = Boolean(listSearch || listStatusFilter || listLabelFilter || listEngineFilter);
     listEl.append(
       el("div", { className: "empty-state" }, [
-        el("p", {}, [listTotal === 0 && !hasFilter ? "Пока пусто" : "Ничего не найдено"]),
+        el("div", { className: "empty-state__icon" }, [icon("inbox")]),
+        el("p", { className: "empty-state__title" }, [
+          listTotal === 0 && !hasFilter ? "Пока пусто" : "Ничего не найдено",
+        ]),
         el("p", {}, [
           listTotal === 0 && !hasFilter ? "Добавьте magnet, URL или .torrent ниже" : "Измените фильтр",
         ]),
@@ -2084,9 +2199,11 @@ function paintTorrentList(refs: ListHostRefs, items: TorrentOut[]): void {
     selectionChanged?.();
   };
   if (listView === "table") {
-    listEl.append(renderTorrentTable(shown, refresh, onSelectToggle));
+    const wrap = renderTorrentTable(shown, refresh, onSelectToggle);
+    if (animate) wrap.classList.add("ttable--enter");
+    listEl.append(wrap);
   } else {
-    const ul = el("ul", { className: "torrent-list" });
+    const ul = el("ul", { className: `torrent-list${animate ? " torrent-list--enter" : ""}` });
     for (const t of shown) ul.append(renderTorrentCard(t, refresh, onSelectToggle));
     listEl.append(ul);
   }
@@ -2159,7 +2276,11 @@ async function loadTorrents(
   const gen = ++listLoadGeneration;
   listAbort = new AbortController();
   const signal = listAbort.signal;
-  if (!opts.silent) listEl.classList.add("is-loading");
+  if (!opts.silent) {
+    listEl.classList.add("is-loading");
+    // Первая загрузка/смена фильтра при пустом списке — покажем скелетоны, а не пустоту.
+    if (!listEl.querySelector(".torrent-list, .ttable-wrap")) renderSkeletons(listEl);
+  }
 
   try {
     const params = new URLSearchParams();
@@ -2184,7 +2305,11 @@ async function loadTorrents(
     }
     const items = page.items;
     lastListItems = items;
-    paintTorrentList({ listEl, countEl, metaEl, scheduleNext: opts.scheduleNext ?? (() => {}) }, items);
+    paintTorrentList(
+      { listEl, countEl, metaEl, scheduleNext: opts.scheduleNext ?? (() => {}) },
+      items,
+      !opts.silent,
+    );
     opts.scheduleNext?.(items, opts.fastPoll ? { fast: true } : undefined);
   } catch (e) {
     if (gen !== listLoadGeneration) return;
@@ -2225,8 +2350,19 @@ function applySessionStats(sessionBarHost: HTMLElement, stats?: SessionStats | n
   if (stats.total_size == null && lastTotalContentSize != null) {
     stats.total_size = lastTotalContentSize;
   }
+  const prev = lastSessionStats;
+  // Если пришёл тот же объект (дорисовка total_size) — сравнивать не с чем, без подсветки.
+  const changed = prev && prev !== stats ? new Set<string>() : undefined;
+  if (changed && prev) {
+    if (prev.torrents !== stats.torrents || prev.torrents_active !== stats.torrents_active) changed.add("torrents");
+    if (prev.total_size !== stats.total_size) changed.add("size");
+    if (prev.download_rate !== stats.download_rate) changed.add("dl");
+    if (prev.upload_rate !== stats.upload_rate) changed.add("ul");
+    if (prev.total_uploaded !== stats.total_uploaded) changed.add("uploaded");
+    if (prev.engines_ok !== stats.engines_ok || prev.engines_total !== stats.engines_total) changed.add("engines");
+  }
   lastSessionStats = stats;
-  sessionBarHost.replaceChildren(mountSessionBar(stats));
+  sessionBarHost.replaceChildren(mountSessionBar(stats, changed));
 }
 
 function startListSse(sessionBarHost: HTMLElement, onFallback: () => void): void {
@@ -2927,6 +3063,7 @@ function mountListShell(root: HTMLElement): void {
   const listHost = el("div", { id: "torrent-list-host" });
   const countEl = el("span", { className: "list-toolbar__count" });
   const sessionBarHost = el("div", { id: "session-bar-host" });
+  const enginesPanel = mountEnginesPanel();
 
   const listRefs: ListHostRefs = {
     listEl: listHost,
@@ -3339,7 +3476,10 @@ function mountListShell(root: HTMLElement): void {
     title: "Обновить",
     "aria-label": "Обновить",
   }, [icon("refresh")]);
-  refreshBtn.addEventListener("click", () => void refresh());
+  refreshBtn.addEventListener("click", () => {
+    void refresh();
+    enginesPanel.reload();
+  });
 
   // Вторичные фильтры (статус/состояние/метка) спрятаны в поповер — панель остаётся чистой,
   // а активные фильтры показываются «чипсами» под строкой поиска и снимаются в один клик.
@@ -3507,6 +3647,7 @@ function mountListShell(root: HTMLElement): void {
   root.append(
     header,
     sessionBarHost,
+    enginesPanel.node,
     filters,
     chipsRow,
     bulkBar,
@@ -3515,6 +3656,7 @@ function mountListShell(root: HTMLElement): void {
   );
   syncReset();
 
+  enginesPanel.reload();
   reloadEngines();
   void reloadLabels();
   void loadSessionStats().then((s) => {

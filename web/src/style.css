@@ -2953,3 +2953,320 @@ body.layout-wide #app {
   gap: 0.35rem;
   flex-shrink: 0;
 }
+
+/* ——————————————————————————————————————————————————————————
+   Панель движков: статус онлайн + полоса заполнения диска
+   —————————————————————————————————————————————————————————— */
+.engines-panel {
+  margin-bottom: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.engines-panel__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.engines-panel__toggle:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.engines-panel__toggle .icon {
+  color: var(--muted);
+}
+
+.engines-panel__count {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.engines-panel__chevron {
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 0.2s ease;
+}
+
+.engines-panel--open .engines-panel__chevron {
+  transform: rotate(90deg);
+}
+
+.engines-panel__body[hidden] {
+  display: none;
+}
+
+.engines-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
+  gap: 0.55rem;
+  padding: 0 0.75rem 0.75rem;
+}
+
+.engines-panel__empty {
+  padding: 0 0.75rem 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.engine-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.engine-card--off {
+  opacity: 0.6;
+}
+
+.engine-card__head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.engine-card__dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #22c55e 22%, transparent);
+  flex-shrink: 0;
+}
+
+.engine-card__dot--off {
+  background: var(--muted);
+  box-shadow: none;
+}
+
+.engine-card__name {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.85rem;
+}
+
+.engine-card__bar {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 22%, transparent);
+  overflow: hidden;
+}
+
+.engine-card__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.engine-card__fill--warn {
+  background: #f59e0b;
+}
+
+.engine-card__fill--crit {
+  background: #ef4444;
+}
+
+.engine-card__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.engine-card__free {
+  white-space: nowrap;
+}
+
+/* ——————————————————————————————————————————————————————————
+   Скелетоны загрузки списка
+   —————————————————————————————————————————————————————————— */
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.skeleton-card {
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.skeleton-line,
+.skeleton-bar {
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--muted) 14%, transparent) 25%,
+    color-mix(in srgb, var(--muted) 26%, transparent) 37%,
+    color-mix(in srgb, var(--muted) 14%, transparent) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+.skeleton-line--title {
+  height: 0.85rem;
+  width: 62%;
+  margin-bottom: 0.55rem;
+}
+
+.skeleton-line--sub {
+  height: 0.65rem;
+  width: 40%;
+  margin-bottom: 0.6rem;
+}
+
+.skeleton-bar {
+  height: 0.5rem;
+  width: 100%;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+
+/* ——————————————————————————————————————————————————————————
+   Полировка пустого состояния
+   —————————————————————————————————————————————————————————— */
+.empty-state__icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.6rem;
+  color: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+.empty-state__icon .icon svg {
+  width: 40px;
+  height: 40px;
+}
+
+.empty-state__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ——————————————————————————————————————————————————————————
+   Анимации: появление строк, подсветка чисел, переходы фильтров
+   —————————————————————————————————————————————————————————— */
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.torrent-list--enter > li,
+.ttable--enter tbody tr {
+  animation: row-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Лёгкий каскад для первых строк — дальше без задержки, чтобы не тормозить длинные списки. */
+.torrent-list--enter > li:nth-child(1),
+.ttable--enter tbody tr:nth-child(1) { animation-delay: 0ms; }
+.torrent-list--enter > li:nth-child(2),
+.ttable--enter tbody tr:nth-child(2) { animation-delay: 25ms; }
+.torrent-list--enter > li:nth-child(3),
+.ttable--enter tbody tr:nth-child(3) { animation-delay: 50ms; }
+.torrent-list--enter > li:nth-child(4),
+.ttable--enter tbody tr:nth-child(4) { animation-delay: 75ms; }
+.torrent-list--enter > li:nth-child(5),
+.ttable--enter tbody tr:nth-child(5) { animation-delay: 100ms; }
+.torrent-list--enter > li:nth-child(6),
+.ttable--enter tbody tr:nth-child(6) { animation-delay: 125ms; }
+.torrent-list--enter > li:nth-child(7),
+.ttable--enter tbody tr:nth-child(7) { animation-delay: 150ms; }
+.torrent-list--enter > li:nth-child(8),
+.ttable--enter tbody tr:nth-child(8) { animation-delay: 175ms; }
+
+@keyframes stat-flash {
+  0% {
+    background: color-mix(in srgb, var(--accent) 24%, var(--surface));
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  }
+  100% {
+    background: var(--surface);
+    border-color: var(--border);
+  }
+}
+
+.stat-chip--flash {
+  animation: stat-flash 0.9s ease-out;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.filter-popover:not([hidden]) {
+  animation: pop-in 0.16s ease-out;
+  transform-origin: top right;
+}
+
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.filter-chip {
+  animation: chip-in 0.18s ease-out;
+}
+
+/* Уважаем системную настройку «меньше движения» — отключаем все декоративные анимации. */
+@media (prefers-reduced-motion: reduce) {
+  .torrent-list--enter > li,
+  .ttable--enter tbody tr,
+  .stat-chip--flash,
+  .filter-popover:not([hidden]),
+  .filter-chip,
+  .skeleton-line,
+  .skeleton-bar {
+    animation: none !important;
+  }
+  .engine-card__fill,
+  .engines-panel__chevron {
+    transition: none !important;
+  }
+}
