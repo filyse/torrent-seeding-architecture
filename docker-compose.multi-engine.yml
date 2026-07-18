@@ -51,6 +51,7 @@ x-engine-common: &engine-common
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: seeding
       POSTGRES_PASSWORD: seeding
@@ -65,6 +66,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -79,6 +81,7 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://seeding:seeding@db:5432/seeding
       REDIS_URL: redis://redis:6379/0
@@ -124,6 +127,7 @@ services:
     build:
       context: .
       dockerfile: queue/Dockerfile
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://seeding:seeding@db:5432/seeding
       REDIS_URL: redis://redis:6379/0
@@ -145,6 +149,7 @@ services:
     build:
       context: .
       dockerfile: web/Dockerfile
+    restart: unless-stopped
     ports:
       - "3000:80"
     depends_on:
