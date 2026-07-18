@@ -2254,25 +2254,49 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     placeholder: `Напр. ${savePathDefault || "/data/b1"}/movies`,
     value: "",
   }) as HTMLInputElement;
-  // Метка: выпадающий список готовых меток (как «Движок») + пункт «Новая метка…»
-  // с полем ввода. Последний выбор запоминается между перезагрузками.
+  // Метка: выпадающий список готовых меток (как «Движок») + пункт «Новая метка…».
+  // При выборе «Новая метка…» список в той же строке превращается в поле ввода
+  // (справа кнопка ↩ — вернуться к списку). Последний выбор запоминается.
   const NEW_LABEL = "__new__";
   const labelSelect = el("select", { className: "select" }) as HTMLSelectElement;
-  const labelInput = el("input", { type: "text", placeholder: "Новая метка" }) as HTMLInputElement;
-  const labelInputField = field("Своя метка", labelInput);
-  labelInputField.hidden = true;
+  const labelInput = el("input", { type: "text", placeholder: "Новая метка", className: "label-combo__input" }) as HTMLInputElement;
+  const labelBack = el("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm label-combo__back",
+    title: "Выбрать из списка",
+  }, ["↩"]) as HTMLButtonElement;
+  const labelInputWrap = el("div", { className: "label-combo__edit" }, [labelInput, labelBack]);
+  labelInputWrap.hidden = true;
+  const labelControl = el("div", { className: "label-combo" }, [labelSelect, labelInputWrap]);
+  let labelNewMode = false;
   const currentLabel = (): string =>
-    labelSelect.value === NEW_LABEL ? labelInput.value.trim() : labelSelect.value;
-  const syncLabelInput = () => {
-    labelInputField.hidden = labelSelect.value !== NEW_LABEL;
-  };
+    labelNewMode ? labelInput.value.trim() : labelSelect.value;
   const rememberLabel = () => lsSet("ui.addLabel", currentLabel());
-  labelSelect.addEventListener("change", () => {
-    syncLabelInput();
-    if (labelSelect.value === NEW_LABEL) labelInput.focus();
+  const showLabelInput = () => {
+    labelNewMode = true;
+    labelSelect.hidden = true;
+    labelInputWrap.hidden = false;
+    labelInput.focus();
+  };
+  const showLabelSelect = () => {
+    labelNewMode = false;
+    labelInputWrap.hidden = true;
+    labelSelect.hidden = false;
+    if (labelSelect.value === NEW_LABEL) labelSelect.value = "";
     rememberLabel();
+  };
+  labelSelect.addEventListener("change", () => {
+    if (labelSelect.value === NEW_LABEL) {
+      showLabelInput();
+    } else {
+      rememberLabel();
+    }
   });
-  labelInput.addEventListener("change", rememberLabel);
+  labelInput.addEventListener("input", rememberLabel);
+  labelBack.addEventListener("click", () => {
+    labelInput.value = "";
+    showLabelSelect();
+  });
   const nameInput = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
   const torrentFile = el("input", { type: "file", accept: ".torrent", multiple: "" }) as HTMLInputElement;
 
@@ -2298,8 +2322,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   advanced.append(
     el("summary", {}, ["Дополнительно"]),
     field("Название", nameInput, "Если пусто — берётся из торрента"),
-    field("Метка", labelSelect, "Выберите готовую или «Новая метка…» для своей"),
-    labelInputField,
+    field("Метка", labelControl, "Выберите готовую или «Новая метка…» для своей"),
     field(
       "Свой путь",
       customPathInput,
@@ -2364,10 +2387,12 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     if (saved && labels.includes(saved)) {
       labelSelect.value = saved;
     } else if (saved) {
-      labelSelect.value = NEW_LABEL;
       labelInput.value = saved;
+      labelSelect.value = NEW_LABEL;
+      labelNewMode = true;
+      labelSelect.hidden = true;
+      labelInputWrap.hidden = false;
     }
-    syncLabelInput();
   })();
 
   // Куда добавлять: свой путь (если задан) приоритетнее выбора движка.

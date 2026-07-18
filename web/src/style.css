@@ -231,6 +231,22 @@ body.layout-wide #app {
   width: 100%;
 }
 
+/* Комбо «метка»: селект и поле ввода занимают одну строку (переключаются). */
+.label-combo {
+  width: 100%;
+}
+.label-combo__edit {
+  display: flex;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+.field .label-combo__edit input[type="text"] {
+  flex: 1 1 auto;
+}
+.label-combo__back {
+  flex: 0 0 auto;
+}
+
 /* Компактный селект (не растягивается на всю ширину панели). */
 .field .select.select--inline {
   width: auto;
