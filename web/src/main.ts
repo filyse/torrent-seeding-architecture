@@ -588,6 +588,7 @@ const ICON_PATHS: Record<string, string> = {
     '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
   play: '<polygon points="5 3 19 12 5 21 5 3"/>',
   pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+  "arrow-up": '<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>',
   tag:
     '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
   swap:
@@ -6250,6 +6251,20 @@ function render(): void {
   root.append(appFooter());
 }
 
+/** Плавающая кнопка «наверх» — появляется справа внизу после прокрутки. Создаётся один раз. */
+function mountScrollTopButton(): void {
+  const btn = el(
+    "button",
+    { type: "button", className: "scrolltop", title: "Наверх", "aria-label": "Наверх" },
+    [icon("arrow-up")],
+  ) as HTMLButtonElement;
+  btn.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+  const toggle = () => btn.classList.toggle("scrolltop--visible", window.scrollY > 400);
+  window.addEventListener("scroll", toggle, { passive: true });
+  toggle();
+  document.body.append(btn);
+}
+
 async function bootstrap(): Promise<void> {
   await loadMe();
   if (!currentRole) {
@@ -6261,6 +6276,7 @@ async function bootstrap(): Promise<void> {
 
 document.title = "RelaySeed";
 applyTheme(getThemeMode());
+mountScrollTopButton();
 // Кнопки «назад/вперёд» браузера (History API) → перерисовка.
 window.addEventListener("popstate", () => render());
 // Внутренняя навигация шлёт это событие вручную после pushState (см. pushPath).
