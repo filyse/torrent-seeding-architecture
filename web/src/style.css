@@ -2193,6 +2193,10 @@ body.layout-wide #app {
   margin-left: auto;
 }
 
+.bulk-bar__migrate {
+  max-width: 12rem;
+}
+
 .torrent-card__check {
   margin-top: 0.25rem;
   flex-shrink: 0;

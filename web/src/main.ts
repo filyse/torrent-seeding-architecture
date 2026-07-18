@@ -3319,6 +3319,90 @@ function mountListShell(root: HTMLElement): void {
     }
   });
 
+  // Массовый перенос: выбираем целевой движок и запускаем перенос каждой выбранной раздачи
+  // через штатный per-torrent эндпоинт (transport=auto). Бэкенд сам определяет источник
+  // и способ передачи; уже находящиеся на цели / уже переносящиеся — пропускаются.
+  const bulkMigrateSelect = el("select", {
+    className: "list-filter__select bulk-bar__migrate",
+    title: "Целевой движок для переноса",
+  }) as HTMLSelectElement;
+  bulkMigrateSelect.append(el("option", { value: "" }, ["⇄ Перенести на…"]));
+  bulkMigrateSelect.disabled = true;
+  const bulkMigrateBtn = el("button", { type: "button", className: "btn btn--sm" }, [
+    "Перенести",
+  ]) as HTMLButtonElement;
+  bulkMigrateBtn.disabled = true;
+  let bulkEnginesLoaded = false;
+  const loadBulkEngines = async () => {
+    if (bulkEnginesLoaded) return;
+    try {
+      const engines = await fetchJson<EngineOut[]>("/engines");
+      engines.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      bulkMigrateSelect.replaceChildren(el("option", { value: "" }, ["⇄ Перенести на…"]));
+      for (const e of engines) {
+        const free = e.disk_free != null ? `своб. ${fmtBytes(e.disk_free)}` : "место неизв.";
+        const off = e.online === false ? " — офлайн" : "";
+        const opt = el("option", { value: e.id }, [`${e.id} · ${free}${off}`]) as HTMLOptionElement;
+        if (e.online === false) opt.disabled = true;
+        bulkMigrateSelect.append(opt);
+      }
+      bulkMigrateSelect.disabled = false;
+      bulkEnginesLoaded = true;
+    } catch {
+      bulkMigrateSelect.replaceChildren(el("option", { value: "" }, ["Движки недоступны"]));
+    }
+  };
+  bulkMigrateSelect.addEventListener("change", () => {
+    bulkMigrateBtn.disabled = !bulkMigrateSelect.value;
+  });
+  const runBulkMigrate = async () => {
+    const ids = [...selectedIds];
+    const target = bulkMigrateSelect.value;
+    if (ids.length === 0) {
+      showToast("Ничего не выбрано", true);
+      return;
+    }
+    if (!target) return;
+    if (
+      !window.confirm(
+        `Перенести ${ids.length} раздач(и) на движок «${target}»?\n\n` +
+          "Контент копируется на целевой движок; источник удаляется только после " +
+          "подтверждённой полной копии.",
+      )
+    )
+      return;
+    bulkMigrateBtn.disabled = true;
+    bulkMigrateSelect.disabled = true;
+    let ok = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    let idx = 0;
+    const worker = async () => {
+      while (idx < ids.length) {
+        const id = ids[idx++];
+        try {
+          await postAction(`/torrents/${id}/migrate?engine_id=${encodeURIComponent(target)}`);
+          ok += 1;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (/equals source|already migrating/i.test(msg)) skipped += 1;
+          else errors.push(`#${id}: ${msg}`);
+        }
+      }
+    };
+    // Ограничиваем параллелизм запуска, чтобы не засыпать оркестратор запросами разом.
+    await Promise.all(Array.from({ length: Math.min(4, ids.length) }, () => worker()));
+    const parts = [`запущено: ${ok}`];
+    if (skipped) parts.push(`пропущено: ${skipped}`);
+    if (errors.length) parts.push(`ошибок: ${errors.length}`);
+    showToast(`Перенос на ${target} — ${parts.join(", ")}`, errors.length > 0);
+    if (errors.length) console.warn("bulk migrate errors:", errors);
+    selectedIds.clear();
+    syncBulkBar();
+    void refresh();
+  };
+  bulkMigrateBtn.addEventListener("click", () => void runBulkMigrate());
+
   const addTorrentBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, ["+ Добавить торрент"]);
   addTorrentBtn.addEventListener("click", () => showAddTorrentDialog("/data/b1", onAdded));
 
@@ -3533,6 +3617,8 @@ function mountListShell(root: HTMLElement): void {
     bulkPause,
     bulkLabelInput,
     bulkLabelBtn,
+    bulkMigrateSelect,
+    bulkMigrateBtn,
     bulkDel,
     el("span", { className: "bulk-bar__spacer" }),
     clearSelBtn,
@@ -3541,6 +3627,8 @@ function mountListShell(root: HTMLElement): void {
     const n = selectedIds.size;
     bulkBar.hidden = n === 0;
     bulkCount.textContent = `Выбрано: ${n}`;
+    // Список движков для переноса тянем лениво — при первом появлении панели.
+    if (n > 0) void loadBulkEngines();
   }
   selectionChanged = syncBulkBar;
   syncBulkBar();
