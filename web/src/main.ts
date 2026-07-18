@@ -29,6 +29,9 @@ type SessionStats = {
   total_downloaded: number;
   engines_ok?: number;
   engines_total?: number;
+  // Общий объём контента раздач (байты). Берётся из facets (не из live-сессии),
+  // проставляется на клиенте — см. applySessionStats.
+  total_size?: number | null;
 };
 
 type BatchUploadItem = {
@@ -778,6 +781,11 @@ function mountSessionBar(stats: SessionStats | null): HTMLElement {
       : "";
   bar.append(
     statChip(`${stats.torrents}`, `Раздач · ${stats.torrents_active} актив.`),
+  );
+  if (stats.total_size != null) {
+    bar.append(statChip(fmtBytes(stats.total_size), "Объём раздач"));
+  }
+  bar.append(
     statChip(`↓ ${fmtRate(stats.download_rate)}`, "Скачивание", "dl"),
     statChip(`↑ ${fmtRate(stats.upload_rate)}`, "Отдача", "ul"),
     statChip(fmtBytes(stats.total_uploaded), "Всего отдано"),
@@ -2206,9 +2214,19 @@ function scheduleListPoll(
 
 // Живая панель сверху. Приоритет — WebSocket (Фаза 7); если фича выключена/недоступна —
 // откат на SSE; при ошибке SSE — откат на таймерный поллинг.
+// Последний известный общий объём раздач (из facets) и последние агрегаты сессии —
+// чтобы дорисовывать «Объём раздач» в живую панель, которая обновляется из потока.
+let lastTotalContentSize: number | null = null;
+let lastSessionStats: SessionStats | null = null;
+
 function applySessionStats(sessionBarHost: HTMLElement, stats?: SessionStats | null): void {
   if (parseRoute().view !== "list") return;
-  if (stats) sessionBarHost.replaceChildren(mountSessionBar(stats));
+  if (!stats) return;
+  if (stats.total_size == null && lastTotalContentSize != null) {
+    stats.total_size = lastTotalContentSize;
+  }
+  lastSessionStats = stats;
+  sessionBarHost.replaceChildren(mountSessionBar(stats));
 }
 
 function startListSse(sessionBarHost: HTMLElement, onFallback: () => void): void {
@@ -3126,6 +3144,12 @@ function mountListShell(root: HTMLElement): void {
     try {
       facets = await fetchJson<ListFacets>("/torrents/facets");
       reloadEngines();
+      // Прокидываем общий объём в живую панель сверху (перерисовываем сразу, не ждём поток).
+      lastTotalContentSize = facets.total_size;
+      if (lastSessionStats) {
+        lastSessionStats.total_size = facets.total_size;
+        applySessionStats(sessionBarHost, lastSessionStats);
+      }
     } catch {
       /* счётчики необязательны — молча игнорируем */
     }
@@ -3494,7 +3518,8 @@ function mountListShell(root: HTMLElement): void {
   reloadEngines();
   void reloadLabels();
   void loadSessionStats().then((s) => {
-    sessionBarHost.replaceChildren(mountSessionBar(s));
+    if (s) applySessionStats(sessionBarHost, s);
+    else sessionBarHost.replaceChildren(mountSessionBar(s));
   });
 
   const startStream = () => startListStream(listRefs, sessionBarHost, () => void refresh());
