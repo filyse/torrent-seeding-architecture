@@ -3074,8 +3074,10 @@ function mountListShell(root: HTMLElement): void {
   // Счётчики у вариантов фильтров: B1 (1 720 шт), есть трафик (40 шт), Раздача (8 000 шт)…
   type ListFacets = {
     total: number;
+    total_size: number;
     statuses: Record<string, number>;
     labels: Record<string, number>;
+    label_sizes: Record<string, number>;
     engines: Record<string, number>;
     engine_sizes: Record<string, number>;
     states: Record<string, number>;
@@ -3092,17 +3094,20 @@ function mountListShell(root: HTMLElement): void {
       o.textContent = c == null ? base : base + fmtCount(c);
     }
   }
-  // У движков к счётчику добавляем суммарный объём раздач: «b5 (1 659 шт · 12.3 TB)».
-  function applyEngineCounts(): void {
+  // К счётчику добавляем суммарный объём раздач: «b5 (1 659 шт · 12.3 TB)».
+  // Вариант «все» (value="") показывает total_size (по всем раздачам).
+  function applyCountsSizeTo(
+    sel: HTMLSelectElement,
+    counts: Record<string, number>,
+    sizes: Record<string, number>,
+  ): void {
     if (!facets) return;
-    const sizes = facets.engine_sizes ?? {};
-    const totalSize = Object.values(sizes).reduce((a, b) => a + b, 0);
-    for (const o of Array.from(engineSelect.options)) {
+    for (const o of Array.from(sel.options)) {
       const base = o.dataset.base ?? o.textContent ?? "";
       if (o.value === "") {
-        o.textContent = base + fmtCountSize(facets.total, totalSize);
+        o.textContent = base + fmtCountSize(facets.total, facets.total_size);
       } else {
-        const c = facets.engines[o.value];
+        const c = counts[o.value];
         o.textContent = c == null ? base : base + fmtCountSize(c, sizes[o.value] ?? 0);
       }
     }
@@ -3111,8 +3116,8 @@ function mountListShell(root: HTMLElement): void {
     if (!facets) return;
     applyCountsTo(statusSelect, facets.statuses);
     applyCountsTo(stateSelect, facets.states);
-    applyCountsTo(labelSelect, facets.labels);
-    applyEngineCounts();
+    applyCountsSizeTo(labelSelect, facets.labels, facets.label_sizes ?? {});
+    applyCountsSizeTo(engineSelect, facets.engines, facets.engine_sizes ?? {});
   }
   async function refreshFacets(): Promise<void> {
     const now = Date.now();

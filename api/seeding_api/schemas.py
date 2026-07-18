@@ -257,9 +257,12 @@ class TorrentFacetsOut(BaseModel):
     """Счётчики для подписи количества у каждого варианта фильтра."""
 
     total: int
+    # Суммарный объём всех раздач (в байтах) — для подписи у варианта «все».
+    total_size: int
     statuses: dict[str, int]
     labels: dict[str, int]
+    # Суммарный объём раздач по метке / по движку (в байтах) — для подписи у варианта.
+    label_sizes: dict[str, int]
     engines: dict[str, int]
-    # Суммарный объём раздач по движку (в байтах) — для подписи рядом со счётчиком.
     engine_sizes: dict[str, int]
     states: dict[str, int]

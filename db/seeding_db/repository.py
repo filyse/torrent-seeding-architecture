@@ -191,7 +191,11 @@ class TorrentRepository:
         ).all()
         label_rows = (
             await self._session.execute(
-                select(TorrentRecord.label, func.count()).group_by(TorrentRecord.label)
+                select(
+                    TorrentRecord.label,
+                    func.count(),
+                    func.coalesce(func.sum(TorrentRecord.size), 0),
+                ).group_by(TorrentRecord.label)
             )
         ).all()
         engine_rows = (
@@ -204,10 +208,11 @@ class TorrentRepository:
             )
         ).all()
         # Все состояния одним запросом через агрегаты с FILTER.
-        total, active, peers, idle, incomplete, err = (
+        total, total_size, active, peers, idle, incomplete, err = (
             await self._session.execute(
                 select(
                     func.count(),
+                    func.coalesce(func.sum(TorrentRecord.size), 0),
                     func.count().filter(TorrentRecord.up_rate > 0),
                     func.count().filter(TorrentRecord.peers > 0),
                     func.count().filter(
@@ -222,8 +227,10 @@ class TorrentRepository:
         ).one()
         return {
             "total": int(total),
+            "total_size": int(total_size),
             "statuses": {str(s): int(c) for s, c in status_rows},
-            "labels": {str(lb): int(c) for lb, c in label_rows if lb},
+            "labels": {str(lb): int(c) for lb, c, _s in label_rows if lb},
+            "label_sizes": {str(lb): int(s) for lb, _c, s in label_rows if lb},
             "engines": {str(e): int(c) for e, c, _s in engine_rows if e},
             "engine_sizes": {str(e): int(s) for e, _c, s in engine_rows if e},
             "states": {
