@@ -2465,7 +2465,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   // Метка: общий комбобокс (готовые метки + «Новая метка…»), помнит выбор в ui.addLabel.
   const labelCombo = createLabelCombo({ storageKey: "ui.addLabel" });
   const nameInput = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
-  const torrentFile = el("input", { type: "file", accept: ".torrent", multiple: "" }) as HTMLInputElement;
+  const torrentFile = el("input", { type: "file", accept: ".torrent", multiple: "", className: "file-input" }) as HTMLInputElement;
 
   let activeTab: "magnet" | "url" | "file" = "file";
   const switchTab = (name: "magnet" | "url" | "file") => {
@@ -2871,7 +2871,7 @@ function showUpdateTorrentDialog(onDone: () => void): void {
     ]),
   );
 
-  const fileInput = el("input", { type: "file", accept: ".torrent", multiple: "" }) as HTMLInputElement;
+  const fileInput = el("input", { type: "file", accept: ".torrent", multiple: "", className: "file-input" }) as HTMLInputElement;
   body.append(field("Новые .torrent-файлы", fileInput));
 
   const rowsHost = el("div", { className: "update-rows" });

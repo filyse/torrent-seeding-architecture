@@ -352,6 +352,33 @@ body.layout-wide #app {
   background: var(--surface);
 }
 
+/* Нативный <input type=file>: саму кнопку «Выбрать файлы» стилизуем под наш .btn. */
+input.file-input {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--muted);
+  max-width: 100%;
+}
+
+input.file-input::file-selector-button {
+  margin-right: 0.6rem;
+  padding: 0.4rem 0.85rem;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+input.file-input::file-selector-button:hover {
+  background: var(--border);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
 .advanced {
   border: 1px solid var(--border);
   border-radius: 6px;
