@@ -2821,6 +2821,53 @@ body.layout-wide #app {
   color: var(--success, #16a34a);
 }
 
-.creator-task--fail .creator-task__status {
+.creator-task--fail .creator-task__status,
+.creator-task--failed .creator-task__status {
   color: var(--danger, #dc2626);
+}
+
+.creator-task--completed .creator-task__status {
+  color: var(--success, #16a34a);
+}
+
+.creator-seed-fields[hidden] {
+  display: none;
+}
+
+.creator-task__btn {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.creator-task__btn .icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.creator-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 26rem;
+  overflow-y: auto;
+  margin: 0.5rem 0;
+}
+
+.creator-queue .creator-task {
+  align-items: center;
+}
+
+.creator-task__info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.creator-task__actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
 }

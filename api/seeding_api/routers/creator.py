@@ -53,6 +53,25 @@ async def creator_browse(
     return [CreatorBrowseItem.model_validate(i) for i in items]
 
 
+@router.get("/tasks", response_model=list[CreatorTaskOut])
+async def list_tasks(pool: EnginePoolDep):
+    """Очередь создания: агрегирует задачи со всех движков (свежие сверху)."""
+    out: list[CreatorTaskOut] = []
+    for spec in pool.specs:
+        try:
+            client = pool.client_for(spec.id)
+        except KeyError:
+            continue
+        try:
+            tasks = await client.list_create_tasks()
+        except httpx.HTTPError:
+            continue
+        for data in tasks:
+            out.append(_task_out(spec.id, data))
+    out.sort(key=lambda t: t.updated_at, reverse=True)
+    return out
+
+
 @router.post("/tasks", response_model=CreatorTaskOut)
 async def create_task(body: CreatorTaskCreate, pool: EnginePoolDep):
     client = _client(pool, body.engine_id)

@@ -121,6 +121,13 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def list_create_tasks(self) -> list[dict]:
+        """Все задачи создания на движке (очередь создания в UI)."""
+        r = await self._client.get("/internal/v1/creator/tasks")
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else []
+
     async def get_create_task(self, task_id: int) -> dict | None:
         r = await self._client.get(f"/internal/v1/creator/tasks/{task_id}")
         if r.status_code == 404:

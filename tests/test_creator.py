@@ -43,6 +43,28 @@ def test_engine_browse_into_subdir(engine_app):
         assert items["movie.mp4"]["is_dir"] is False
 
 
+def test_engine_list_tasks_empty(engine_app):
+    with TestClient(engine_app) as client:
+        r = client.get("/internal/v1/creator/tasks")
+        assert r.status_code == 200, r.text
+        assert r.json() == []
+
+
+def test_engine_list_tasks_reports_created(engine_app):
+    with TestClient(engine_app) as client:
+        svc = engine_app.state.creator
+        from seeding_engine.creator import CreateStatus, CreateTask
+
+        svc._tasks[0] = CreateTask(id=0, source_path="b1/Show", name="Show")
+        svc._tasks[1] = CreateTask(
+            id=1, source_path="b1/movie.mp4", name="movie", status=CreateStatus.COMPLETED
+        )
+        r = client.get("/internal/v1/creator/tasks")
+        assert r.status_code == 200, r.text
+        ids = [t["id"] for t in r.json()]
+        assert ids == [1, 0]  # свежие сверху
+
+
 def test_engine_browse_rejects_traversal(engine_app):
     with TestClient(engine_app) as client:
         r = client.get("/internal/v1/fs/browse", params={"path": "../.."})
@@ -189,6 +211,35 @@ def test_creator_create_and_status(api_module):
             s = client.get("/api/v1/creator/tasks/default/0")
             assert s.status_code == 200, s.text
             assert s.json()["status"] == "completed"
+
+
+def test_creator_list_tasks_aggregates(api_module):
+    task = {
+        "id": 0,
+        "source_path": "b1/Show",
+        "save_path": "/data/b1",
+        "status": "completed",
+        "progress": 100,
+        "message": "Готово",
+        "error": None,
+        "name": "Show",
+        "file_count": 3,
+        "created_at": 1.0,
+        "updated_at": 2.0,
+        "has_torrent": True,
+    }
+    with respx.mock(assert_all_called=False) as mock:
+        _wire_health(mock)
+        mock.get(f"{ENGINE}/internal/v1/creator/tasks").mock(
+            return_value=httpx.Response(200, json=[task])
+        )
+        with TestClient(api_module.app) as client:
+            r = client.get("/api/v1/creator/tasks")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert len(body) == 1
+            assert body[0]["engine_id"] == "default"
+            assert body[0]["id"] == 0
 
 
 def test_creator_seed_registers_torrent(api_module):

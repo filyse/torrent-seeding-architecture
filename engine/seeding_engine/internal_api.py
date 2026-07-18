@@ -220,6 +220,13 @@ async def create_torrent_task(
     return CreateTaskOut.model_validate(task.to_public())
 
 
+@router.get("/creator/tasks", response_model=list[CreateTaskOut])
+async def list_create_tasks(
+    svc: creator_mod.CreatorService = Depends(get_creator),
+):
+    return [CreateTaskOut.model_validate(t) for t in svc.list_all()]
+
+
 @router.get("/creator/tasks/{task_id}", response_model=CreateTaskOut)
 async def get_create_task(
     task_id: int,

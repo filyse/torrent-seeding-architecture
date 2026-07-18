@@ -573,6 +573,14 @@ const ICON_PATHS: Record<string, string> = {
     '<rect x="3" y="3" width="18" height="18" rx="1"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/>',
   upload:
     '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+  "file-plus":
+    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>',
+  list:
+    '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
+  download:
+    '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/>',
+  x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  play: '<polygon points="5 3 19 12 5 21 5 3"/>',
   refresh:
     '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   settings:
@@ -3051,9 +3059,16 @@ function mountListShell(root: HTMLElement): void {
   addTorrentBtn.addEventListener("click", () => showAddTorrentDialog("/data/b1", onAdded));
 
   const createTorrentBtn = el("button", { type: "button", className: "btn btn--sm" }, [
+    icon("file-plus"),
     "Создать торрент",
   ]);
   createTorrentBtn.addEventListener("click", () => openCreateTorrentDialog(() => void refresh({ afterAdd: true })));
+
+  const creatorQueueBtn = el("button", { type: "button", className: "btn btn--sm" }, [
+    icon("list"),
+    "Очередь создания",
+  ]);
+  creatorQueueBtn.addEventListener("click", () => openCreatorQueueDialog(() => void refresh({ afterAdd: true })));
 
   const updateTorrentBtn = el("button", { type: "button", className: "btn btn--sm" }, [
     icon("upload"),
@@ -3068,7 +3083,7 @@ function mountListShell(root: HTMLElement): void {
   });
 
   const headerActions = el("div", { className: "app-header__actions" });
-  if (canWrite()) headerActions.append(addTorrentBtn, createTorrentBtn, updateTorrentBtn);
+  if (canWrite()) headerActions.append(addTorrentBtn, createTorrentBtn, creatorQueueBtn, updateTorrentBtn);
   headerActions.append(settingsLink, metaEl);
   const header = el("header", { className: "app-header" }, [
     el("div", {}, [el("h1", {}, ["Раздача"]), el("p", { className: "field__hint" }, ["Управление торрентами"])]),
@@ -4174,12 +4189,23 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
   const nameInput = el("input", { type: "text", placeholder: "Название (только для одиночного)" }) as HTMLInputElement;
 
   const modeSeed = el("input", { type: "radio", name: "create-mode", value: "seed" }) as HTMLInputElement;
-  modeSeed.checked = true;
   const modeDownload = el("input", { type: "radio", name: "create-mode", value: "download" }) as HTMLInputElement;
+  modeDownload.checked = true;
   const modeRow = el("div", { className: "creator-modes" }, [
-    el("label", {}, [modeSeed, " Создать и раздавать"]),
     el("label", {}, [modeDownload, " Только создать (.torrent)"]),
+    el("label", {}, [modeSeed, " Создать и раздавать"]),
   ]);
+  // Метка и название — только для режима «Создать и раздавать».
+  const seedFields = el("div", { className: "creator-seed-fields" }, [
+    field("Метка", labelInput),
+    field("Название", nameInput),
+  ]);
+  const syncModeFields = () => {
+    seedFields.hidden = !modeSeed.checked;
+  };
+  modeSeed.addEventListener("change", syncModeFields);
+  modeDownload.addEventListener("change", syncModeFields);
+  syncModeFields();
 
   const episodeCheck = el("input", { type: "checkbox" }) as HTMLInputElement;
   const episodeRow = el("label", { className: "creator-check" }, [episodeCheck, " Проверять последовательность серий"]);
@@ -4242,7 +4268,7 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
     }
   };
 
-  const navigate = async (path: string) => {
+  const navigate = async (path: string, fallbackToRoot = false) => {
     currentPath = path;
     renderBreadcrumb();
     listBox.replaceChildren(el("div", { className: "creator-empty" }, ["Загрузка…"]));
@@ -4252,17 +4278,29 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
       );
       renderItems(items);
     } catch (e) {
+      if (fallbackToRoot && path !== "") {
+        await navigate("");
+        return;
+      }
       listBox.replaceChildren(
         el("div", { className: "creator-empty" }, [e instanceof Error ? e.message : String(e)]),
       );
     }
   };
 
+  // Папка контента движка внутри его SEEDING_DATA_ROOT (напр. /data/a1 → "a1"),
+  // чтобы сразу открывать её, а не корень /data со служебными каталогами.
+  const engineSubdir = (id: string): string => {
+    const eng = engines.find((e) => e.id === id);
+    const prefix = (eng?.storage_prefix ?? "").replace(/\/+$/, "");
+    return prefix.split("/").pop() ?? "";
+  };
+
   engineSelect.addEventListener("change", () => {
     currentEngine = engineSelect.value;
     selected.clear();
     updateSelectionInfo();
-    void navigate("");
+    void navigate(engineSubdir(currentEngine), true);
   });
 
   const finish = () => {
@@ -4321,8 +4359,17 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
             return;
           }
           if (mode === "download") {
-            await downloadCreatedTorrent(task);
-            status.textContent = "✓ Готово (.torrent скачан)";
+            status.textContent = "✓ Готово";
+            const dl = el("button", { type: "button", className: "btn btn--sm btn--primary creator-task__btn" }, [
+              icon("download"),
+              "Скачать",
+            ]);
+            dl.addEventListener("click", () => {
+              downloadCreatedTorrent(task).catch((e) =>
+                showToast(e instanceof Error ? e.message : String(e), true),
+              );
+            });
+            row.append(dl);
           } else {
             await fetchJson<TorrentOut>(`/creator/tasks/${task.engine_id}/${task.id}/seed`, {
               method: "POST",
@@ -4358,8 +4405,7 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
     el("div", { className: "creator-selection" }, [selectionInfo]),
     modeRow,
     episodeRow,
-    field("Метка", labelInput),
-    field("Название", nameInput),
+    seedFields,
     progressBox,
     (() => {
       const actions = el("div", { className: "modal-actions modal-actions--row" });
@@ -4385,11 +4431,149 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
     if (engines.length > 0) {
       currentEngine = engines[0].id;
       engineSelect.value = currentEngine;
-      void navigate("");
+      void navigate(engineSubdir(currentEngine), true);
     } else {
       listBox.append(el("div", { className: "creator-empty" }, ["Нет доступных движков"]));
     }
   })();
+}
+
+function openCreatorQueueDialog(onSeeded: () => void): void {
+  const overlay = el("div", { className: "modal-overlay" });
+  const dialog = el("div", {
+    className: "modal-dialog modal-dialog--wide",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "creator-queue-title",
+  });
+
+  const listBox = el("div", { className: "creator-queue" });
+  const refreshBtn = el("button", { type: "button", className: "btn btn--sm" }, [icon("refresh"), "Обновить"]);
+  const closeBtn = el("button", { type: "button", className: "btn btn--ghost" }, ["Закрыть"]);
+
+  let timer: number | null = null;
+  let closed = false;
+
+  const finish = () => {
+    closed = true;
+    if (timer !== null) clearTimeout(timer);
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape") finish();
+  };
+  closeBtn.addEventListener("click", finish);
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) finish();
+  });
+  document.addEventListener("keydown", onKey);
+
+  const statusLabel = (t: CreatorTaskOut): string => {
+    if (t.status === "completed") return "✓ Готово";
+    if (t.status === "failed") return `✗ ${t.message}`;
+    if (t.status === "cancelled") return "Отменено";
+    return `${t.message} (${t.progress}%)`;
+  };
+
+  const seedTask = async (t: CreatorTaskOut) => {
+    try {
+      await fetchJson<TorrentOut>(`/creator/tasks/${t.engine_id}/${t.id}/seed`, {
+        method: "POST",
+        body: JSON.stringify({ label: "", display_name: "" }),
+      });
+      showToast("Поставлено на раздачу");
+      onSeeded();
+      void load();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    }
+  };
+
+  const cancelTask = async (t: CreatorTaskOut) => {
+    try {
+      await fetchJson(`/creator/tasks/${t.engine_id}/${t.id}/cancel`, { method: "POST" });
+      void load();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    }
+  };
+
+  const render = (tasks: CreatorTaskOut[]) => {
+    listBox.replaceChildren();
+    if (tasks.length === 0) {
+      listBox.append(el("div", { className: "creator-empty" }, ["Очередь пуста"]));
+      return;
+    }
+    for (const t of tasks) {
+      const row = el("div", { className: `creator-task creator-task--${t.status}` });
+      const info = el("div", { className: "creator-task__info" }, [
+        el("span", { className: "creator-task__name" }, [`${t.engine_id}: ${t.name || t.source_path}`]),
+        el("span", { className: "creator-task__status" }, [statusLabel(t)]),
+      ]);
+      const actions = el("div", { className: "creator-task__actions" });
+      if (t.status === "queued" || t.status === "processing") {
+        const c = el("button", { type: "button", className: "btn btn--sm creator-task__btn" }, [icon("x"), "Отмена"]);
+        c.addEventListener("click", () => void cancelTask(t));
+        actions.append(c);
+      }
+      if (t.status === "completed" && t.has_torrent) {
+        const dl = el("button", { type: "button", className: "btn btn--sm creator-task__btn" }, [
+          icon("download"),
+          "Скачать",
+        ]);
+        dl.addEventListener("click", () =>
+          downloadCreatedTorrent(t).catch((e) => showToast(e instanceof Error ? e.message : String(e), true)),
+        );
+        actions.append(dl);
+        const seed = el("button", { type: "button", className: "btn btn--sm btn--primary creator-task__btn" }, [
+          icon("play"),
+          "Раздать",
+        ]);
+        seed.addEventListener("click", () => void seedTask(t));
+        actions.append(seed);
+      }
+      row.append(info, actions);
+      listBox.append(row);
+    }
+  };
+
+  const load = async () => {
+    if (closed) return;
+    try {
+      const tasks = await fetchJson<CreatorTaskOut[]>("/creator/tasks");
+      if (closed) return;
+      render(tasks);
+      const active = tasks.some((t) => t.status === "queued" || t.status === "processing");
+      if (timer !== null) clearTimeout(timer);
+      if (active) timer = window.setTimeout(() => void load(), CREATE_POLL_MS);
+    } catch (e) {
+      if (closed) return;
+      listBox.replaceChildren(
+        el("div", { className: "creator-empty" }, [e instanceof Error ? e.message : String(e)]),
+      );
+    }
+  };
+
+  refreshBtn.addEventListener("click", () => void load());
+
+  dialog.append(
+    el("h2", { id: "creator-queue-title", className: "modal-title" }, ["Очередь создания торрентов"]),
+    el("p", { className: "field__hint" }, [
+      "Задачи создания на всех движках. Хранятся в памяти движка и очищаются при его перезапуске.",
+    ]),
+    listBox,
+    (() => {
+      const bar = el("div", { className: "modal-actions modal-actions--row" });
+      bar.append(closeBtn, refreshBtn);
+      return bar;
+    })(),
+  );
+  overlay.append(dialog);
+  document.body.append(overlay);
+
+  listBox.append(el("div", { className: "creator-empty" }, ["Загрузка…"]));
+  void load();
 }
 
 function showLoginDialog(): void {

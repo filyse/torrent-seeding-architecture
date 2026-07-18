@@ -215,6 +215,12 @@ class CreatorService:
         with self._lock:
             return self._tasks.get(task_id)
 
+    def list_all(self) -> list[dict[str, object]]:
+        """Все задачи (свежие сверху) — для очереди создания в UI."""
+        with self._lock:
+            tasks = sorted(self._tasks.values(), key=lambda t: t.id, reverse=True)
+        return [t.to_public() for t in tasks]
+
     def create(self, source_path: str, skip_episode_check: bool = False) -> CreateTask:
         if _try_import_libtorrent() is None:
             raise RuntimeError("libtorrent is not available in this engine")
