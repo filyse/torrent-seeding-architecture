@@ -13,6 +13,7 @@
 |------|----------------|------------------|--------------|
 | Оркестратор (control plane) | CT 400 (Proxmox LXC, `192.168.1.101`), доступ через PVE `192.168.1.10` → `pct exec 400` | `/opt/containerd` | `api`, `queue_worker`, `web`, `db` (postgres), `redis`, `caddy`, стек наблюдаемости (prometheus/grafana/cadvisor/node-exporter) |
 | Движки b1–b6 (data plane) | seedbox b-host `rudub@192.168.1.171:24` | `/home/rudub/seeding-engine` | контейнеры `b1-seeding`…`b6-seeding` (по тому на диск), плюс легаси `torrent-api`, `rtorrent-rutorrent`, `ftpd`, `webdav` |
+| Движки a1–a3 (data plane) | seedbox a-host `rudub2@192.168.2.243` (LAN2; SSH только через прыжок `-J root@192.168.1.10`) | `/home/rudub2/torrent-seeding-architecture` | контейнеры `a1-seeding`…`a3-seeding` (один compose-проект `seeding-engines-a`) |
 
 Деплой-механизм — не `git pull` в CI, а **сборка docker-образов из локального
 чекаута репозитория на самом хосте**:
@@ -68,7 +69,58 @@
 5. **Проверка здоровья**: `api/v1/health`, наличие эндпоинтов `creator`,
    реестр движков, healthcheck контейнеров.
 
-## 5. Откат
+## 5. Runbook пересборки движков (точные команды)
+
+Движки собираются из локального чекаута `engine/` на своём хосте. Хостоспецифичные
+оверреи (`docker-compose.*-content.yml`, `docker-compose.a-host.yml`) и `.env.engine*`
+— untracked, их сохраняет `git reset --hard` (в целевом коммите их нет).
+
+**b-host** (`rudub@192.168.1.171:24`, `cd ~/seeding-engine`):
+
+```bash
+git fetch origin && git reset --hard origin/main
+# b1 — проект без суффикса, .env.engine
+docker compose -p seeding-engine    --env-file .env.engine    -f docker-compose.engine.yml -f docker-compose.b1-content.yml up -d --build
+# b2..b6 — проект с суффиксом и свой .env
+for n in 2 3 4 5 6; do
+  docker compose -p seeding-engine-b$n --env-file .env.engine.b$n \
+    -f docker-compose.engine.yml -f docker-compose.b$n-content.yml up -d --build
+done
+```
+
+**a-host** (`rudub2@192.168.2.243` через `-J root@192.168.1.10`, `cd ~/torrent-seeding-architecture`):
+
+```bash
+git fetch origin && git reset --hard origin/main
+# a1..a3 — один compose-проект, инлайн-env (без --env-file)
+docker compose -p seeding-engines-a -f docker-compose.a-host.yml up -d --build
+```
+
+**CT400** (`pct exec 400`, `cd /opt/containerd`):
+
+```bash
+git fetch origin && git reset --hard origin/main
+scripts/deploy-ct400.sh up -d --build
+```
+
+Проверка: `curl -s http://127.0.0.1:8000/api/v1/health` (все движки `true`);
+на движке — `docker inspect <name> --format '{{.State.Health.Status}}'` = `healthy`,
+`docker exec <name> cat /app/BUILD_TIME` = свежая метка.
+
+## 6. Выполнено — 2026-07-18
+
+- Нормализация git: `restart: unless-stopped` внесён в `docker-compose.multi-engine.yml`,
+  запушен в `origin/main` (тип `6409faa`). Остальное расхождение — прод был позади git;
+  фича `creator` доставлена на все хосты.
+- Все три хоста выровнены `git reset --hard origin/main` (untracked-секреты сохранены,
+  мусор `*.bak*` удалён), пересобраны и здоровы:
+  - CT400: `api` healthy, БД ok, все 9 движков `true`, роуты `/api/v1/creator/*` активны.
+  - b1–b6: `healthy`, свежий BUILD_TIME, роуты движка `/internal/v1/creator/*`, `/internal/v1/fs/browse` активны.
+  - a1–a3: `healthy`, свежий BUILD_TIME.
+- Предеплой-бэкапы: `~/predeploy-*.patch`, `~/predeploy-*.status`,
+  `~/predeploy-hostcfg-*.tar.gz` на CT400 и b-host; `~/predeploy-a-host.yml.bak` на a-host.
+
+## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
 - Образы: предыдущие образы docker остаются в кэше до `docker image prune`;
