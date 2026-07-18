@@ -2157,16 +2157,27 @@ body.layout-wide #app {
 }
 
 /* Поле метки визуально идентично селекту движка: тот же бордер/фон/hover/focus и
-   сброс нативного вида (appearance:none), иначе браузер рисует бордер инпута иначе. */
+   та же серая «шеврон»-иконка. Поле — это <input list=datalist>, поэтому браузер рисует
+   свой нативный индикатор датализта — прячем его и подставляем ту же svg-стрелку. */
 .bulk-bar > input {
   width: 9rem;
-  padding: 0 0.6rem;
+  padding: 0 1.8rem 0 0.6rem;
   border: 1px solid var(--border);
   border-radius: 6px;
   background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 0.7rem;
   color: inherit;
   appearance: none;
   -webkit-appearance: none;
+}
+
+/* Нативная стрелка датализта (Chrome/Edge) — убираем, чтобы не дублировала svg-шеврон. */
+.bulk-bar > input::-webkit-calendar-picker-indicator {
+  display: none;
+  opacity: 0;
 }
 
 .bulk-bar > input:hover {
