@@ -1,3 +1,3 @@
 """libtorrent seeding engine process."""
 
-__version__ = "1.0.3"
+__version__ = "1.1.1"
