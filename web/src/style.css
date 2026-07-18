@@ -2195,6 +2195,66 @@ body.layout-wide #app {
   padding: 0 1.8rem 0 0.6rem;
 }
 
+/* Комбобокс метки (select готовых меток + режим «Новая метка») в панели — приводим его
+   селект и поле ввода к тем же габаритам и виду, что и у селекта движка. */
+.bulk-bar .label-combo {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.bulk-bar .label-combo .select,
+.bulk-bar .label-combo__input {
+  height: 2rem;
+  min-height: 2rem;
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.bulk-bar .label-combo .select {
+  width: 12rem;
+  max-width: 12rem;
+  padding: 0 1.8rem 0 0.6rem;
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 0.6rem center;
+  background-size: 0.7rem;
+}
+
+.bulk-bar .label-combo .select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.bulk-bar .label-combo__edit {
+  gap: 0.3rem;
+}
+
+.bulk-bar .label-combo__input {
+  width: 9rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.bulk-bar .label-combo__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.bulk-bar .label-combo__back {
+  height: 2rem;
+  min-height: 2rem;
+  padding: 0 0.5rem;
+}
+
 /* Тонкий разделитель перед деструктивным действием, чтобы «Удалить» не сливалось. */
 .bulk-bar__sep {
   align-self: stretch;

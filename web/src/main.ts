@@ -3276,12 +3276,10 @@ function mountListShell(root: HTMLElement): void {
   bulkPause.addEventListener("click", () => void runBulk("/torrents/bulk/pause"));
   bulkResume.addEventListener("click", () => void runBulk("/torrents/bulk/resume"));
 
-  const bulkLabelInput = el("input", {
-    type: "text",
-    className: "list-toolbar__label-input",
-    placeholder: "Метка…",
-    list: "label-suggestions",
-  }) as HTMLInputElement;
+  // Метка: тот же комбобокс, что в модалках (нативный select готовых меток + «Новая метка…»).
+  // Так всплывающий список совпадает по стилю с селектом движка (оба — нативные select),
+  // тогда как прежний <input list=datalist> давал несовместимое нативное меню датализта.
+  const bulkLabelCombo = createLabelCombo({ storageKey: "ui.bulkLabel" });
   const bulkLabelBtn = el("button", { type: "button", className: "btn btn--sm" }, [icon("tag"), "Метка"]);
   const applyBulkLabel = async () => {
     const ids = [...selectedIds];
@@ -3289,23 +3287,21 @@ function mountListShell(root: HTMLElement): void {
       showToast("Ничего не выбрано", true);
       return;
     }
-    const label = bulkLabelInput.value.trim();
+    const label = bulkLabelCombo.value().trim();
     try {
       await fetchJson("/torrents/bulk/label", { method: "POST", body: JSON.stringify({ ids, label }) });
-      bulkLabelInput.value = "";
       selectedIds.clear();
       syncBulkBar();
       showToast(label ? `Метка «${label}» назначена` : "Метка снята");
       await reloadLabels();
+      void bulkLabelCombo.refresh();
       void refresh();
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), true);
     }
   };
   bulkLabelBtn.addEventListener("click", () => void applyBulkLabel());
-  bulkLabelInput.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter") void applyBulkLabel();
-  });
+  void bulkLabelCombo.refresh();
   bulkDel.addEventListener("click", async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) {
@@ -3621,7 +3617,7 @@ function mountListShell(root: HTMLElement): void {
     bulkCount,
     bulkResume,
     bulkPause,
-    bulkLabelInput,
+    bulkLabelCombo.control,
     bulkLabelBtn,
     bulkMigrateSelect,
     bulkMigrateBtn,
