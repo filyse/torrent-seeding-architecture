@@ -1833,20 +1833,27 @@ input.file-input::file-selector-button:hover {
 }
 
 .session-bar {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.6rem;
   margin-bottom: 0.85rem;
 }
 
+/* В настройках («Информация») карточки раскладываем сеткой по 3 в ряд —
+   на главной остаётся flex-wrap. */
+#settings-session-host .session-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 @media (max-width: 720px) {
-  .session-bar {
+  #settings-session-host .session-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 440px) {
-  .session-bar {
+  #settings-session-host .session-bar {
     grid-template-columns: 1fr;
   }
 }
