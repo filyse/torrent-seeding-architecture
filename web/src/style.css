@@ -2156,11 +2156,21 @@ body.layout-wide #app {
   height: 14px;
 }
 
+/* Поле метки визуально идентично селекту движка: тот же бордер/фон/hover/focus и
+   сброс нативного вида (appearance:none), иначе браузер рисует бордер инпута иначе. */
 .bulk-bar > input {
   width: 9rem;
   padding: 0 0.6rem;
   border: 1px solid var(--border);
-  background: var(--surface);
+  border-radius: 6px;
+  background-color: var(--surface);
+  color: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.bulk-bar > input:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
 
 .bulk-bar > input:focus {
