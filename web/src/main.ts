@@ -591,8 +591,6 @@ const ICON_PATHS: Record<string, string> = {
     '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   settings:
     '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
-  server:
-    '<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>',
   inbox:
     '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
 };
@@ -799,96 +797,6 @@ function mountSessionBar(stats: SessionStats | null, changed?: Set<string>): HTM
   );
   if (enginesNote) bar.append(statChip(enginesNote, "Онлайн", undefined, f("engines")));
   return bar;
-}
-
-/** Карточка одного движка: статус онлайн + полоса заполнения диска. */
-function renderEngineCard(e: EngineOut): HTMLElement {
-  const off = e.online === false;
-  const total = e.disk_total ?? null;
-  const free = e.disk_free ?? null;
-  const used = total != null && free != null ? Math.max(0, total - free) : null;
-  const usedPct =
-    total && total > 0 && used != null ? Math.min(100, Math.max(0, (used / total) * 100)) : null;
-
-  const dot = el("span", {
-    className: `engine-card__dot${off ? " engine-card__dot--off" : ""}`,
-    title: off ? "офлайн" : "онлайн",
-  });
-  const head = el("div", { className: "engine-card__head" }, [
-    dot,
-    el("span", { className: "engine-card__name" }, [e.id]),
-  ]);
-
-  const children: (string | Node)[] = [head];
-  if (usedPct != null) {
-    const grade = usedPct >= 90 ? " engine-card__fill--crit" : usedPct >= 75 ? " engine-card__fill--warn" : "";
-    const fill = el("div", { className: `engine-card__fill${grade}` });
-    fill.style.width = `${usedPct.toFixed(1)}%`;
-    children.push(
-      el("div", { className: "engine-card__bar" }, [fill]),
-      el("div", { className: "engine-card__meta" }, [
-        el("span", {}, [`${fmtBytes(used)} / ${fmtBytes(total)}`]),
-        el("span", { className: "engine-card__free" }, [`своб. ${fmtBytes(free)}`]),
-      ]),
-    );
-  } else {
-    children.push(
-      el("div", { className: "engine-card__meta" }, [
-        el("span", { className: "engine-card__free" }, [off ? "офлайн" : "место неизв."]),
-      ]),
-    );
-  }
-  return el("div", { className: `engine-card${off ? " engine-card--off" : ""}` }, children);
-}
-
-/** Сворачиваемая панель со списком движков (статус + диск). Состояние — в localStorage. */
-function mountEnginesPanel(): { node: HTMLElement; reload: () => void } {
-  const grid = el("div", { className: "engines-grid" });
-  const count = el("span", { className: "engines-panel__count" });
-  const chevron = el("span", { className: "engines-panel__chevron", "aria-hidden": "true" }, ["▸"]);
-  const toggle = el("button", { type: "button", className: "engines-panel__toggle" }, [
-    icon("server"),
-    el("span", {}, ["Движки"]),
-    count,
-    chevron,
-  ]) as HTMLButtonElement;
-  const body = el("div", { className: "engines-panel__body" }, [grid]);
-  const panel = el("section", { className: "engines-panel" }, [toggle, body]);
-
-  let open = lsGet("ui.enginesOpen") !== "0";
-  const applyOpen = () => {
-    panel.classList.toggle("engines-panel--open", open);
-    body.hidden = !open;
-    toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  };
-  toggle.addEventListener("click", () => {
-    open = !open;
-    lsSet("ui.enginesOpen", open ? "1" : "0");
-    applyOpen();
-  });
-  applyOpen();
-
-  let loading = false;
-  const reload = async (): Promise<void> => {
-    if (loading) return;
-    loading = true;
-    try {
-      const engines = await fetchJson<EngineOut[]>("/engines");
-      engines.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-      count.textContent = ` (${engines.length})`;
-      grid.replaceChildren();
-      if (engines.length === 0) {
-        grid.append(el("p", { className: "engines-panel__empty" }, ["Движков нет"]));
-        return;
-      }
-      for (const e of engines) grid.append(renderEngineCard(e));
-    } catch {
-      /* панель необязательная — молча игнорируем сбой */
-    } finally {
-      loading = false;
-    }
-  };
-  return { node: panel, reload: () => void reload() };
 }
 
 /** Скелетоны на время первой загрузки списка — вместо пустоты/скачка. */
@@ -3063,7 +2971,6 @@ function mountListShell(root: HTMLElement): void {
   const listHost = el("div", { id: "torrent-list-host" });
   const countEl = el("span", { className: "list-toolbar__count" });
   const sessionBarHost = el("div", { id: "session-bar-host" });
-  const enginesPanel = mountEnginesPanel();
 
   const listRefs: ListHostRefs = {
     listEl: listHost,
@@ -3476,10 +3383,7 @@ function mountListShell(root: HTMLElement): void {
     title: "Обновить",
     "aria-label": "Обновить",
   }, [icon("refresh")]);
-  refreshBtn.addEventListener("click", () => {
-    void refresh();
-    enginesPanel.reload();
-  });
+  refreshBtn.addEventListener("click", () => void refresh());
 
   // Вторичные фильтры (статус/состояние/метка) спрятаны в поповер — панель остаётся чистой,
   // а активные фильтры показываются «чипсами» под строкой поиска и снимаются в один клик.
@@ -3647,7 +3551,6 @@ function mountListShell(root: HTMLElement): void {
   root.append(
     header,
     sessionBarHost,
-    enginesPanel.node,
     filters,
     chipsRow,
     bulkBar,
@@ -3656,7 +3559,6 @@ function mountListShell(root: HTMLElement): void {
   );
   syncReset();
 
-  enginesPanel.reload();
   reloadEngines();
   void reloadLabels();
   void loadSessionStats().then((s) => {
