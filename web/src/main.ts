@@ -599,6 +599,50 @@ function icon(name: keyof typeof ICON_PATHS): HTMLElement {
   return span;
 }
 
+/** Знак-логотип в шапке: граф раздачи (центральный узел раздаёт пирам). */
+function brandMark(): HTMLElement {
+  const span = el("span", { className: "brand__mark", "aria-hidden": "true" });
+  span.innerHTML =
+    '<svg viewBox="0 0 32 32" width="34" height="34" xmlns="http://www.w3.org/2000/svg">' +
+    '<rect width="32" height="32" rx="8" fill="var(--accent)"/>' +
+    '<g stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">' +
+    '<path d="M16 11.2 9.6 19.4M16 11.2l6.4 8.2M11.4 22h9.2"/>' +
+    '</g>' +
+    '<g fill="#fff">' +
+    '<circle cx="16" cy="9" r="2.6"/>' +
+    '<circle cx="9" cy="22" r="2.6"/>' +
+    '<circle cx="23" cy="22" r="2.6"/>' +
+    '</g></svg>';
+  return span;
+}
+
+/** Лого-локап (знак + название + подпись) для шапки. */
+function brandLockup(): HTMLElement {
+  return el("div", { className: "brand" }, [
+    brandMark(),
+    el("div", { className: "brand__text" }, [
+      el("h1", { className: "brand__name" }, ["Раздача"]),
+      el("p", { className: "brand__tag" }, ["Управление торрентами"]),
+    ]),
+  ]);
+}
+
+/** Подвал с копирайтом разработчика (общий для всех экранов). */
+function appFooter(): HTMLElement {
+  const link = el("a", {
+    className: "app-footer__link",
+    href: "https://hw-s.ru",
+    target: "_blank",
+    rel: "noopener noreferrer",
+  }, ["HW-S.ru"]);
+  return el("footer", { className: "app-footer" }, [
+    document.createTextNode("Разработано: "),
+    link,
+    document.createTextNode(" by Hardkor"),
+    el("span", { className: "app-footer__ver" }, [` · v${WEB_VERSION}`]),
+  ]);
+}
+
 // Роутинг через History API (чистые пути, без "#"). nginx отдаёт index.html на любой путь
 // (try_files … /index.html), поэтому /torrent/1 и /settings работают и при перезагрузке.
 function parseRoute(): Route {
@@ -3215,7 +3259,7 @@ function mountListShell(root: HTMLElement): void {
   if (canWrite()) headerActions.append(addTorrentBtn, createTorrentBtn, creatorQueueBtn, updateTorrentBtn);
   headerActions.append(settingsLink, metaEl);
   const header = el("header", { className: "app-header" }, [
-    el("div", {}, [el("h1", {}, ["Раздача"]), el("p", { className: "field__hint" }, ["Управление торрентами"])]),
+    brandLockup(),
     headerActions,
   ]);
 
@@ -6020,6 +6064,7 @@ function render(): void {
   if (route.view === "list") mountListShell(root);
   else if (route.view === "settings") mountSettingsShell(root);
   else mountDetailShell(root, route.id);
+  root.append(appFooter());
 }
 
 async function bootstrap(): Promise<void> {

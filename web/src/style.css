@@ -112,6 +112,68 @@ body.layout-wide #app {
   gap: 0.75rem;
 }
 
+/* —— бренд/логотип в шапке —— */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.brand__mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.brand__mark svg {
+  display: block;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.brand__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.brand__name {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.brand__tag {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* —— подвал с копирайтом —— */
+.app-footer {
+  margin-top: 2.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.app-footer__link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.app-footer__link:hover {
+  text-decoration: underline;
+}
+
+.app-footer__ver {
+  opacity: 0.7;
+}
+
 .live-dot {
   display: inline-block;
   width: 0.45rem;
