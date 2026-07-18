@@ -2254,7 +2254,25 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     placeholder: `Напр. ${savePathDefault || "/data/b1"}/movies`,
     value: "",
   }) as HTMLInputElement;
-  const labelInput = el("input", { type: "text", placeholder: "Метка (необязательно)" }) as HTMLInputElement;
+  // Метка: выпадающий список готовых меток (как «Движок») + пункт «Новая метка…»
+  // с полем ввода. Последний выбор запоминается между перезагрузками.
+  const NEW_LABEL = "__new__";
+  const labelSelect = el("select", { className: "select" }) as HTMLSelectElement;
+  const labelInput = el("input", { type: "text", placeholder: "Новая метка" }) as HTMLInputElement;
+  const labelInputField = field("Своя метка", labelInput);
+  labelInputField.hidden = true;
+  const currentLabel = (): string =>
+    labelSelect.value === NEW_LABEL ? labelInput.value.trim() : labelSelect.value;
+  const syncLabelInput = () => {
+    labelInputField.hidden = labelSelect.value !== NEW_LABEL;
+  };
+  const rememberLabel = () => lsSet("ui.addLabel", currentLabel());
+  labelSelect.addEventListener("change", () => {
+    syncLabelInput();
+    if (labelSelect.value === NEW_LABEL) labelInput.focus();
+    rememberLabel();
+  });
+  labelInput.addEventListener("change", rememberLabel);
   const nameInput = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
   const torrentFile = el("input", { type: "file", accept: ".torrent", multiple: "" }) as HTMLInputElement;
 
@@ -2280,7 +2298,8 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   advanced.append(
     el("summary", {}, ["Дополнительно"]),
     field("Название", nameInput, "Если пусто — берётся из торрента"),
-    field("Метка", labelInput),
+    field("Метка", labelSelect, "Выберите готовую или «Новая метка…» для своей"),
+    labelInputField,
     field(
       "Свой путь",
       customPathInput,
@@ -2327,6 +2346,30 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     }
   })();
 
+  void (async () => {
+    const saved = lsGet("ui.addLabel") ?? "";
+    let labels: string[] = [];
+    try {
+      labels = await fetchJson<string[]>("/labels");
+    } catch {
+      /* список меток необязателен */
+    }
+    labelSelect.replaceChildren(
+      el("option", { value: "" }, ["Без метки"]),
+      ...labels.map((lb) => el("option", { value: lb }, [lb])),
+      el("option", { value: NEW_LABEL }, ["Новая метка…"]),
+    );
+    // Восстанавливаем прошлый выбор: если такая метка есть в списке — выбираем её,
+    // иначе (своя метка) — режим «Новая метка…» с подставленным текстом.
+    if (saved && labels.includes(saved)) {
+      labelSelect.value = saved;
+    } else if (saved) {
+      labelSelect.value = NEW_LABEL;
+      labelInput.value = saved;
+    }
+    syncLabelInput();
+  })();
+
   // Куда добавлять: свой путь (если задан) приоритетнее выбора движка.
   const targetJson = (): { engine_id?: string; save_path?: string } | null => {
     const custom = customPathInput.value.trim();
@@ -2361,7 +2404,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
           magnet_uri,
           ...target,
           display_name: nameInput.value.trim(),
-          label: labelInput.value.trim(),
+          label: currentLabel(),
         }),
       });
       magnetInput.value = "";
@@ -2388,7 +2431,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
           url,
           ...target,
           display_name: nameInput.value.trim(),
-          label: labelInput.value.trim(),
+          label: currentLabel(),
         }),
       });
       urlInput.value = "";
@@ -2412,7 +2455,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
         body.set("torrent_file", files[0], files[0].name);
         if (!applyTargetToForm(body)) return;
         body.set("display_name", nameInput.value.trim());
-        body.set("label", labelInput.value.trim());
+        body.set("label", currentLabel());
         const res = await fetch(`${API}/torrents/upload`, { method: "POST", headers: apiHeaders(false), body });
         await throwIfNotOk(res);
         const created = (await res.json()) as TorrentOut;
@@ -2426,7 +2469,7 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
       const body = new FormData();
       for (const f of files) body.append("torrent_files", f, f.name);
       if (!applyTargetToForm(body)) return;
-      body.set("label", labelInput.value.trim());
+      body.set("label", currentLabel());
       const res = await fetch(`${API}/torrents/upload-batch`, { method: "POST", headers: apiHeaders(false), body });
       await throwIfNotOk(res);
       const result = (await res.json()) as BatchUploadResult;
