@@ -240,6 +240,10 @@ body.layout-wide #app {
   gap: 0.4rem;
   align-items: stretch;
 }
+/* display:flex перебивает браузерное [hidden]{display:none} — возвращаем скрытие. */
+.label-combo__edit[hidden] {
+  display: none;
+}
 .field .label-combo__edit input[type="text"] {
   flex: 1 1 auto;
 }
