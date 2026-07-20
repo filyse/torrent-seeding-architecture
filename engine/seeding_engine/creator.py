@@ -102,18 +102,30 @@ def browse(path: str = "") -> list[dict[str, object]]:
     items: list[dict[str, object]] = []
     for entry in os.scandir(abs_path):
         rel = os.path.join(path, entry.name).replace("\\", "/").lstrip("/")
+        # is_dir() берётся из d_type readdir (ext4) — без обращения к inode.
         try:
-            st = entry.stat()
-            size = 0 if entry.is_dir() else st.st_size
-            modified = st.st_mtime
+            is_dir = entry.is_dir()
         except OSError:
-            size = 0
-            modified = 0.0
+            is_dir = False
+        # stat() делаем ТОЛЬКО для файлов: UI показывает размер файла, но для каталога
+        # размер всегда 0, а поле modified не используется вовсе. На HDD с холодным кэшем
+        # stat() каждого элемента — это отдельный random-seek к inode; на каталоге с
+        # тысячами записей (напр. b1 ~1700) листинг «подвисает» на секунды. Пропуск stat
+        # для каталогов сводит листинг папок к одному readdir — мгновенно даже на HDD.
+        size = 0
+        modified = 0.0
+        if not is_dir:
+            try:
+                st = entry.stat(follow_symlinks=False)
+                size = st.st_size
+                modified = st.st_mtime
+            except OSError:
+                pass
         items.append(
             {
                 "name": entry.name,
                 "path": rel,
-                "is_dir": entry.is_dir(),
+                "is_dir": is_dir,
                 "size": size,
                 "modified": modified,
             }
