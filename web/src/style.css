@@ -3320,25 +3320,45 @@ input.file-input::file-selector-button:hover {
   transition: transform 0.15s ease;
 }
 
-.tb-menu__toggle[aria-expanded="true"] .tb-menu__caret {
+.tb-menu:hover .tb-menu__caret,
+.tb-menu:focus-within .tb-menu__caret,
+.tb-menu.is-open .tb-menu__caret {
   transform: rotate(180deg);
 }
 
 .tb-menu__list {
   position: absolute;
-  top: calc(100% + 0.35rem);
+  top: 100%;
   left: 0;
   z-index: 70;
   min-width: 13rem;
-  display: flex;
+  display: none;
   flex-direction: column;
+  margin-top: 0.35rem;
   padding: 0.3rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) + 2px);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
-  animation: pop-in 0.14s ease-out;
   transform-origin: top left;
+}
+
+/* Раскрытие: по наведению, фокусу внутри или клику (тач). */
+.tb-menu:hover .tb-menu__list,
+.tb-menu:focus-within .tb-menu__list,
+.tb-menu.is-open .tb-menu__list {
+  display: flex;
+  animation: pop-in 0.14s ease-out;
+}
+
+/* Невидимый «мостик» перекрывает зазор между кнопкой и меню, чтобы hover не срывался. */
+.tb-menu__list::before {
+  content: "";
+  position: absolute;
+  top: -0.35rem;
+  left: 0;
+  right: 0;
+  height: 0.35rem;
 }
 
 .tb-menu__item {
@@ -3369,7 +3389,9 @@ input.file-input::file-selector-button:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tb-menu__list {
+  .tb-menu:hover .tb-menu__list,
+  .tb-menu:focus-within .tb-menu__list,
+  .tb-menu.is-open .tb-menu__list {
     animation: none;
   }
   .tb-menu__caret {

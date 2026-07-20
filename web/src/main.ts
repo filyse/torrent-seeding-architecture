@@ -3417,37 +3417,29 @@ function mountListShell(root: HTMLElement): void {
     { ic: "list", label: "Очередь создания", run: () => openCreatorQueueDialog(() => void refresh({ afterAdd: true })) },
   ];
 
+  // Меню раскрывается по наведению (CSS :hover). Класс is-open — фолбэк для тач-устройств (по клику).
   const torrentMenu = el("div", { className: "tb-menu" });
   const torrentMenuToggle = el(
     "button",
-    {
-      type: "button",
-      className: "btn btn--primary btn--sm tb-menu__toggle",
-      "aria-haspopup": "true",
-      "aria-expanded": "false",
-    },
+    { type: "button", className: "btn btn--primary btn--sm tb-menu__toggle", "aria-haspopup": "true" },
     [icon("plus"), "Торрент", el("span", { className: "tb-menu__caret" }, [icon("chevron-down")])],
   );
-  const torrentMenuList = el("div", { className: "tb-menu__list", role: "menu", hidden: "" });
+  const torrentMenuList = el("div", { className: "tb-menu__list", role: "menu" });
 
   const closeTorrentMenu = () => {
-    if (torrentMenuList.hidden) return;
-    torrentMenuList.hidden = true;
-    torrentMenuToggle.setAttribute("aria-expanded", "false");
+    if (!torrentMenu.classList.contains("is-open")) return;
+    torrentMenu.classList.remove("is-open");
     document.removeEventListener("click", onOutsideTorrentMenu, true);
-    document.removeEventListener("keydown", onEscTorrentMenu, true);
   };
   const onOutsideTorrentMenu = (ev: Event) => {
     if (!torrentMenu.contains(ev.target as Node)) closeTorrentMenu();
-  };
-  const onEscTorrentMenu = (ev: KeyboardEvent) => {
-    if (ev.key === "Escape") closeTorrentMenu();
   };
 
   for (const it of torrentMenuItems) {
     const b = el("button", { type: "button", className: "tb-menu__item", role: "menuitem" }, [icon(it.ic), it.label]);
     b.addEventListener("click", () => {
       closeTorrentMenu();
+      torrentMenuToggle.blur();
       it.run();
     });
     torrentMenuList.append(b);
@@ -3455,13 +3447,10 @@ function mountListShell(root: HTMLElement): void {
 
   torrentMenuToggle.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    if (torrentMenuList.hidden) {
-      torrentMenuList.hidden = false;
-      torrentMenuToggle.setAttribute("aria-expanded", "true");
+    if (torrentMenu.classList.toggle("is-open")) {
       document.addEventListener("click", onOutsideTorrentMenu, true);
-      document.addEventListener("keydown", onEscTorrentMenu, true);
     } else {
-      closeTorrentMenu();
+      document.removeEventListener("click", onOutsideTorrentMenu, true);
     }
   });
   torrentMenu.append(torrentMenuToggle, torrentMenuList);
