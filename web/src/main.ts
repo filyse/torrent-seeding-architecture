@@ -612,6 +612,129 @@ function icon(name: keyof typeof ICON_PATHS): HTMLElement {
   return span;
 }
 
+// —— Кастомный выпадающий список для <select> ————————————————————————————————
+// Нативный <select> оставляем как есть (закрытый вид и вся логика/значение — его),
+// но перехватываем ОТКРЫТИЕ и вместо системного меню рисуем свой стилизованный список.
+// Опции читаются из select в момент открытия — динамические списки (метки/движки) и
+// программная смена value работают без синхронизации.
+let closeActiveCselect: (() => void) | null = null;
+
+function enhanceSelect(select: HTMLSelectElement): void {
+  if (select.dataset.cselDone === "1") return;
+  select.dataset.cselDone = "1";
+
+  const panel = el("div", { className: "cselect-panel", role: "listbox" });
+  let open = false;
+
+  const reposition = () => {
+    const r = select.getBoundingClientRect();
+    const gap = 4;
+    const spaceBelow = window.innerHeight - r.bottom;
+    const spaceAbove = r.top;
+    const wantMax = 320;
+    const below = spaceBelow >= Math.min(wantMax, spaceAbove) || spaceBelow >= 200;
+    const maxH = Math.max(120, Math.min(wantMax, (below ? spaceBelow : spaceAbove) - gap - 8));
+    panel.style.left = `${r.left}px`;
+    panel.style.minWidth = `${r.width}px`;
+    panel.style.maxWidth = `${Math.max(r.width, 360)}px`;
+    panel.style.maxHeight = `${maxH}px`;
+    if (below) {
+      panel.style.top = `${r.bottom + gap}px`;
+      panel.style.bottom = "";
+    } else {
+      panel.style.top = "";
+      panel.style.bottom = `${window.innerHeight - r.top + gap}px`;
+    }
+  };
+
+  const build = () => {
+    panel.replaceChildren();
+    Array.from(select.options).forEach((opt, i) => {
+      const item = el("div", { className: "cselect-option", role: "option" }, [opt.textContent ?? ""]);
+      if (i === select.selectedIndex) item.classList.add("is-selected");
+      if (opt.disabled) item.classList.add("is-disabled");
+      item.addEventListener("mousedown", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (opt.disabled) return;
+        if (select.selectedIndex !== i) {
+          select.selectedIndex = i;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        close();
+      });
+      panel.append(item);
+    });
+  };
+
+  const onDocDown = (ev: Event) => {
+    if (ev.target !== select && !select.contains(ev.target as Node) && !panel.contains(ev.target as Node)) close();
+  };
+  const onKeyClose = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape") {
+      close();
+      select.focus();
+    }
+  };
+  const onViewportChange = () => {
+    if (open) reposition();
+  };
+
+  function open_() {
+    if (select.disabled) return;
+    closeActiveCselect?.();
+    build();
+    document.body.append(panel);
+    reposition();
+    open = true;
+    select.classList.add("cselect-active");
+    panel.querySelector(".is-selected")?.scrollIntoView({ block: "nearest" });
+    document.addEventListener("mousedown", onDocDown, true);
+    document.addEventListener("keydown", onKeyClose, true);
+    window.addEventListener("scroll", onViewportChange, true);
+    window.addEventListener("resize", onViewportChange, true);
+    closeActiveCselect = close;
+  }
+
+  function close() {
+    if (!open) return;
+    open = false;
+    select.classList.remove("cselect-active");
+    panel.remove();
+    document.removeEventListener("mousedown", onDocDown, true);
+    document.removeEventListener("keydown", onKeyClose, true);
+    window.removeEventListener("scroll", onViewportChange, true);
+    window.removeEventListener("resize", onViewportChange, true);
+    if (closeActiveCselect === close) closeActiveCselect = null;
+  }
+
+  // Блокируем системное меню и открываем своё.
+  select.addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    select.focus({ preventScroll: true });
+    open ? close() : open_();
+  });
+  select.addEventListener("keydown", (ev) => {
+    if (["Enter", " ", "ArrowDown", "ArrowUp"].includes(ev.key)) {
+      ev.preventDefault();
+      if (!open) open_();
+    }
+  });
+}
+
+/** Включает кастомные списки для всех текущих <select> и следит за новыми. */
+function initCustomSelects(): void {
+  document.querySelectorAll("select").forEach((s) => enhanceSelect(s as HTMLSelectElement));
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      m.addedNodes.forEach((n) => {
+        if (n instanceof HTMLSelectElement) enhanceSelect(n);
+        else if (n instanceof HTMLElement) n.querySelectorAll("select").forEach((s) => enhanceSelect(s as HTMLSelectElement));
+      });
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
 /** Знак-логотип в шапке: граф раздачи (центральный узел раздаёт пирам). */
 function brandMark(): HTMLElement {
   const span = el("span", { className: "brand__mark", "aria-hidden": "true" });
@@ -3531,6 +3654,9 @@ function mountListShell(root: HTMLElement): void {
 
   let popoverOpen = false;
   const onDocClick = (ev: Event) => {
+    const t = ev.target as Element;
+    // Клик по кастомному списку опций (рисуется в body) — не считаем «снаружи».
+    if (t?.closest?.(".cselect-panel")) return;
     if (!filterWrap.contains(ev.target as Node)) closePopover();
   };
   const onEsc = (ev: KeyboardEvent) => {
@@ -6324,6 +6450,7 @@ async function bootstrap(): Promise<void> {
 document.title = "RelaySeed";
 applyTheme(getThemeMode());
 mountScrollTopButton();
+initCustomSelects();
 // Кнопки «назад/вперёд» браузера (History API) → перерисовка.
 window.addEventListener("popstate", () => render());
 // Внутренняя навигация шлёт это событие вручную после pushState (см. pushPath).

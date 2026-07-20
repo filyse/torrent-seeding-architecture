@@ -352,6 +352,66 @@ body.layout-wide #app {
   background: var(--surface);
 }
 
+/* Кастомный выпадающий список для <select> (рисуется в body, position: fixed). */
+.cselect-panel {
+  position: fixed;
+  z-index: 4000;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0.3rem;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.3);
+  animation: pop-in 0.12s ease-out;
+}
+
+.cselect-option {
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+  line-height: 1.25;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.cselect-option:hover {
+  background: var(--surface-2);
+}
+
+.cselect-option.is-selected {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  font-weight: 600;
+}
+
+.cselect-option.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cselect-option.is-disabled:hover {
+  background: transparent;
+}
+
+/* Открытый нативный select подсвечиваем как в фокусе. */
+.select.cselect-active,
+.list-filter__select.cselect-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cselect-panel {
+    animation: none;
+  }
+}
+
 /* Нативный <input type=file>: саму кнопку «Выбрать файлы» стилизуем под наш .btn. */
 input.file-input {
   font: inherit;
