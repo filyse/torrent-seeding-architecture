@@ -589,6 +589,8 @@ const ICON_PATHS: Record<string, string> = {
   play: '<polygon points="5 3 19 12 5 21 5 3"/>',
   pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
   "arrow-up": '<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  "chevron-down": '<polyline points="6 9 12 15 18 9"/>',
   tag:
     '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
   swap:
@@ -3407,26 +3409,62 @@ function mountListShell(root: HTMLElement): void {
   };
   bulkMigrateBtn.addEventListener("click", () => void runBulkMigrate());
 
-  const addTorrentBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, ["+ Добавить торрент"]);
-  addTorrentBtn.addEventListener("click", () => showAddTorrentDialog("/data/b1", onAdded));
+  // Единое меню «Торрент ▾» со всеми действиями над раздачами (добавить/создать/обновить/очередь).
+  const torrentMenuItems: { ic: keyof typeof ICON_PATHS; label: string; run: () => void }[] = [
+    { ic: "plus", label: "Добавить торрент", run: () => showAddTorrentDialog("/data/b1", onAdded) },
+    { ic: "file-plus", label: "Создать торрент", run: () => openCreateTorrentDialog(() => void refresh({ afterAdd: true })) },
+    { ic: "upload", label: "Обновить торрент", run: () => showUpdateTorrentDialog(() => refresh({ afterAdd: true })) },
+    { ic: "list", label: "Очередь создания", run: () => openCreatorQueueDialog(() => void refresh({ afterAdd: true })) },
+  ];
 
-  const createTorrentBtn = el("button", { type: "button", className: "btn btn--sm" }, [
-    icon("file-plus"),
-    "Создать торрент",
-  ]);
-  createTorrentBtn.addEventListener("click", () => openCreateTorrentDialog(() => void refresh({ afterAdd: true })));
+  const torrentMenu = el("div", { className: "tb-menu" });
+  const torrentMenuToggle = el(
+    "button",
+    {
+      type: "button",
+      className: "btn btn--primary btn--sm tb-menu__toggle",
+      "aria-haspopup": "true",
+      "aria-expanded": "false",
+    },
+    [icon("plus"), "Торрент", el("span", { className: "tb-menu__caret" }, [icon("chevron-down")])],
+  );
+  const torrentMenuList = el("div", { className: "tb-menu__list", role: "menu", hidden: "" });
 
-  const creatorQueueBtn = el("button", { type: "button", className: "btn btn--sm" }, [
-    icon("list"),
-    "Очередь создания",
-  ]);
-  creatorQueueBtn.addEventListener("click", () => openCreatorQueueDialog(() => void refresh({ afterAdd: true })));
+  const closeTorrentMenu = () => {
+    if (torrentMenuList.hidden) return;
+    torrentMenuList.hidden = true;
+    torrentMenuToggle.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", onOutsideTorrentMenu, true);
+    document.removeEventListener("keydown", onEscTorrentMenu, true);
+  };
+  const onOutsideTorrentMenu = (ev: Event) => {
+    if (!torrentMenu.contains(ev.target as Node)) closeTorrentMenu();
+  };
+  const onEscTorrentMenu = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape") closeTorrentMenu();
+  };
 
-  const updateTorrentBtn = el("button", { type: "button", className: "btn btn--sm" }, [
-    icon("upload"),
-    "Обновить торрент",
-  ]);
-  updateTorrentBtn.addEventListener("click", () => showUpdateTorrentDialog(() => refresh({ afterAdd: true })));
+  for (const it of torrentMenuItems) {
+    const b = el("button", { type: "button", className: "tb-menu__item", role: "menuitem" }, [icon(it.ic), it.label]);
+    b.addEventListener("click", () => {
+      closeTorrentMenu();
+      it.run();
+    });
+    torrentMenuList.append(b);
+  }
+
+  torrentMenuToggle.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (torrentMenuList.hidden) {
+      torrentMenuList.hidden = false;
+      torrentMenuToggle.setAttribute("aria-expanded", "true");
+      document.addEventListener("click", onOutsideTorrentMenu, true);
+      document.addEventListener("keydown", onEscTorrentMenu, true);
+    } else {
+      closeTorrentMenu();
+    }
+  });
+  torrentMenu.append(torrentMenuToggle, torrentMenuList);
 
   const settingsLink = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, [icon("settings"), "Настройки"]);
   settingsLink.addEventListener("click", () => {
@@ -3435,7 +3473,7 @@ function mountListShell(root: HTMLElement): void {
   });
 
   const headerActions = el("div", { className: "app-header__actions" });
-  if (canWrite()) headerActions.append(addTorrentBtn, createTorrentBtn, creatorQueueBtn, updateTorrentBtn);
+  if (canWrite()) headerActions.append(torrentMenu);
   headerActions.append(settingsLink, metaEl);
   const header = el("header", { className: "app-header" }, [
     brandLockup(),

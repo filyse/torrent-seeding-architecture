@@ -3302,6 +3302,82 @@ input.file-input::file-selector-button:hover {
 }
 
 /* ——————————————————————————————————————————————————————————
+   Меню «Торрент ▾» в шапке
+   —————————————————————————————————————————————————————————— */
+.tb-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.tb-menu__toggle {
+  gap: 0.4rem;
+}
+
+.tb-menu__caret {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.05rem;
+  transition: transform 0.15s ease;
+}
+
+.tb-menu__toggle[aria-expanded="true"] .tb-menu__caret {
+  transform: rotate(180deg);
+}
+
+.tb-menu__list {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 70;
+  min-width: 13rem;
+  display: flex;
+  flex-direction: column;
+  padding: 0.3rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  animation: pop-in 0.14s ease-out;
+  transform-origin: top left;
+}
+
+.tb-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.tb-menu__item:hover,
+.tb-menu__item:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+
+.tb-menu__item .icon {
+  color: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tb-menu__list {
+    animation: none;
+  }
+  .tb-menu__caret {
+    transition: none;
+  }
+}
+
+/* ——————————————————————————————————————————————————————————
    Плавающая кнопка «наверх»
    —————————————————————————————————————————————————————————— */
 .scrolltop {
