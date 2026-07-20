@@ -3235,7 +3235,7 @@ function mountListShell(root: HTMLElement): void {
     syncReset();
   });
 
-  const sortSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
+  const sortSelect = el("select", { className: "list-filter__select sort-select" }) as HTMLSelectElement;
   for (const [val, label] of [
     ["name", "Сорт: имя"],
     ["added", "Сорт: новые"],
