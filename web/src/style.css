@@ -3569,6 +3569,18 @@ input.file-input::file-selector-button:hover {
   }
 }
 
+/* Правый кластер: карточка профиля, под ней — таймстамп «Обновлено …». */
+.profile-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+}
+.profile-cluster .app-header__meta {
+  margin: 0;
+  padding-right: 0.35rem;
+}
+
 .profile {
   position: relative;
   display: inline-flex;
@@ -3577,14 +3589,15 @@ input.file-input::file-selector-button:hover {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  height: 34px;
-  padding: 0 0.6rem 0 0.25rem;
+  height: 36px;
+  padding: 0 0.6rem 0 0.3rem;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
   color: var(--text);
   cursor: pointer;
   font: inherit;
+  line-height: 1;
 }
 .pf-toggle:hover,
 .profile.is-open .pf-toggle {
@@ -3593,6 +3606,7 @@ input.file-input::file-selector-button:hover {
 .pf-toggle__name {
   font-size: 0.85rem;
   font-weight: 500;
+  line-height: 1;
   max-width: 11rem;
   overflow: hidden;
   text-overflow: ellipsis;

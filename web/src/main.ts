@@ -3920,7 +3920,10 @@ function mountListShell(root: HTMLElement): void {
 
   const headerActions = el("div", { className: "app-header__actions" });
   if (canWrite()) headerActions.append(torrentMenu);
-  headerActions.append(settingsLink, metaEl, profileControl());
+  headerActions.append(
+    settingsLink,
+    el("div", { className: "profile-cluster" }, [profileControl(), metaEl]),
+  );
   const header = el("header", { className: "app-header" }, [
     brandLockup(),
     headerActions,
@@ -4554,7 +4557,7 @@ function mountDetailShell(root: HTMLElement, id: number): void {
     back,
     el("header", { className: "app-header" }, [
       el("div", {}, [el("h1", {}, ["Торрент"]), el("p", { className: "field__hint" }, [`#${id}`])]),
-      el("div", { className: "app-header__actions" }, [metaEl, profileControl()]),
+      el("div", { className: "profile-cluster" }, [profileControl(), metaEl]),
     ]),
     main,
   );
