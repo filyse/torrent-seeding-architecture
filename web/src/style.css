@@ -1448,6 +1448,17 @@ input.file-input::file-selector-button:hover {
   font-weight: 600;
 }
 
+/* Шапка модалки с разделителем (единый вид с «Добавить торрент»). */
+.modal-head {
+  margin: 0 0 0.9rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-head .modal-title {
+  margin: 0;
+}
+
 .modal-text {
   margin: 0 0 1rem;
   font-size: 0.875rem;

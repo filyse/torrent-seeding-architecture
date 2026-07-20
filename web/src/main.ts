@@ -2712,6 +2712,20 @@ function field(label: string, input: HTMLElement, hint?: string): HTMLElement {
   return f;
 }
 
+/** Шапка модалки: заголовок + крестик закрытия, с разделительной чертой снизу (единый стиль). */
+function modalHead(title: string, titleId: string, onClose: () => void): HTMLElement {
+  const closeX = el(
+    "button",
+    { type: "button", className: "btn btn--ghost btn--sm modal-close", "aria-label": "Закрыть" },
+    ["✕"],
+  );
+  closeX.addEventListener("click", onClose);
+  return el("div", { className: "modal-head panel__head--with-action" }, [
+    el("h2", { id: titleId, className: "modal-title" }, [title]),
+    closeX,
+  ]);
+}
+
 const stripTorrentExt = (n: string): string => n.replace(/\.torrent$/i, "");
 
 /** Поиск раздачи для замены: поле ввода + выпадающий список результатов из /torrents. */
@@ -4615,7 +4629,6 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
   const progressBox = el("div", { className: "creator-progress" });
 
   const createBtn = el("button", { type: "button", className: "btn btn--primary" }, ["Создать"]);
-  const closeBtn = el("button", { type: "button", className: "btn btn--ghost" }, ["Закрыть"]);
 
   const updateSelectionInfo = () => {
     selectionInfo.textContent =
@@ -4712,7 +4725,6 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key === "Escape") finish();
   };
-  closeBtn.addEventListener("click", finish);
   overlay.addEventListener("click", (ev) => {
     if (ev.target === overlay) finish();
   });
@@ -4800,7 +4812,7 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
   });
 
   dialog.append(
-    el("h2", { id: "create-dialog-title", className: "modal-title" }, ["Создать торрент"]),
+    modalHead("Создать торрент", "create-dialog-title", finish),
     field("Диск (движок)", engineSelect),
     breadcrumb,
     listBox,
@@ -4811,7 +4823,7 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
     progressBox,
     (() => {
       const actions = el("div", { className: "modal-actions modal-actions--row" });
-      actions.append(closeBtn, createBtn);
+      actions.append(createBtn);
       return actions;
     })(),
   );
@@ -4851,7 +4863,6 @@ function openCreatorQueueDialog(onSeeded: () => void): void {
 
   const listBox = el("div", { className: "creator-queue" });
   const refreshBtn = el("button", { type: "button", className: "btn btn--sm" }, [icon("refresh"), "Обновить"]);
-  const closeBtn = el("button", { type: "button", className: "btn btn--ghost" }, ["Закрыть"]);
 
   let timer: number | null = null;
   let closed = false;
@@ -4865,7 +4876,6 @@ function openCreatorQueueDialog(onSeeded: () => void): void {
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key === "Escape") finish();
   };
-  closeBtn.addEventListener("click", finish);
   overlay.addEventListener("click", (ev) => {
     if (ev.target === overlay) finish();
   });
@@ -4980,7 +4990,7 @@ function openCreatorQueueDialog(onSeeded: () => void): void {
   refreshBtn.addEventListener("click", () => void load());
 
   dialog.append(
-    el("h2", { id: "creator-queue-title", className: "modal-title" }, ["Очередь создания торрентов"]),
+    modalHead("Очередь создания торрентов", "creator-queue-title", finish),
     el("p", { className: "field__hint" }, [
       "Задачи создания на всех движках. Хранятся в памяти движка, автоудаляются через 24 часа " +
         "и очищаются при его перезапуске.",
@@ -4988,7 +4998,7 @@ function openCreatorQueueDialog(onSeeded: () => void): void {
     listBox,
     (() => {
       const bar = el("div", { className: "modal-actions modal-actions--row" });
-      bar.append(closeBtn, refreshBtn);
+      bar.append(refreshBtn);
       return bar;
     })(),
   );
