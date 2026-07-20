@@ -867,7 +867,7 @@ function paintProfile(host: HTMLElement): void {
     "aria-haspopup": "true",
   });
   toggle.append(
-    avatarNode(avatar, name, 24),
+    avatarNode(avatar, name, 22),
     el("span", { className: "pf-toggle__name" }, [name]),
     el("span", { className: "pf-caret" }, [icon("chevron-down")]),
   );
@@ -3918,12 +3918,11 @@ function mountListShell(root: HTMLElement): void {
     window.dispatchEvent(new HashChangeEvent("hashchange"));
   });
 
-  const headerActions = el("div", { className: "app-header__actions" });
-  if (canWrite()) headerActions.append(torrentMenu);
-  headerActions.append(
-    settingsLink,
-    el("div", { className: "profile-cluster" }, [profileControl(), metaEl]),
-  );
+  const actionsRow = el("div", { className: "app-header__actions" });
+  if (canWrite()) actionsRow.append(torrentMenu);
+  actionsRow.append(settingsLink, profileControl());
+  // Все контролы в один ровный ряд, а «Обновлено …» — тонкой строкой под всем блоком.
+  const headerActions = el("div", { className: "app-header__side" }, [actionsRow, metaEl]);
   const header = el("header", { className: "app-header" }, [
     brandLockup(),
     headerActions,
@@ -4557,7 +4556,10 @@ function mountDetailShell(root: HTMLElement, id: number): void {
     back,
     el("header", { className: "app-header" }, [
       el("div", {}, [el("h1", {}, ["Торрент"]), el("p", { className: "field__hint" }, [`#${id}`])]),
-      el("div", { className: "profile-cluster" }, [profileControl(), metaEl]),
+      el("div", { className: "app-header__side" }, [
+        el("div", { className: "app-header__actions" }, [profileControl()]),
+        metaEl,
+      ]),
     ]),
     main,
   );
