@@ -1969,6 +1969,7 @@ function tableColumns(): TableColumn[] {
     { key: "seeds", label: "Сиды", num: true, cell: (t) => String(t.runtime?.num_seeds ?? 0) },
     { key: "peers", label: "Пиры", sort: "peers", num: true, cell: (t) => String(t.runtime?.peers ?? 0) },
     { key: "added", label: "Добавлен", sort: "added", cell: (t) => fmtAddedCell(t.created_at) },
+    { key: "engine", label: "Движок", cell: (t) => (t.engine_id && t.engine_id.trim() ? t.engine_id : "—") },
     { key: "label", label: "Метка", cell: (t) => (t.label && t.label.trim() ? t.label : "—") },
   ];
 }
