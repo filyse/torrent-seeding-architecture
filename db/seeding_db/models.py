@@ -74,6 +74,9 @@ class UserRecord(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Аватар профиля: либо id пресета ("aurora", "brand", "initials", …), либо data-URL
+    # загруженной картинки. Пусто = автоаватар с инициалами. Отдаётся в /auth/me.
+    avatar: Mapped[str] = mapped_column(Text, default="", server_default="")
 
 
 class SessionRecord(Base):

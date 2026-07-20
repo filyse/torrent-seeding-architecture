@@ -496,6 +496,14 @@ class UserRepository:
         await self._session.flush()
         return row
 
+    async def set_avatar(self, user_id: int, avatar: str) -> UserRecord | None:
+        row = await self.get_by_id(user_id)
+        if row is None:
+            return None
+        row.avatar = avatar
+        await self._session.flush()
+        return row
+
     async def delete(self, user_id: int) -> bool:
         row = await self.get_by_id(user_id)
         if row is None:

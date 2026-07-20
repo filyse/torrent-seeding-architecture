@@ -288,7 +288,7 @@ let selectedIds = new Set<number>();
 let selectionChanged: (() => void) | null = null;
 
 type Role = "viewer" | "operator" | "admin";
-type MeOut = { name: string; role: Role; source: string };
+type MeOut = { name: string; role: Role; source: string; avatar?: string };
 let currentRole: Role | null = null;
 let currentMe: MeOut | null = null;
 
@@ -601,6 +601,9 @@ const ICON_PATHS: Record<string, string> = {
     '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   inbox:
     '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  "log-out":
+    '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
 };
 
 /** Инлайновая SVG-иконка (Feather-стиль), наследует цвет текста кнопки. */
@@ -777,6 +780,323 @@ function appFooter(): HTMLElement {
     document.createTextNode(" by Hardkor"),
     el("span", { className: "app-footer__ver" }, [` · v${WEB_VERSION}`]),
   ]);
+}
+
+// —— Профиль: аватары и карточка в шапке ————————————————————————————————————
+// Аватар хранится в БД (users.avatar): либо id пресета, либо data-URL картинки.
+// Пусто/"initials" — автоаватар с инициалами по имени.
+function avaGrad(id: string, c1: string, c2: string): string {
+  return `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient>`;
+}
+const AVATARS: Record<string, string> = {
+  brand:
+    '<svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#2563eb"/><g stroke="#fff" stroke-width="4" stroke-linecap="round" fill="none"><path d="M32 22 19 39M32 22l13 17M23 44h18"/></g><g fill="#fff"><circle cx="32" cy="18" r="5"/><circle cx="18" cy="44" r="5"/><circle cx="46" cy="44" r="5"/></g></svg>',
+  aurora: `<svg viewBox="0 0 64 64"><defs>${avaGrad("ag1", "#6366f1", "#22d3ee")}</defs><rect width="64" height="64" fill="url(#ag1)"/><circle cx="44" cy="22" r="16" fill="#fff" opacity=".18"/><circle cx="22" cy="46" r="20" fill="#000" opacity=".12"/></svg>`,
+  sunset: `<svg viewBox="0 0 64 64"><defs>${avaGrad("ag2", "#fb7185", "#f59e0b")}</defs><rect width="64" height="64" fill="url(#ag2)"/><circle cx="32" cy="40" r="12" fill="#fff" opacity=".28"/></svg>`,
+  forest: `<svg viewBox="0 0 64 64"><defs>${avaGrad("ag3", "#10b981", "#065f46")}</defs><rect width="64" height="64" fill="url(#ag3)"/><path d="M0 44 L20 30 L36 46 L52 28 L64 40 V64 H0Z" fill="#000" opacity=".18"/></svg>`,
+  grape: `<svg viewBox="0 0 64 64"><defs>${avaGrad("ag4", "#a855f7", "#ec4899")}</defs><rect width="64" height="64" fill="url(#ag4)"/><g fill="#fff" opacity=".85"><circle cx="24" cy="26" r="4"/><circle cx="40" cy="26" r="4"/></g><path d="M22 42q10 10 20 0" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
+  ocean: `<svg viewBox="0 0 64 64"><defs>${avaGrad("ag5", "#0ea5e9", "#1e3a8a")}</defs><rect width="64" height="64" fill="url(#ag5)"/><g stroke="#fff" stroke-width="3" fill="none" opacity=".5"><path d="M0 30q8 -6 16 0t16 0 16 0 16 0"/><path d="M0 42q8 -6 16 0t16 0 16 0 16 0"/></g></svg>`,
+  hex: `<svg viewBox="0 0 64 64"><defs>${avaGrad("ag6", "#334155", "#0f172a")}</defs><rect width="64" height="64" fill="url(#ag6)"/><path d="M32 16 46 24 46 40 32 48 18 40 18 24Z" fill="none" stroke="#38bdf8" stroke-width="3"/></svg>`,
+  ember: `<svg viewBox="0 0 64 64"><defs>${avaGrad("ag7", "#f97316", "#b91c1c")}</defs><rect width="64" height="64" fill="url(#ag7)"/><g fill="#fff" opacity=".85"><circle cx="20" cy="20" r="3"/><circle cx="44" cy="18" r="2"/><circle cx="48" cy="40" r="3"/><circle cx="24" cy="46" r="2"/></g></svg>`,
+  mono: '<svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#27272a"/><circle cx="32" cy="26" r="11" fill="#a1a1aa"/><path d="M14 56c2-11 10-16 18-16s16 5 18 16Z" fill="#a1a1aa"/></svg>',
+};
+const AVATAR_IDS = Object.keys(AVATARS);
+
+function initialsSVG(name: string): string {
+  const parts = (name || "?").trim().split(/\s+/);
+  const ini = ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? parts[0]?.[1] ?? "")).toUpperCase() || "?";
+  let h = 0;
+  for (const ch of name || "x") h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const hue = h % 360;
+  return (
+    `<svg viewBox="0 0 64 64"><rect width="64" height="64" fill="hsl(${hue} 55% 45%)"/>` +
+    `<text x="32" y="41" font-size="26" font-family="system-ui,sans-serif" font-weight="700" ` +
+    `fill="#fff" text-anchor="middle">${ini}</text></svg>`
+  );
+}
+
+function avatarNode(spec: string, name: string, size: number): HTMLElement {
+  const wrap = el("span", { className: "pf-av", style: `width:${size}px;height:${size}px` });
+  if (spec.startsWith("data:")) {
+    wrap.append(el("img", { src: spec, alt: "", className: "pf-av__img" }));
+  } else {
+    wrap.innerHTML = spec && spec !== "initials" && AVATARS[spec] ? AVATARS[spec] : initialsSVG(name);
+  }
+  return wrap;
+}
+
+const ROLE_SHORT: Record<Role, string> = {
+  viewer: "Наблюдатель",
+  operator: "Оператор",
+  admin: "Администратор",
+};
+
+const profileHosts = new Set<HTMLElement>();
+
+function refreshAllProfiles(): void {
+  for (const h of [...profileHosts]) {
+    if (h.isConnected) paintProfile(h);
+    else profileHosts.delete(h);
+  }
+}
+
+async function doLogout(): Promise<void> {
+  try {
+    await fetchJson("/auth/logout", { method: "POST" });
+  } catch {
+    /* ignore */
+  }
+  setApiKey("");
+  currentMe = null;
+  currentRole = null;
+  showLoginDialog();
+}
+
+function paintProfile(host: HTMLElement): void {
+  host.replaceChildren();
+  host.className = "profile";
+  const me = currentMe;
+  if (!me) return;
+  const name = me.name || "—";
+  const role = (me.role ?? "viewer") as Role;
+  const avatar = me.avatar ?? "";
+
+  const toggle = el("button", {
+    type: "button",
+    className: "pf-toggle",
+    "aria-haspopup": "true",
+  });
+  toggle.append(
+    avatarNode(avatar, name, 24),
+    el("span", { className: "pf-toggle__name" }, [name]),
+    el("span", { className: "pf-caret" }, [icon("chevron-down")]),
+  );
+
+  const menu = el("div", { className: "pf-menu", role: "menu" });
+  menu.append(
+    el("div", { className: "pf-menu__head" }, [
+      avatarNode(avatar, name, 40),
+      el("div", { className: "pf-menu__id" }, [
+        el("div", { className: "pf-menu__name" }, [name]),
+        el("div", { className: "pf-menu__role" }, [ROLE_SHORT[role]]),
+      ]),
+    ]),
+  );
+
+  const item = (
+    ic: keyof typeof ICON_PATHS,
+    label: string,
+    onClick: () => void,
+    danger = false,
+  ): HTMLElement => {
+    const b = el(
+      "button",
+      { type: "button", className: `pf-item${danger ? " pf-item--danger" : ""}`, role: "menuitem" },
+      [icon(ic), label],
+    );
+    b.addEventListener("click", () => {
+      close();
+      onClick();
+    });
+    return b;
+  };
+  menu.append(
+    item("user", "Сменить аватар", () => openAvatarPicker()),
+    item("swap", "Сменить аккаунт", () => showLoginDialog()),
+    item("log-out", "Выйти", () => void doLogout(), true),
+  );
+
+  const close = (): void => {
+    host.classList.remove("is-open");
+    document.removeEventListener("click", onOutside, true);
+    document.removeEventListener("keydown", onEsc, true);
+  };
+  const onOutside = (ev: Event): void => {
+    if (!host.contains(ev.target as Node)) close();
+  };
+  const onEsc = (ev: KeyboardEvent): void => {
+    if (ev.key === "Escape") close();
+  };
+  toggle.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (host.classList.toggle("is-open")) {
+      document.addEventListener("click", onOutside, true);
+      document.addEventListener("keydown", onEsc, true);
+    } else {
+      close();
+    }
+  });
+
+  host.append(toggle, menu);
+}
+
+function profileControl(): HTMLElement {
+  const host = el("span", { className: "profile" });
+  profileHosts.add(host);
+  paintProfile(host);
+  return host;
+}
+
+function downscaleImage(dataUrl: string, max = 128): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("no canvas ctx"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      try {
+        resolve(canvas.toDataURL("image/webp", 0.85));
+      } catch {
+        resolve(canvas.toDataURL("image/png"));
+      }
+    };
+    img.onerror = () => reject(new Error("bad image"));
+    img.src = dataUrl;
+  });
+}
+
+function openAvatarPicker(): void {
+  const me = currentMe;
+  if (!me) return;
+  let sel = me.avatar ?? "";
+  const name = me.name || "—";
+
+  const overlay = el("div", { className: "modal-overlay" });
+  const dialog = el("div", {
+    className: "modal-dialog",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "avatar-dialog-title",
+  });
+  const close = (): void => overlay.remove();
+
+  const preview = el("div", { className: "avatar-preview" });
+  const grid = el("div", { className: "avatar-grid" });
+  const fileInput = el("input", {
+    type: "file",
+    accept: "image/*",
+    className: "file-input",
+    hidden: "",
+  }) as HTMLInputElement;
+
+  const renderPreview = (): void => {
+    preview.replaceChildren(
+      avatarNode(sel, name, 72),
+      el("div", { className: "avatar-preview__txt" }, [
+        el("div", { className: "avatar-preview__name" }, [name]),
+        el("div", { className: "field__hint" }, [
+          sel.startsWith("data:") ? "Своя картинка" : sel && sel !== "initials" ? sel : "Инициалы (по имени)",
+        ]),
+      ]),
+    );
+  };
+
+  const renderGrid = (): void => {
+    grid.replaceChildren();
+    const ids = [...AVATAR_IDS, "initials"];
+    for (const id of ids) {
+      const isSel = sel === id || (id === "initials" && (sel === "" || sel === "initials"));
+      const tile = el("button", {
+        type: "button",
+        className: `avatar-tile${isSel ? " sel" : ""}`,
+        title: id,
+      });
+      tile.append(avatarNode(id === "initials" ? "initials" : id, name, 52));
+      tile.addEventListener("click", () => {
+        sel = id === "initials" ? "initials" : id;
+        renderGrid();
+        renderPreview();
+      });
+      grid.append(tile);
+    }
+    const isCustom = sel.startsWith("data:");
+    const upload = el("button", {
+      type: "button",
+      className: `avatar-tile avatar-tile--upload${isCustom ? " sel" : ""}`,
+      title: "Загрузить свой",
+    });
+    if (isCustom) upload.append(avatarNode(sel, name, 52));
+    else upload.append(icon("plus"), el("span", {}, ["Свой"]));
+    upload.addEventListener("click", () => fileInput.click());
+    grid.append(upload);
+  };
+
+  fileInput.addEventListener("change", () => {
+    const f = fileInput.files?.[0];
+    if (!f) return;
+    if (f.size > 8 * 1024 * 1024) {
+      showToast("Файл слишком большой (до 8 МБ)", true);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        sel = await downscaleImage(String(reader.result), 128);
+        renderGrid();
+        renderPreview();
+      } catch {
+        showToast("Не удалось обработать изображение", true);
+      }
+    };
+    reader.readAsDataURL(f);
+  });
+
+  const saveBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, ["Сохранить"]);
+  saveBtn.addEventListener("click", async () => {
+    saveBtn.setAttribute("disabled", "");
+    try {
+      const value = sel === "initials" ? "" : sel;
+      await fetchJson("/auth/me/avatar", {
+        method: "PUT",
+        body: JSON.stringify({ avatar: value }),
+      });
+      if (currentMe) currentMe.avatar = value;
+      refreshAllProfiles();
+      showToast("Аватар обновлён");
+      close();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Не удалось сохранить аватар", true);
+      saveBtn.removeAttribute("disabled");
+    }
+  });
+  const cancelBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Отмена"]);
+  cancelBtn.addEventListener("click", close);
+
+  const body = el("div", { className: "modal-body" }, [
+    preview,
+    el("p", { className: "field__label" }, ["Выберите аватар"]),
+    grid,
+    fileInput,
+  ]);
+  if (me.source !== "session") {
+    body.append(
+      el("p", { className: "field__hint" }, [
+        "Аватар сохраняется только для аккаунтов (вход по логину). Для доступа по API-ключу он не запоминается.",
+      ]),
+    );
+  }
+
+  dialog.append(
+    modalHead("Аватар профиля", "avatar-dialog-title", close),
+    body,
+    el("div", { className: "modal-actions" }, [cancelBtn, saveBtn]),
+  );
+  overlay.append(dialog);
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) close();
+  });
+  document.body.append(overlay);
+  renderPreview();
+  renderGrid();
 }
 
 // Роутинг через History API (чистые пути, без "#"). nginx отдаёт index.html на любой путь
@@ -3600,7 +3920,7 @@ function mountListShell(root: HTMLElement): void {
 
   const headerActions = el("div", { className: "app-header__actions" });
   if (canWrite()) headerActions.append(torrentMenu);
-  headerActions.append(settingsLink, metaEl);
+  headerActions.append(settingsLink, metaEl, profileControl());
   const header = el("header", { className: "app-header" }, [
     brandLockup(),
     headerActions,
@@ -4234,7 +4554,7 @@ function mountDetailShell(root: HTMLElement, id: number): void {
     back,
     el("header", { className: "app-header" }, [
       el("div", {}, [el("h1", {}, ["Торрент"]), el("p", { className: "field__hint" }, [`#${id}`])]),
-      metaEl,
+      el("div", { className: "app-header__actions" }, [metaEl, profileControl()]),
     ]),
     main,
   );
@@ -6280,6 +6600,7 @@ function mountSettingsShell(root: HTMLElement): void {
       el("h1", {}, ["Настройки"]),
       el("p", { className: "field__hint" }, ["Глобальные параметры платформы"]),
     ]),
+    el("div", { className: "app-header__actions" }, [profileControl()]),
   ]);
 
   const statsHost = el("div", { id: "settings-session-host" });

@@ -131,8 +131,41 @@ async def logout(
 
 
 @router.get("/auth/me")
-async def whoami(principal: Principal = Depends(require_auth)):
-    return {"name": principal.name, "role": principal.role, "source": principal.source}
+async def whoami(session: DbSession, principal: Principal = Depends(require_auth)):
+    avatar = ""
+    if principal.source == "session":
+        user = await UserRepository(session).get_by_username(principal.name)
+        if user is not None:
+            avatar = user.avatar or ""
+    return {
+        "name": principal.name,
+        "role": principal.role,
+        "source": principal.source,
+        "avatar": avatar,
+    }
+
+
+class AvatarIn(BaseModel):
+    # Пресет-id ("aurora"/"brand"/"initials"/…) или data-URL картинки. Пусто = автоаватар.
+    avatar: str = Field(default="", max_length=400_000)
+
+
+@router.put("/auth/me/avatar")
+async def set_my_avatar(
+    body: AvatarIn, session: DbSession, principal: Principal = Depends(require_auth)
+):
+    """Сохранить аватар текущего пользователя (только для входа по логину/паролю)."""
+    if principal.source != "session":
+        raise HTTPException(
+            status_code=400, detail="аватар доступен только для аккаунтов — войдите по логину"
+        )
+    repo = UserRepository(session)
+    user = await repo.get_by_username(principal.name)
+    if user is None:
+        raise HTTPException(status_code=404, detail="пользователь не найден")
+    await repo.set_avatar(user.id, body.avatar)
+    await session.commit()
+    return {"avatar": body.avatar}
 
 
 @router.post("/auth/key-login")
@@ -141,7 +174,7 @@ async def key_login(principal: Principal = Depends(require_auth)):
 
     Программный доступ по ключу пишет в журнал свои действия (мутации) и в этом
     эндпоинте не нуждается."""
-    return {"name": principal.name, "role": principal.role, "source": principal.source}
+    return {"name": principal.name, "role": principal.role, "source": principal.source, "avatar": ""}
 
 
 def _user_out(row, *, protected: bool = False) -> dict:
