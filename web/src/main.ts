@@ -3836,33 +3836,42 @@ function mountListShell(root: HTMLElement): void {
       return;
     bulkMigrateBtn.disabled = true;
     bulkMigrateSelect.disabled = true;
-    let ok = 0;
-    let skipped = 0;
-    const errors: string[] = [];
-    let idx = 0;
-    const worker = async () => {
-      while (idx < ids.length) {
-        const id = ids[idx++];
-        try {
-          await postAction(`/torrents/${id}/migrate?engine_id=${encodeURIComponent(target)}`);
-          ok += 1;
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          if (/equals source|already migrating/i.test(msg)) skipped += 1;
-          else errors.push(`#${id}: ${msg}`);
+    try {
+      let ok = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+      let idx = 0;
+      const worker = async () => {
+        while (idx < ids.length) {
+          const id = ids[idx++];
+          try {
+            await postAction(`/torrents/${id}/migrate?engine_id=${encodeURIComponent(target)}`);
+            ok += 1;
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (/equals source|already migrating/i.test(msg)) skipped += 1;
+            else errors.push(`#${id}: ${msg}`);
+          }
         }
-      }
-    };
-    // Ограничиваем параллелизм запуска, чтобы не засыпать оркестратор запросами разом.
-    await Promise.all(Array.from({ length: Math.min(4, ids.length) }, () => worker()));
-    const parts = [`запущено: ${ok}`];
-    if (skipped) parts.push(`пропущено: ${skipped}`);
-    if (errors.length) parts.push(`ошибок: ${errors.length}`);
-    showToast(`Перенос на ${target} — ${parts.join(", ")}`, errors.length > 0);
-    if (errors.length) console.warn("bulk migrate errors:", errors);
-    selectedIds.clear();
-    syncBulkBar();
-    void refresh();
+      };
+      // Ограничиваем параллелизм запуска, чтобы не засыпать оркестратор запросами разом.
+      await Promise.all(Array.from({ length: Math.min(4, ids.length) }, () => worker()));
+      const parts = [`запущено: ${ok}`];
+      if (skipped) parts.push(`пропущено: ${skipped}`);
+      if (errors.length) parts.push(`ошибок: ${errors.length}`);
+      showToast(`Перенос на ${target} — ${parts.join(", ")}`, errors.length > 0);
+      if (errors.length) console.warn("bulk migrate errors:", errors);
+      selectedIds.clear();
+      syncBulkBar();
+      void refresh();
+    } finally {
+      // Возвращаем контролы переноса в рабочее состояние. Их отключали на время
+      // операции; без восстановления после переноса селект/кнопка оставались
+      // disabled, и следующий перенос был недоступен до перезагрузки (F5).
+      bulkMigrateSelect.value = "";
+      bulkMigrateSelect.disabled = !bulkEnginesLoaded;
+      bulkMigrateBtn.disabled = true;
+    }
   };
   bulkMigrateBtn.addEventListener("click", () => void runBulkMigrate());
 
