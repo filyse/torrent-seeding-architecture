@@ -4107,7 +4107,14 @@ function mountListShell(root: HTMLElement): void {
 
   // Контекстная панель массовых действий: видна только когда что-то выбрано.
   const bulkCount = el("span", { className: "bulk-bar__count" });
-  const clearSelBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["Снять"]);
+  // Отмена выбора: маленькая иконка-кнопка (закрученная стрелка «↩», как в комбобоксе меток)
+  // рядом со счётчиком — привычное место для «сбросить выделение».
+  const clearSelBtn = el("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm bulk-bar__clear",
+    title: "Отменить выбор",
+    "aria-label": "Отменить выбор",
+  }, ["↩"]);
   clearSelBtn.addEventListener("click", () => {
     selectedIds.clear();
     repaint();
@@ -4115,6 +4122,7 @@ function mountListShell(root: HTMLElement): void {
   });
   const bulkBar = el("div", { className: "bulk-bar", hidden: "" }, [
     bulkCount,
+    clearSelBtn,
     bulkResume,
     bulkPause,
     bulkLabelCombo.control,
@@ -4123,8 +4131,6 @@ function mountListShell(root: HTMLElement): void {
     bulkMigrateBtn,
     el("span", { className: "bulk-bar__sep" }),
     bulkDel,
-    el("span", { className: "bulk-bar__spacer" }),
-    clearSelBtn,
   ]);
   function syncBulkBar(): void {
     const n = selectedIds.size;

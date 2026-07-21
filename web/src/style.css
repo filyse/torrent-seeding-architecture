@@ -2466,6 +2466,18 @@ input.file-input::file-selector-button:hover {
   margin-left: auto;
 }
 
+/* Кнопка «Отменить выбор» — маленькая квадратная иконка с глифом «↩». */
+.bulk-bar__clear.btn {
+  width: 2rem;
+  padding: 0;
+  font-size: 1.05rem;
+  line-height: 1;
+  color: var(--muted);
+}
+.bulk-bar__clear.btn:hover {
+  color: var(--text);
+}
+
 .torrent-card__check {
   margin-top: 0.25rem;
   flex-shrink: 0;
