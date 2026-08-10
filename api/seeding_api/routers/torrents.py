@@ -10,7 +10,7 @@ from seeding_db.repository import MigrationRepository, TorrentRepository
 
 from seeding_api.deps import DbSession, EnginePoolDep
 from seeding_api.migrate import cancel_migration, run_migration, set_progress
-from seeding_api.runtime_sync import merge_runtime_into_row
+from seeding_api.runtime_sync import apply_uploaded_carry, merge_runtime_into_row
 from seeding_api.schemas import (
     BatchUploadItem,
     BatchUploadResult,
@@ -124,6 +124,7 @@ async def list_torrents(
     for row in rows:
         runtime = runtime_by_engine.get(row.engine_id, {}).get(row.id)
         merged = await merge_runtime_into_row(repo, row, runtime)
+        runtime = apply_uploaded_carry(row, runtime)
         data = TorrentOut.model_validate(row).model_dump()
         data["status"] = merged
         data["runtime"] = runtime
@@ -807,7 +808,7 @@ async def get_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDep):
             peer_list = []
     data = TorrentOut.model_validate(row).model_dump()
     data["status"] = status
-    data["runtime"] = runtime
+    data["runtime"] = apply_uploaded_carry(row, runtime)
     data["peer_list"] = peer_list
     return TorrentDetailOut.model_validate(data)
 
@@ -957,7 +958,7 @@ async def set_torrent_limits(
     status = await merge_runtime_into_row(repo, row, runtime)
     data = TorrentOut.model_validate(row).model_dump()
     data["status"] = status
-    data["runtime"] = runtime
+    data["runtime"] = apply_uploaded_carry(row, runtime)
     return TorrentDetailOut.model_validate(data)
 
 
@@ -978,7 +979,7 @@ async def set_torrent_private(
     status = await merge_runtime_into_row(repo, row, runtime)
     data = TorrentOut.model_validate(row).model_dump()
     data["status"] = status
-    data["runtime"] = runtime
+    data["runtime"] = apply_uploaded_carry(row, runtime)
     return TorrentDetailOut.model_validate(data)
 
 

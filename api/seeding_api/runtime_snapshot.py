@@ -20,6 +20,8 @@ from seeding_db.models import TorrentStatus
 from seeding_db.repository import TorrentRepository
 from seeding_db.status_from_runtime import status_from_runtime
 
+from seeding_api.runtime_sync import accumulate_uploaded
+
 log = logging.getLogger(__name__)
 
 
@@ -65,13 +67,18 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                 up = down = peers = 0
                 prog = r.progress or 0.0
                 upl = r.uploaded_total
+                seen = r.uploaded_seen
                 sz = r.size
             else:
                 up = int(h.get("upload_rate") or 0)
                 down = int(h.get("download_rate") or 0)
                 peers = int(h.get("peers") or 0)
                 prog = float(h.get("progress") or 0.0)
-                upl = int(h.get("total_uploaded") or 0)
+                # Накапливаем, а не зеркалим: счётчик движка обнуляется при переносе
+                # раздачи на другой движок, а «всего отдано» принадлежит раздаче.
+                upl, seen = accumulate_uploaded(
+                    r.uploaded_total, r.uploaded_seen, h.get("total_uploaded") or 0
+                )
                 sz = int(h.get("size") or 0) or r.size
 
                 # Согласуем статус по рантайму для ВСЕХ раздач (а не только для открытой страницы
@@ -90,6 +97,7 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                 or peers != r.peers
                 or abs(prog - (r.progress or 0.0)) > 1e-4
                 or upl != r.uploaded_total
+                or seen != r.uploaded_seen
                 or sz != r.size
             )
             if changed:
@@ -101,15 +109,21 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                         "peers": peers,
                         "progress": prog,
                         "uploaded_total": upl,
+                        "uploaded_seen": seen,
                         "size": sz,
                         "runtime_at": now,
                     }
                 )
 
-            # WS torrent:{id} — единый формат с адресным пуллером (ws_pollers): сырой handle
-            # движка в `runtime` + согласованный `status`. Деталь применяет это к живым полям.
+            # WS torrent:{id} — единый формат с адресным пуллером (ws_pollers): handle движка
+            # в `runtime` + согласованный `status`. Деталь применяет это к живым полям.
+            # `total_uploaded` подменяем на накопленный (`upl`), иначе после переноса деталь
+            # показывала бы счётчик нового движка, стартовавший с нуля.
             if hub is not None and hub.has_subscribers(f"torrent:{r.id}"):
-                ws_deltas[r.id] = {"id": r.id, "runtime": h, "status": r.status}
+                payload_rt = h
+                if h is not None:
+                    payload_rt = {**h, "total_uploaded": upl}
+                ws_deltas[r.id] = {"id": r.id, "runtime": payload_rt, "status": r.status}
 
         for su in status_updates:
             if su["id"] in ws_deltas:

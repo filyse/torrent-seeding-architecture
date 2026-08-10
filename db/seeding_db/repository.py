@@ -327,6 +327,10 @@ class TorrentRepository:
             return None
         row.engine_id = engine_id
         row.save_path = save_path
+        # Явная граница инкарнации: на цели торрент добавлен заново, счётчик libtorrent
+        # начинается с нуля. Накопленное (`uploaded_total`) не трогаем — объём отданного
+        # принадлежит раздаче, а не движку; обнуляем только базу для расчёта дельт.
+        row.uploaded_seen = 0
         await self._session.flush()
         return row
 

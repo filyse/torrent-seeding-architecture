@@ -40,7 +40,14 @@ class TorrentRecord(Base):
     down_rate: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     peers: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     progress: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    # Всего отдано за ВСЮ жизнь раздачи — накопитель, а не зеркало счётчика движка.
+    # Счётчик libtorrent живёт в рамках одной «инкарнации»: перенос на другой движок
+    # добавляет торрент заново, и счётчик стартует с нуля. Объём отданного привязан к
+    # раздаче, а не к движку/пути, поэтому копим здесь. См. runtime_snapshot.snapshot_once.
     uploaded_total: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    # Последнее сырое значение счётчика текущей инкарнации. Инвариант после каждого снимка:
+    # uploaded_total - uploaded_seen = отдано на ПРЕДЫДУЩИХ движках.
+    uploaded_seen: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     size: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     runtime_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 

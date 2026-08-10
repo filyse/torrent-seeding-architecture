@@ -19,6 +19,8 @@ from seeding_db.models import TorrentStatus
 from seeding_db.repository import TorrentRepository
 from seeding_db.status_from_runtime import status_from_runtime
 
+from seeding_api.runtime_sync import apply_uploaded_carry
+
 log = logging.getLogger(__name__)
 
 _BASE_INTERVAL = 2.0  # сек: тик детали и джоб
@@ -56,6 +58,9 @@ async def _poll_torrents(app, hub) -> None:
                 handle.get("runtime_status"), handle.get("lt_state"),
                 float(handle.get("progress") or 0.0),
             )
+        # «Всего отдано» — за всю жизнь раздачи, а не за текущий движок: после переноса
+        # счётчик libtorrent на цели стартует с нуля (см. runtime_sync.accumulate_uploaded).
+        handle = apply_uploaded_carry(row, handle)
         await hub.publish(f"torrent:{row.id}", {"id": row.id, "runtime": handle, "status": status})
 
     await asyncio.gather(*(_one(r) for r in rows))
