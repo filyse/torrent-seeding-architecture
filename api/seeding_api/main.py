@@ -28,6 +28,7 @@ from seeding_api.routers import creator as creator_router
 from seeding_api.routers import engines as engines_router
 from seeding_api.routers import health as health_router
 from seeding_api.routers import jobs as jobs_router
+from seeding_api.routers import network as network_router
 from seeding_api.routers import quotas as quotas_router
 from seeding_api.routers import session as session_router
 from seeding_api.routers import settings as settings_router
@@ -273,6 +274,11 @@ app.include_router(
 app.include_router(
     components_router.router,
     prefix="/api/v1",
+)
+app.include_router(
+    network_router.router,
+    prefix="/api/v1",
+    dependencies=[Depends(require_auth)],
 )
 app.include_router(
     quotas_router.router,
