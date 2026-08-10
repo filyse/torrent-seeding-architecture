@@ -4,8 +4,8 @@
 #  - следит за свободным местом и пишет предупреждение в лог;
 #  - при критическом заполнении делает агрессивную чистку.
 #
-# Запуск из cron/таймера, напр. ежечасно:
-#   0 * * * * /opt/containerd/scripts/disk-guard.sh >/dev/null 2>&1
+# Запуск из cron/таймера, напр. ежечасно (через bash — см. db-backup.sh о потере +x):
+#   0 * * * * bash /opt/containerd/scripts/disk-guard.sh >/dev/null 2>&1
 #
 # Пороги настраиваются через env: DISK_WARN_PCT (по умолч. 85), DISK_CRIT_PCT (92),
 # DISK_MOUNT (/), DISK_GUARD_LOG (/var/log/disk-guard.log).

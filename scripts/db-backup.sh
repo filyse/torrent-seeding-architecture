@@ -3,8 +3,10 @@
 # Запуск на CT400 (внутри контейнера живёт docker). Кладём дампы на /mnt/media —
 # это отдельный диск от rootfs, поэтому бэкап переживает пересоздание CT/тома pgdata.
 #
-# Cron (ежедневно в 04:30):
-#   30 4 * * * /opt/containerd/scripts/db-backup.sh >> /var/log/db-backup.log 2>&1
+# Cron (ежедневно в 04:30). Вызов ЧЕРЕЗ bash, а не напрямую: если файл потеряет бит
+# запуска (например, после `git reset --hard` с чекаута, где режимы не сохранились),
+# прямой вызов молча падает в «Permission denied» и бэкапы прекращаются незаметно.
+#   30 4 * * * bash /opt/containerd/scripts/db-backup.sh >> /var/log/db-backup.log 2>&1
 set -euo pipefail
 
 DB_CONTAINER="${DB_CONTAINER:-containerd-db-1}"
