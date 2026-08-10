@@ -213,8 +213,9 @@ API-restore (ниже) остаётся как восстановление по
 | GET/POST | `/torrents/{id}/files` · `/files/priorities` | файлы и приоритеты |
 | POST | `/torrents/bulk/pause` · `/resume` · `/delete` | массовые операции |
 | GET | `/labels` | список меток |
-| GET | `/session/stats` | агрегированная статистика по всем движкам |
+| GET | `/session/stats` | агрегированная статистика по всем движкам (+ разрез `by_engine`) |
 | POST | `/session/limits` | глобальные лимиты сессии |
+| GET | `/network/links` | карта WAN-каналов: движки и ёмкость аплинков ([`docs/NETWORK.md`](docs/NETWORK.md)) |
 | POST | `/jobs/*` | постановка фоновых задач (sync, restore, health, bulk-register) |
 
 Внутренний API движка (`:8081`, не публичный) зеркалит торрент-операции на уровне `db_id`
@@ -226,7 +227,8 @@ API-restore (ниже) остаётся как восстановление по
 
 **API:** `DATABASE_URL`, `REDIS_URL`, `ENGINES_CONFIG_FILE` (путь к engines.json),
 `SEEDING_RESTORE_CONCURRENCY`, `SEEDING_ENGINE_RESTORE`, `SEEDING_API_KEYS` (+ заголовок
-`X-API-Key`), `SEEDING_REQUIRE_ENGINE_FOR_DELETE`.
+`X-API-Key`), `SEEDING_REQUIRE_ENGINE_FOR_DELETE`, `SEEDING_WAN_LINKS` (карта WAN-каналов
+для экрана «Сеть», см. [`docs/NETWORK.md`](docs/NETWORK.md)).
 
 **Движок:** `ENGINE_HTTP_PORT=8081`, `SEEDING_ENGINE_BACKEND=libtorrent`, `SEEDING_DATA_ROOT=/data`,
 `ENGINE_STORAGE_SUBDIR=bX`, `SEEDING_LT_STATE_FILE`, `SEEDING_FASTRESUME_DIR`,

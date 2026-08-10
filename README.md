@@ -22,6 +22,8 @@
 - [`AGENTS.md`](AGENTS.md) — роли агентов и сдача работ координатору
 - [`docs/PLAN_BY_AGENT.md`](docs/PLAN_BY_AGENT.md) — пошаговые планы кода по ролям
 - [`docs/INTEGRATION.md`](docs/INTEGRATION.md) — границы модулей и контракты
+- [`docs/CREATOR.md`](docs/CREATOR.md) — создание `.torrent` из контента на диске движка
+- [`docs/NETWORK.md`](docs/NETWORK.md) — экран «Сеть»: отдача по WAN-каналам и движкам
 - [`docs/QA_MANUAL_CHECKLIST.md`](docs/QA_MANUAL_CHECKLIST.md) — ручные сценарии веб + CLI
 - [`docs/reports/`](docs/reports/) — отчёты QA (шаблон в [`AGENTS.md`](AGENTS.md))
 
