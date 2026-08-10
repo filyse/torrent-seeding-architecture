@@ -30,6 +30,63 @@ def _backup_dir() -> str:
     return os.getenv("SEEDING_BACKUP_DIR", "/backups")
 
 
+def _stale_hours() -> float:
+    """С какого возраста последний бэкап считается протухшим (бэкап суточный).
+
+    Нужен потому, что тихо сломавшийся cron однажды уже стоил 23 дней без копий:
+    сам факт наличия старых файлов в каталоге ни о чём не говорит."""
+    try:
+        return max(1.0, float(os.getenv("SEEDING_BACKUP_STALE_HOURS", "48")))
+    except ValueError:
+        return 48.0
+
+
+def _age_hours(ts: float) -> float:
+    return max(0.0, (datetime.now(timezone.utc).timestamp() - ts) / 3600.0)
+
+
+def _engine_meta_summary() -> dict:
+    """Сводка по архивам состояния движков (пишет `seeding_api.backup_engines`)."""
+    d = os.path.join(_backup_dir(), "engines")
+    latest_by_engine: dict[str, float] = {}
+    total_size = 0
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return {"available": False, "engines": [], "latest_at": None, "stale": True}
+    for name in names:
+        if not name.endswith(".tar.gz"):
+            continue
+        # <engine_id>-<YYYYmmdd-HHMMSS>.tar.gz — id движка не содержит дефисов.
+        engine_id = name.split("-", 1)[0]
+        try:
+            stt = os.stat(os.path.join(d, name))
+        except OSError:
+            continue
+        total_size += stt.st_size
+        if stt.st_mtime > latest_by_engine.get(engine_id, 0.0):
+            latest_by_engine[engine_id] = stt.st_mtime
+    if not latest_by_engine:
+        return {"available": True, "engines": [], "latest_at": None, "stale": True}
+    newest = max(latest_by_engine.values())
+    return {
+        "available": True,
+        "size": total_size,
+        "engines": [
+            {
+                "engine_id": eid,
+                "latest_at": datetime.fromtimestamp(ts, timezone.utc).isoformat(),
+                "age_hours": round(_age_hours(ts), 1),
+                "stale": _age_hours(ts) > _stale_hours(),
+            }
+            for eid, ts in sorted(latest_by_engine.items())
+        ],
+        "latest_at": datetime.fromtimestamp(newest, timezone.utc).isoformat(),
+        "age_hours": round(_age_hours(newest), 1),
+        "stale": _age_hours(newest) > _stale_hours(),
+    }
+
+
 def _db_conn() -> dict:
     url = os.getenv("DATABASE_URL", "")
     parts = urlsplit(url)
@@ -86,12 +143,25 @@ async def list_backups(_: Principal = Depends(require_admin)):
                     "filename": name,
                     "size": stt.st_size,
                     "created_at": datetime.fromtimestamp(stt.st_mtime, timezone.utc).isoformat(),
+                    "mtime": stt.st_mtime,
                 }
             )
     except FileNotFoundError:
-        return {"dir": d, "available": False, "items": []}
+        return {"dir": d, "available": False, "items": [], "stale": True}
     items.sort(key=lambda x: x["filename"], reverse=True)
-    return {"dir": d, "available": True, "items": items}
+    newest = max((i["mtime"] for i in items), default=None)
+    for i in items:
+        i.pop("mtime", None)
+    return {
+        "dir": d,
+        "available": True,
+        "items": items,
+        "latest_at": datetime.fromtimestamp(newest, timezone.utc).isoformat() if newest else None,
+        "age_hours": round(_age_hours(newest), 1) if newest else None,
+        "stale": (_age_hours(newest) > _stale_hours()) if newest else True,
+        "stale_after_hours": _stale_hours(),
+        "engine_meta": _engine_meta_summary(),
+    }
 
 
 @router.post("/backups", status_code=201)

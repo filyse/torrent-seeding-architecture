@@ -5952,7 +5952,25 @@ function mountUsersPanel(): HTMLElement {
 }
 
 type BackupItem = { filename: string; size: number; created_at: string };
-type BackupsOut = { dir: string; available: boolean; items: BackupItem[] };
+type EngineMetaItem = { engine_id: string; latest_at: string; age_hours: number; stale: boolean };
+type EngineMetaOut = {
+  available: boolean;
+  size?: number;
+  engines: EngineMetaItem[];
+  latest_at: string | null;
+  age_hours?: number;
+  stale: boolean;
+};
+type BackupsOut = {
+  dir: string;
+  available: boolean;
+  items: BackupItem[];
+  latest_at?: string | null;
+  age_hours?: number | null;
+  stale: boolean;
+  stale_after_hours?: number;
+  engine_meta?: EngineMetaOut;
+};
 
 type JobEnqueueOut = { enqueued: boolean; job: string; job_id?: string | null };
 type JobResultOut = { job_id: string; status: string; success?: boolean; result?: unknown };
@@ -6473,19 +6491,73 @@ function mountBackupsPanel(): HTMLElement {
   panel.append(head);
 
   const body = el("div", { className: "panel__body" });
+  // Возраст последней копии на виду: молча сломавшийся cron однажды уже стоил
+  // 23 дней без бэкапов, а по списку файлов это заметно только приглядевшись к датам.
+  const status = el("div", { className: "backup-status" });
   const hint = el("p", { className: "field__hint" }, ["Загрузка…"]);
   const list = el("div", { className: "keys-list" });
-  body.append(hint, list);
+  body.append(status, hint, list);
   panel.append(body);
+
+  const fmtAge = (hours: number): string => {
+    if (hours < 1) return "меньше часа назад";
+    if (hours < 24) return `${Math.round(hours)} ч назад`;
+    const days = Math.floor(hours / 24);
+    return days === 1 ? "вчера" : `${days} дн. назад`;
+  };
+
+  const renderStatus = (data: BackupsOut) => {
+    status.replaceChildren();
+    const rows: HTMLElement[] = [];
+
+    const dbStale = data.stale;
+    const dbText =
+      data.age_hours == null
+        ? "БД: копий ещё нет"
+        : `БД: последняя копия ${fmtAge(data.age_hours)}`;
+    rows.push(
+      el("div", { className: `backup-status__row${dbStale ? " backup-status__row--warn" : ""}` }, [
+        el("span", { className: "backup-status__dot" }),
+        el("span", {}, [dbText]),
+      ]),
+    );
+
+    const meta = data.engine_meta;
+    if (meta) {
+      const metaText =
+        meta.latest_at == null || meta.age_hours == null
+          ? "Состояние движков: архивов ещё нет"
+          : `Состояние движков: ${meta.engines.length} шт., свежесть ${fmtAge(meta.age_hours)}`;
+      rows.push(
+        el(
+          "div",
+          { className: `backup-status__row${meta.stale ? " backup-status__row--warn" : ""}` },
+          [el("span", { className: "backup-status__dot" }), el("span", {}, [metaText])],
+        ),
+      );
+    }
+
+    if (dbStale || meta?.stale) {
+      rows.push(
+        el("div", { className: "backup-status__note" }, [
+          `Бэкап суточный — если копия старше ${data.stale_after_hours ?? 48} ч, проверьте cron на CT400: ` +
+            "bash /opt/containerd/scripts/db-backup.sh",
+        ]),
+      );
+    }
+    status.append(...rows);
+  };
 
   const reload = async () => {
     try {
       const data = await fetchJson<BackupsOut>("/backups");
       if (!data.available) {
+        status.replaceChildren();
         hint.textContent = `Каталог бэкапов недоступен (${data.dir}). Проверьте монтирование.`;
         list.replaceChildren();
         return;
       }
+      renderStatus(data);
       hint.textContent = `Каталог: ${data.dir} · копий: ${data.items.length}`;
       list.replaceChildren();
       if (data.items.length === 0) {
@@ -6511,6 +6583,7 @@ function mountBackupsPanel(): HTMLElement {
         list.append(row);
       }
     } catch (e) {
+      status.replaceChildren();
       hint.textContent = e instanceof Error ? e.message : String(e);
     }
   };

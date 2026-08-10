@@ -394,6 +394,72 @@ async def sysinfo(request: Request):
     return await asyncio.to_thread(_sysinfo.collect, rt)
 
 
+#: Что считаем «состоянием движка»: fastresume спасает от полного рехэша контента,
+#: .torrents позволяет поднять раздачи без повторного скачивания метаданных,
+#: session.state хранит настройки сессии libtorrent (DHT-ноды и пр.).
+_META_SUBDIRS = (".fastresume", ".torrents", ".state")
+
+
+def _data_root() -> Path:
+    return Path(os.getenv("SEEDING_DATA_ROOT", "/data"))
+
+
+@router.get("/meta/archive")
+async def stream_meta_archive():
+    """Отдать состояние движка tar.gz-потоком — источник для суточного бэкапа.
+
+    Контент раздач НЕ включаем: он на порядки больше и при аварии восстанавливается
+    ре-сидированием. А вот эти каталоги маленькие (десятки МБ), живут в docker-томе и
+    нигде больше не дублируются: без них восстановление означает полный рехэш всего
+    контента, то есть дни работы дисков.
+    """
+    root = _data_root()
+    present = [sub for sub in _META_SUBDIRS if (root / sub).is_dir()]
+    if not present:
+        raise HTTPException(status_code=404, detail="metadata dirs not found")
+
+    def _count() -> int:
+        total = 0
+        for sub in present:
+            try:
+                with os.scandir(root / sub) as it:
+                    total += sum(1 for _ in it)
+            except OSError:
+                continue
+        return total
+
+    files = await asyncio.to_thread(_count)
+
+    async def gen():
+        loop = asyncio.get_running_loop()
+        rfd, wfd = os.pipe()
+
+        def write_tar() -> None:
+            # Поток без seek (`w|gz`): архив уходит по сети по мере упаковки, ничего
+            # не буферизуется на диске движка.
+            with os.fdopen(wfd, "wb") as wf, tarfile.open(fileobj=wf, mode="w|gz") as tf:
+                for sub in present:
+                    tf.add(str(root / sub), arcname=sub)
+
+        task = loop.run_in_executor(None, write_tar)
+        rf = os.fdopen(rfd, "rb")
+        try:
+            while True:
+                chunk = await loop.run_in_executor(None, rf.read, 1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            rf.close()
+            await task
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/gzip",
+        headers={"X-Meta-Files": str(files), "X-Meta-Dirs": ",".join(present)},
+    )
+
+
 @router.get("/torrents/{db_id}/content")
 async def stream_content(request: Request, db_id: int):
     """Отдать контент раздачи tar-потоком (источник сетевого переноса между машинами)."""

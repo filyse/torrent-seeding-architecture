@@ -3111,6 +3111,44 @@ input.file-input::file-selector-button:hover {
   border-radius: 5px;
   vertical-align: middle;
 }
+/* —— свежесть резервных копий —— */
+
+.backup-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+}
+
+.backup-status__row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+}
+
+.backup-status__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--ok, #2ea043);
+  flex: 0 0 auto;
+}
+
+.backup-status__row--warn {
+  color: #f5a524;
+  font-weight: 600;
+}
+
+.backup-status__row--warn .backup-status__dot {
+  background: #f5a524;
+}
+
+.backup-status__note {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
 .keys-list {
   display: flex;
   flex-direction: column;

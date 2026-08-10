@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Резервная копия Postgres (реестр раздач/движков) на медиа-шару с ретеншеном.
+# Суточный бэкап: дамп Postgres (реестр раздач/движков) + состояние движков
+# (.fastresume/.torrents/.state) на медиа-шару, с ретеншеном.
 # Запуск на CT400 (внутри контейнера живёт docker). Кладём дампы на /mnt/media —
 # это отдельный диск от rootfs, поэтому бэкап переживает пересоздание CT/тома pgdata.
 #
@@ -10,6 +11,7 @@
 set -euo pipefail
 
 DB_CONTAINER="${DB_CONTAINER:-containerd-db-1}"
+API_CONTAINER="${API_CONTAINER:-containerd-api-1}"
 DB_USER="${POSTGRES_USER:-seeding}"
 DB_NAME="${POSTGRES_DB:-seeding}"
 BACKUP_DIR="${DB_BACKUP_DIR:-/mnt/media/seeding-test/_backups/db}"
@@ -45,3 +47,18 @@ log "ретеншен: удалено старых дампов: ${DELETED} (х�
 
 COUNT="$(find "$BACKUP_DIR" -maxdepth 1 -name "${DB_NAME}-*.dump" -type f | wc -l)"
 log "всего дампов в $BACKUP_DIR: ${COUNT}"
+
+# Состояние движков (.fastresume/.torrents/.state). Запускаем внутри контейнера api:
+# там уже есть реестр движков, TLS-сертификаты и токен внутреннего API, поэтому не нужно
+# заводить SSH-доступ с CT400 на хосты движков. Свой ретеншен модуль применяет сам.
+# Неуспех здесь не должен ронять весь бэкап — дамп БД уже снят и это главное.
+if docker inspect "$API_CONTAINER" >/dev/null 2>&1; then
+  log "метаданные движков -> $BACKUP_DIR/engines"
+  if docker exec "$API_CONTAINER" python3 -m seeding_api.backup_engines 2>&1 | sed "s/^/  /"; then
+    log "метаданные движков: готово"
+  else
+    log "ПРЕДУПРЕЖДЕНИЕ: метаданные движков сняты не полностью (см. выше)"
+  fi
+else
+  log "ПРЕДУПРЕЖДЕНИЕ: контейнер api '$API_CONTAINER' не найден — метаданные движков пропущены"
+fi

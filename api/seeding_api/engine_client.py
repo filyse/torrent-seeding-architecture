@@ -225,6 +225,22 @@ class EngineClient:
                 total = 0
             yield resp, total
 
+    @contextlib.asynccontextmanager
+    async def stream_meta_archive(self):
+        """Открыть выгрузку состояния движка (.fastresume/.torrents/.state) как tar.gz.
+
+        Возвращает (response, files_count). Используется суточным бэкапом."""
+        timeout = httpx.Timeout(connect=30.0, read=None, write=None, pool=None)
+        async with self._client.stream(
+            "GET", "/internal/v1/meta/archive", timeout=timeout
+        ) as resp:
+            resp.raise_for_status()
+            try:
+                files = int(resp.headers.get("X-Meta-Files", "0"))
+            except ValueError:
+                files = 0
+            yield resp, files
+
     async def stage_remote(
         self, db_id: int, torrent_bytes: bytes, save_path: str, content_total: int
     ) -> dict:
