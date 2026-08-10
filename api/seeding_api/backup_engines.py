@@ -124,6 +124,9 @@ def main() -> None:
         format="[%(asctime)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    # httpx на INFO печатает строку на каждый запрос — в суточном cron-логе это шум,
+    # который прячет собственно результат по каждому движку.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     sys.exit(asyncio.run(run()))
 
 
