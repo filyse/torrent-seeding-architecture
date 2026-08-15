@@ -1,0 +1,24 @@
+# Пример оверрея для b-host (192.168.1.171).
+# Подставь external volume names из `docker volume ls | grep seeding-engine`.
+# Либо bind-mount хостовые пути дисков b1..b6.
+
+services:
+  upload:
+    environment:
+      UPLOAD_ENGINE_ROOTS: >-
+        {"b1":"/data/b1","b2":"/data/b2","b3":"/data/b3","b4":"/data/b4","b5":"/data/b5","b6":"/data/b6"}
+    volumes:
+      # Пример bind (замени на реальные пути хоста):
+      # - /mnt/b1:/data/b1
+      # - /mnt/b2:/data/b2
+      # Или external named volumes движков:
+      - type: volume
+        source: seeding-engine_engine_data
+        target: /data/b1
+        volume:
+          nocopy: true
+      # b2..b6 — добавь по аналогии с именами проектов seeding-engine-bN_engine_data
+
+volumes:
+  seeding-engine_engine_data:
+    external: true

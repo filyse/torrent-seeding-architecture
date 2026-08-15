@@ -1,0 +1,12 @@
+# Пример оверрея для a-host (192.168.2.243).
+
+services:
+  upload:
+    environment:
+      UPLOAD_ENGINE_ROOTS: >-
+        {"a1":"/data/a1","a2":"/data/a2","a3":"/data/a3"}
+    volumes:
+      # Замени на реальные bind/volume a1..a3:
+      # - /home/rudub2/storage/a1:/data/a1
+      # - /home/rudub2/storage/a2:/data/a2
+      # - /home/rudub2/storage/a3:/data/a3

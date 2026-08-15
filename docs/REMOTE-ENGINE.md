@@ -35,6 +35,7 @@ cp .env.engine.example .env.engine && nano .env.engine   # заполнить з
 | `SEEDING_ENGINE_ADVERTISE_URL` | да | Адрес движка для оркестратора — внешний IP + порт API |
 | `SEEDING_ENGINE_LISTEN_PORT` | да | BitTorrent-порт (TCP+UDP), открыть для пиров |
 | `SEEDING_ENGINE_API_PORT` | нет | Порт внутреннего API на хосте (по умолчанию `8081`) |
+| `SEEDING_UPLOAD_TICKET_SECRET` | нет | Секрет HMAC для `/upload/v1`. Если задан — контейнер в сети `seeding-upload` |
 | `SEEDING_ENGINE_HEARTBEAT_INTERVAL` | нет | Период heartbeat, сек (по умолчанию `60`) |
 
 `media_path` для удалённого движка **не задаётся**: перенос пойдёт по сети (`transport=http`).

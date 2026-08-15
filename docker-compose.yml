@@ -29,8 +29,8 @@ services:
   # Движок: в образе часто нет libtorrent → SEEDING_ENGINE_BACKEND=auto даст mock.
   engine:
     build:
-      context: ./engine
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: engine/Dockerfile
     environment:
       ENGINE_HTTP_PORT: "8081"
       SEEDING_DATA_ROOT: /data

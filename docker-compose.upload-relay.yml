@@ -1,0 +1,32 @@
+# Streaming-релей на RU VDS (или любом хосте с хорошим входящим каналом).
+# Браузер → relay /u/{a|b}/… → seedbox2 /u/{a|b}/… → upload-контейнер.
+#
+#   UPLOAD_RELAY_UPSTREAMS='{"a":"https://seedbox2.hw-s.ru/u/a","b":"https://seedbox2.hw-s.ru/u/b"}'
+#   docker compose -f docker-compose.upload-relay.yml up -d --build
+
+name: seeding-upload-relay
+
+services:
+  upload-relay:
+    build:
+      context: ./upload-relay
+      dockerfile: Dockerfile
+    container_name: seeding-upload-relay
+    restart: unless-stopped
+    environment:
+      UPLOAD_RELAY_UPSTREAMS: ${UPLOAD_RELAY_UPSTREAMS:-{"a":"https://seedbox2.hw-s.ru/u/a","b":"https://seedbox2.hw-s.ru/u/b"}}
+      UPLOAD_CORS_ORIGINS: ${UPLOAD_CORS_ORIGINS:-https://seedbox2.hw-s.ru,https://seedbox.hw-s.ru}
+    ports:
+      - "${UPLOAD_RELAY_PUBLISH_PORT:-8091}:8091"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=5).read()",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

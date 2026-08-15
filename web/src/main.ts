@@ -1,4 +1,12 @@
 import "./style.css";
+import {
+  applyUploadLimits,
+  loadUploadFeatures,
+  openFileUploadDialog,
+  openUploadQueueDialog,
+  uploadFeatureEnabled,
+  type FileUploadDeps,
+} from "./fileUpload";
 import { WEB_VERSION } from "./version";
 import { onWsUnavailable, wsAvailable, wsSubscribe } from "./ws";
 
@@ -590,9 +598,19 @@ function showToast(message: string, isError = false): void {
     className: `toast${isError ? " toast--error" : ""}`,
     role: "status",
   });
-  t.textContent = message;
+  // «Заголовок\nтело» — длинные имена файлов не режем в одну строку.
+  const nl = message.indexOf("\n");
+  if (nl >= 0) {
+    t.append(
+      el("div", { className: "toast__title" }, [message.slice(0, nl)]),
+      el("div", { className: "toast__body" }, [message.slice(nl + 1)]),
+    );
+  } else {
+    t.textContent = message;
+  }
   document.body.append(t);
-  toastTimer = setTimeout(() => t.remove(), isError ? 5000 : 2500);
+  const hold = isError || nl >= 0 ? 5000 : 2500;
+  toastTimer = setTimeout(() => t.remove(), hold);
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -1529,6 +1547,86 @@ function mountNetSettingsPanel(): HTMLElement {
   });
 
   body.append(hint, toggles, el("div", { className: "btn-row" }, [saveBtn]), result);
+  panel.append(body);
+  void load();
+  return panel;
+}
+
+type UploadLimitsOut = { max_parallel_uploads: number; chunk_concurrency: number };
+
+function mountUploadLimitsPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  panel.append(el("div", { className: "panel__head" }, ["Загрузка файлов"]));
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, [
+    "Сколько файлов и чанков одновременно шлёт браузер. На HDD (b*) лучше 1 активная загрузка и 2–4 чанка, иначе диск начнёт трещать. Менять может только admin; очередь подхватывает сразу после сохранения.",
+  ]);
+  const parallelInput = el("input", {
+    type: "number",
+    min: "1",
+    max: "8",
+    className: "input",
+  }) as HTMLInputElement;
+  const chunkInput = el("input", {
+    type: "number",
+    min: "1",
+    max: "8",
+    className: "input",
+  }) as HTMLInputElement;
+  const saveBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Сохранить"]);
+  const result = el("p", { className: "field__hint" }, [""]);
+
+  const clamp = (raw: string, fallback: number) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(1, Math.min(8, Math.round(n)));
+  };
+
+  const setAll = (s: UploadLimitsOut) => {
+    parallelInput.value = String(s.max_parallel_uploads);
+    chunkInput.value = String(s.chunk_concurrency);
+  };
+
+  const load = async () => {
+    try {
+      setAll(await fetchJson<UploadLimitsOut>("/settings/upload"));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  saveBtn.addEventListener("click", async () => {
+    saveBtn.disabled = true;
+    result.textContent = "Сохраняю…";
+    try {
+      const s = await fetchJson<UploadLimitsOut>("/settings/upload", {
+        method: "POST",
+        body: JSON.stringify({
+          max_parallel_uploads: clamp(parallelInput.value, 4),
+          chunk_concurrency: clamp(chunkInput.value, 4),
+        }),
+      });
+      setAll(s);
+      applyUploadLimits(s);
+      result.textContent = `Параллельных файлов: ${s.max_parallel_uploads}, чанков: ${s.chunk_concurrency}.`;
+      showToast("Лимиты загрузки сохранены");
+    } catch (e) {
+      result.textContent = e instanceof Error ? e.message : String(e);
+      showToast(result.textContent, true);
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  body.append(
+    hint,
+    el("div", { className: "limits-form" }, [
+      el("label", { className: "limits-form__field" }, ["Параллельных файлов (1–8)", parallelInput]),
+      el("label", { className: "limits-form__field" }, ["Чанков на файл (1–8)", chunkInput]),
+      saveBtn,
+    ]),
+    result,
+  );
   panel.append(body);
   void load();
   return panel;
@@ -3502,7 +3600,6 @@ function mountListShell(root: HTMLElement): void {
   const listHost = el("div", { id: "torrent-list-host" });
   const countEl = el("span", { className: "list-toolbar__count" });
   const sessionBarHost = el("div", { id: "session-bar-host" });
-
   const listRefs: ListHostRefs = {
     listEl: listHost,
     countEl,
@@ -3940,51 +4037,79 @@ function mountListShell(root: HTMLElement): void {
   };
   bulkMigrateBtn.addEventListener("click", () => void runBulkMigrate());
 
-  // Единое меню «Торрент ▾» со всеми действиями над раздачами (добавить/создать/обновить/очередь).
-  const torrentMenuItems: { ic: keyof typeof ICON_PATHS; label: string; run: () => void }[] = [
+  const fileUploadDeps = (): FileUploadDeps => ({
+    apiHeaders,
+    fetchJson,
+    showToast,
+    canWrite,
+    el: el as FileUploadDeps["el"],
+    icon: icon as FileUploadDeps["icon"],
+    field,
+    browseCreator: (engineId, path) =>
+      fetchJson(`/creator/browse?engine_id=${encodeURIComponent(engineId)}&path=${encodeURIComponent(path)}`),
+    listEngines: () => fetchJson<EngineOut[]>("/engines"),
+    openCreateTorrent: (engineId, dirPath) =>
+      openCreateTorrentDialog(() => void refresh({ afterAdd: true }), { engineId, dirPath }),
+  });
+
+  type TbMenuItem = { ic: keyof typeof ICON_PATHS; label: string; run: () => void };
+  const makeToolbarMenu = (
+    label: string,
+    labelIcon: keyof typeof ICON_PATHS,
+    items: TbMenuItem[],
+    primary: boolean,
+  ): HTMLElement => {
+    // Меню раскрывается по наведению (CSS :hover). Класс is-open — фолбэк для тач (клик).
+    const menu = el("div", { className: "tb-menu" });
+    const toggle = el(
+      "button",
+      {
+        type: "button",
+        className: `btn btn--sm tb-menu__toggle${primary ? " btn--primary" : ""}`,
+        "aria-haspopup": "true",
+      },
+      [icon(labelIcon), label, el("span", { className: "tb-menu__caret" }, [icon("chevron-down")])],
+    );
+    const list = el("div", { className: "tb-menu__list", role: "menu" });
+    const closeMenu = () => {
+      if (!menu.classList.contains("is-open")) return;
+      menu.classList.remove("is-open");
+      document.removeEventListener("click", onOutside, true);
+    };
+    const onOutside = (ev: Event) => {
+      if (!menu.contains(ev.target as Node)) closeMenu();
+    };
+    for (const it of items) {
+      const b = el("button", { type: "button", className: "tb-menu__item", role: "menuitem" }, [
+        icon(it.ic),
+        it.label,
+      ]);
+      b.addEventListener("click", () => {
+        closeMenu();
+        toggle.blur();
+        it.run();
+      });
+      list.append(b);
+    }
+    toggle.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (menu.classList.toggle("is-open")) {
+        document.addEventListener("click", onOutside, true);
+      } else {
+        document.removeEventListener("click", onOutside, true);
+      }
+    });
+    menu.append(toggle, list);
+    return menu;
+  };
+
+  const torrentMenuItems: TbMenuItem[] = [
     { ic: "plus", label: "Добавить торрент", run: () => showAddTorrentDialog("/data/b1", onAdded) },
     { ic: "file-plus", label: "Создать торрент", run: () => openCreateTorrentDialog(() => void refresh({ afterAdd: true })) },
     { ic: "upload", label: "Обновить торрент", run: () => showUpdateTorrentDialog(() => refresh({ afterAdd: true })) },
     { ic: "list", label: "Очередь создания", run: () => openCreatorQueueDialog(() => void refresh({ afterAdd: true })) },
   ];
-
-  // Меню раскрывается по наведению (CSS :hover). Класс is-open — фолбэк для тач-устройств (по клику).
-  const torrentMenu = el("div", { className: "tb-menu" });
-  const torrentMenuToggle = el(
-    "button",
-    { type: "button", className: "btn btn--primary btn--sm tb-menu__toggle", "aria-haspopup": "true" },
-    [icon("plus"), "Торрент", el("span", { className: "tb-menu__caret" }, [icon("chevron-down")])],
-  );
-  const torrentMenuList = el("div", { className: "tb-menu__list", role: "menu" });
-
-  const closeTorrentMenu = () => {
-    if (!torrentMenu.classList.contains("is-open")) return;
-    torrentMenu.classList.remove("is-open");
-    document.removeEventListener("click", onOutsideTorrentMenu, true);
-  };
-  const onOutsideTorrentMenu = (ev: Event) => {
-    if (!torrentMenu.contains(ev.target as Node)) closeTorrentMenu();
-  };
-
-  for (const it of torrentMenuItems) {
-    const b = el("button", { type: "button", className: "tb-menu__item", role: "menuitem" }, [icon(it.ic), it.label]);
-    b.addEventListener("click", () => {
-      closeTorrentMenu();
-      torrentMenuToggle.blur();
-      it.run();
-    });
-    torrentMenuList.append(b);
-  }
-
-  torrentMenuToggle.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    if (torrentMenu.classList.toggle("is-open")) {
-      document.addEventListener("click", onOutsideTorrentMenu, true);
-    } else {
-      document.removeEventListener("click", onOutsideTorrentMenu, true);
-    }
-  });
-  torrentMenu.append(torrentMenuToggle, torrentMenuList);
+  const torrentMenu = makeToolbarMenu("Торрент", "plus", torrentMenuItems, true);
 
   const settingsLink = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, [icon("settings"), "Настройки"]);
   settingsLink.addEventListener("click", () => {
@@ -3993,6 +4118,27 @@ function mountListShell(root: HTMLElement): void {
   });
 
   const actionsRow = el("div", { className: "app-header__actions" });
+  if (canWrite() && uploadFeatureEnabled()) {
+    actionsRow.append(
+      makeToolbarMenu(
+        "Файл",
+        "inbox",
+        [
+          {
+            ic: "inbox",
+            label: "Загрузить файлы",
+            run: () => openFileUploadDialog(fileUploadDeps()),
+          },
+          {
+            ic: "list",
+            label: "Очередь загрузок",
+            run: () => openUploadQueueDialog(fileUploadDeps()),
+          },
+        ],
+        false,
+      ),
+    );
+  }
   if (canWrite()) actionsRow.append(torrentMenu);
   actionsRow.append(settingsLink, profileControl());
   // Все контролы в один ровный ряд, а «Обновлено …» — тонкой строкой под всем блоком.
@@ -5112,7 +5258,10 @@ async function downloadCreatedTorrent(task: CreatorTaskOut): Promise<void> {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-function openCreateTorrentDialog(onSeeded: () => void): void {
+function openCreateTorrentDialog(
+  onSeeded: () => void,
+  preset?: { engineId: string; dirPath: string },
+): void {
   const overlay = el("div", { className: "modal-overlay" });
   const dialog = el("div", {
     className: "modal-dialog modal-dialog--wide",
@@ -5125,6 +5274,9 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
   let currentEngine = "";
   let currentPath = "";
   const selected = new Set<string>();
+  // Если пришли из очереди загрузок — сразу выбрать каталог (не файл).
+  const presetEngineId = preset?.engineId ?? "";
+  const presetDirAbs = (preset?.dirPath ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
 
   const engineSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
   const breadcrumb = el("div", { className: "creator-breadcrumb" });
@@ -5374,9 +5526,35 @@ function openCreateTorrentDialog(onSeeded: () => void): void {
       engineSelect.append(el("option", { value: eng.id }, [`${eng.id} (${eng.storage_prefix})`]));
     }
     if (engines.length > 0) {
-      currentEngine = engines[0].id;
+      const presetEng =
+        presetEngineId && engines.some((e) => e.id === presetEngineId)
+          ? presetEngineId
+          : engines[0].id;
+      currentEngine = presetEng;
       engineSelect.value = currentEngine;
-      void navigate(engineSubdir(currentEngine), true);
+      let startPath = engineSubdir(currentEngine);
+      if (presetDirAbs) {
+        const prefix = (engines.find((e) => e.id === currentEngine)?.storage_prefix ?? "")
+          .replace(/\\/g, "/")
+          .replace(/\/+$/, "");
+        const base = engineSubdir(currentEngine);
+        const dataRoot = prefix.endsWith("/" + base)
+          ? prefix.slice(0, -(base.length + 1))
+          : prefix.replace(/\/[^/]+$/, "");
+        if (presetDirAbs === prefix || presetDirAbs.startsWith(prefix + "/")) {
+          const rel = presetDirAbs === prefix ? base : `${base}${presetDirAbs.slice(prefix.length)}`;
+          startPath = rel.replace(/^\/+/, "");
+        } else if (presetDirAbs.startsWith(dataRoot + "/")) {
+          startPath = presetDirAbs.slice(dataRoot.length + 1);
+        }
+      }
+      void navigate(startPath, true).then(() => {
+        if (!presetDirAbs) return;
+        // Выбрать сам каталог как источник для create (не содержимое).
+        selected.clear();
+        selected.add(startPath);
+        updateSelectionInfo();
+      });
     } else {
       listBox.append(el("div", { className: "creator-empty" }, ["Нет доступных движков"]));
     }
@@ -7001,7 +7179,9 @@ function mountSettingsShell(root: HTMLElement): void {
       panels: () => {
         const out: HTMLElement[] = [];
         if (globalLimits) out.push(globalLimits);
-        out.push(mountEngineLimitsPanel(), mountQuotasPanel(), mountNetSettingsPanel(), mountPrivateMaintenancePanel());
+        out.push(mountEngineLimitsPanel(), mountQuotasPanel(), mountNetSettingsPanel());
+        if (isAdmin()) out.push(mountUploadLimitsPanel());
+        out.push(mountPrivateMaintenancePanel());
         return out;
       },
     },
@@ -7115,6 +7295,19 @@ async function bootstrap(): Promise<void> {
     showLoginDialog();
     return;
   }
+  // Фича-флаг загрузки: до render, чтобы пункт меню появился сразу.
+  await loadUploadFeatures({
+    apiHeaders,
+    fetchJson,
+    showToast,
+    canWrite,
+    el: el as FileUploadDeps["el"],
+    icon: icon as FileUploadDeps["icon"],
+    field,
+    browseCreator: async () => [],
+    listEngines: async () => [],
+    openCreateTorrent: () => undefined,
+  }).catch(() => undefined);
   render();
 }
 

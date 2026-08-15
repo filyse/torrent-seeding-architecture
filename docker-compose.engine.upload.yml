@@ -1,0 +1,15 @@
+# Оверлей: движок в сети seeding-upload (для upload-edge на :8090).
+#   docker network create seeding-upload
+#   docker compose --env-file .env.engine -f docker-compose.engine.yml \
+#     -f docker-compose.engine.upload.yml up -d --build
+
+services:
+  engine:
+    networks:
+      - default
+      - seeding-upload
+
+networks:
+  seeding-upload:
+    external: true
+    name: seeding-upload

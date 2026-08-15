@@ -11,11 +11,22 @@ from seeding_engine.internal_api import router as internal_router
 from seeding_engine.logconf import setup_logging
 from seeding_engine.torrent_runtime import build_torrent_runtime
 
+try:
+    from seeding_engine.upload_http import mount_upload, upload_gc_loop
+except ImportError:  # нет upload/seeding_upload в PYTHONPATH
+
+    def mount_upload(_app):
+        return None
+
+    async def upload_gc_loop(_storage):
+        return
+
 setup_logging("engine")
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="Seeding engine", version="0.1.0")
 app.include_router(internal_router)
+_upload_storage = mount_upload(app)
 
 
 def _self_register_payload() -> dict | None:
@@ -98,17 +109,20 @@ async def startup() -> None:
 
     app.state.creator = CreatorService()
     app.state.register_task = asyncio.create_task(_self_register_loop())
+    if _upload_storage is not None:
+        app.state.upload_gc_task = asyncio.create_task(upload_gc_loop(_upload_storage))
 
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    task = getattr(app.state, "register_task", None)
-    if task is not None:
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
+    for name in ("register_task", "upload_gc_task"):
+        task = getattr(app.state, name, None)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
     creator = getattr(app.state, "creator", None)
     if creator is not None:
         creator.shutdown()

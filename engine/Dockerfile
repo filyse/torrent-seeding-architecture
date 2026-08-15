@@ -10,7 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pytest \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY . /app/engine
+# context = корень репозитория (нужен пакет upload/seeding_upload).
+COPY engine /app/engine
+COPY upload/seeding_upload /app/engine/seeding_upload
 RUN sed -i 's/\r$//' /app/engine/docker-entrypoint.sh \
     && chmod +x /app/engine/docker-entrypoint.sh
 # Метка времени сборки образа (обновляется при каждой реальной пересборке — слой идёт после COPY).

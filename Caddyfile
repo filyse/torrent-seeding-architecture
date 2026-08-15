@@ -1,21 +1,26 @@
-# Caddy — публичный HTTPS-фронт для LAN (Фаза 5).
-# Терминирует TLS и проксирует всё на web (nginx), который уже отдаёт SPA и проксирует
-# /api на api (включая SSE). Сертификат выпускает локальный CA самого Caddy (local_certs) —
-# без интернета/ACME. Браузеру нужно один раз доверить корневой сертификат Caddy:
+# Caddy — HTTPS-фронт CT400 (Фаза 5) + прокси загрузки /u/b и /u/a.
+# Терминирует TLS и отдаёт SPA/API на web (nginx). Локальный CA (local_certs).
+# Браузеру один раз доверить root.crt:
 #   docker compose ... cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
-# и импортировать caddy-root.crt в доверенные корневые ЦС.
+#
+# Публичный NPM на seedbox2 тоже держит /u/b → 171:8090 и /u/a → 243:8090.
+# Эти handle_path нужны, когда клиент приходит на Caddy (LAN IP или те же имена).
+# handle_path снимает префикс: /u/b/b1/upload/v1/… → 171:8090/b1/upload/v1/…
 
 {
-	# Локальный CA вместо Let's Encrypt (подходит для доступа по IP в локальной сети).
 	local_certs
-	# При доступе по IP клиент не шлёт SNI — указываем, какой сертификат отдавать по умолчанию.
 	default_sni {$SEEDING_SITE:192.168.1.101}
 }
 
-# Адрес сайта (IP или домен) задаётся переменной SEEDING_SITE (по умолчанию — IP CT400).
-{$SEEDING_SITE:192.168.1.101} {
+{$SEEDING_SITE:192.168.1.101}, seedbox2.hw-s.ru, seedbox.hw-s.ru {
 	encode gzip
-	# Один апстрим: web (nginx) сам разрулит SPA и /api (в т.ч. /api/v1/stream — SSE и
-	# /api/v1/ws — WebSocket; Caddy проксирует Upgrade прозрачно, gzip на upgrade не влияет).
+
+	handle_path /u/b/* {
+		reverse_proxy 192.168.1.171:8090
+	}
+	handle_path /u/a/* {
+		reverse_proxy 192.168.2.243:8090
+	}
+
 	reverse_proxy web:80
 }

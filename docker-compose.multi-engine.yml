@@ -3,8 +3,8 @@
 
 x-engine-common: &engine-common
   build:
-    context: ./engine
-    dockerfile: Dockerfile
+    context: .
+    dockerfile: engine/Dockerfile
   # Запас времени на graceful shutdown: сохранить fastresume/session.state по SIGTERM
   # до того, как Docker пришлёт SIGKILL (по умолчанию всего 10s).
   stop_grace_period: 60s
@@ -97,6 +97,12 @@ services:
       SEEDING_LOG_JSON: "1"
       # WebSocket (Фаза 7): по умолчанию выключен, текущий SSE/поллинг — fallback.
       SEEDING_WS_ENABLED: ${SEEDING_WS_ENABLED:-0}
+      # Тестовая загрузка файлов (docs/FILE_UPLOAD.md). По умолчанию выкл.
+      SEEDING_UPLOAD_ENABLED: ${SEEDING_UPLOAD_ENABLED:-0}
+      SEEDING_UPLOAD_TICKET_SECRET: ${SEEDING_UPLOAD_TICKET_SECRET:-}
+      SEEDING_UPLOAD_BASE_URLS: ${SEEDING_UPLOAD_BASE_URLS:-}
+      SEEDING_UPLOAD_RELAY_BASE_URLS: ${SEEDING_UPLOAD_RELAY_BASE_URLS:-}
+      SEEDING_UPLOAD_PER_ENGINE: ${SEEDING_UPLOAD_PER_ENGINE:-0}
     volumes:
       - ./config/engines.ct400.json:/config/engines.json:ro
       - ./certs/ca.crt:/certs/ca.crt:ro

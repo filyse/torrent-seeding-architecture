@@ -9,6 +9,40 @@
 
 ---
 
+## web 1.19.0 · api 1.11.0 — 2026-08-16
+
+- **Caddy на CT400** проксирует `/u/b` → 171:8090 и `/u/a` → 243:8090 (как NPM).
+  Имена `seedbox2.hw-s.ru` / `seedbox.hw-s.ru` в server_name. Runbook выката:
+  [`docs/UPDATE-UPLOAD-EMBED.md`](docs/UPDATE-UPLOAD-EMBED.md).
+
+- **Лимиты загрузки файлов в настройках.** Admin правит параллель (1–8) и чанки на файл
+  (1–8) в «Настройки → Лимиты». Хранится в `app_settings` (`upload_limits`); env —
+  дефолт, пока в БД пусто. `GET /upload/features` читает БД, очередь в UI подхватывает
+  сразу после сохранения. POST только `require_admin`.
+
+## engine 1.3.0 · api 1.10.0 · upload 0.2.0 — 2026-08-16
+
+- **Загрузка файлов вшита в движок.** `/upload/v1` живёт в процессе engine (тот же том,
+  HMAC-ticket). Sidecar больше не пишет на диск. Новый движок через one-liner принимает
+  файлы, если задан `SEEDING_UPLOAD_TICKET_SECRET`.
+- **upload-edge** (`docker-compose.upload-edge.yml`): nginx на `:8090` маршрутизирует
+  `/{engine_id}/upload/v1/` → `{id}-seeding:8081`, **без** `/internal/v1`. NPM `/u/b/`
+  и `/u/a/` не меняются.
+- API: `SEEDING_UPLOAD_PER_ENGINE=1` дописывает `/{engine_id}` к `upload_base_url`
+  (и к релей-базе). Старый sidecar — флаг `0`.
+- Образ движка собирается из корня репо (`COPY upload/seeding_upload`).
+- Роутер вынесен в `seeding_upload.router` — общий для sidecar (откат) и движка.
+
+## web 1.17.0 · api 1.9.0 · upload 0.1.0 — 2026-08-13
+
+- **Тестовая загрузка файлов в RelaySeed** (см. [`docs/FILE_UPLOAD.md`](docs/FILE_UPLOAD.md)).
+  Отдельный контейнер `upload` на data-plane хостах; API выдаёт HMAC-ticket; UI — пункт
+  «Загрузить файлы» / «Очередь загрузок» (фича-флаг `SEEDING_UPLOAD_ENABLED=0` по умолчанию).
+- Чанки + докачка, staging `/data/<engine>/.upload-tmp`, move в выбранный каталог; после
+  загрузки — «Создать торрент» на **каталог**. Подсказки пути из `/torrents?q=` (как
+  «Обновить торрент»). Откат: флаг off + `docker compose …upload down`. После теста —
+  планируется вшивание в каждый движок.
+
 ## web 1.16.0 · api 1.8.0 · engine 1.2.0 · tooling — 2026-08-10
 
 - **Починены суточные бэкапы: их не было с 18 июля.** Все `scripts/*.sh` лежали в git как

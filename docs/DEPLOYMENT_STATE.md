@@ -120,6 +120,16 @@ scripts/deploy-ct400.sh up -d --build
 - Предеплой-бэкапы: `~/predeploy-*.patch`, `~/predeploy-*.status`,
   `~/predeploy-hostcfg-*.tar.gz` на CT400 и b-host; `~/predeploy-a-host.yml.bak` на a-host.
 
+## 7а. Выкат загрузки в движок — 2026-08-16
+
+Вшивание `/upload/v1` в engine + `upload-edge` вместо Python-sidecar.
+Версии: web 1.19.0, api 1.11.0, engine 1.3.0.
+Полный runbook: [`UPDATE-UPLOAD-EMBED.md`](UPDATE-UPLOAD-EMBED.md).
+
+Кратко: push в `origin/main` → секрет в `.env.engine*` → rebuild b1–b6 и a1–a3
+с `docker-compose.engine.upload.yml` → edge `:8090` → sidecar `down` → на CT400
+`SEEDING_UPLOAD_PER_ENGINE=1` и только `scripts/deploy-ct400.sh`. NPM не менять.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

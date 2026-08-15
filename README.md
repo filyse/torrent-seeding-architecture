@@ -25,6 +25,8 @@
 - [`docs/CREATOR.md`](docs/CREATOR.md) — создание `.torrent` из контента на диске движка
 - [`docs/NETWORK.md`](docs/NETWORK.md) — экран «Сеть»: отдача по WAN-каналам и движкам
 - [`docs/BACKUP.md`](docs/BACKUP.md) — суточные бэкапы БД и состояния движков, восстановление
+- [`docs/FILE_UPLOAD.md`](docs/FILE_UPLOAD.md) — загрузка файлов в том движка (ticket + edge)
+- [`docs/UPDATE-UPLOAD-EMBED.md`](docs/UPDATE-UPLOAD-EMBED.md) — выкат вшитой загрузки на 171/243/CT400
 - [`docs/QA_MANUAL_CHECKLIST.md`](docs/QA_MANUAL_CHECKLIST.md) — ручные сценарии веб + CLI
 - [`docs/reports/`](docs/reports/) — отчёты QA (шаблон в [`AGENTS.md`](AGENTS.md))
 

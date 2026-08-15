@@ -209,6 +209,16 @@ class NetSettingsOut(BaseModel):
     errors: int | None = None
 
 
+class UploadLimitsIn(BaseModel):
+    max_parallel_uploads: int | None = Field(default=None, ge=1, le=8)
+    chunk_concurrency: int | None = Field(default=None, ge=1, le=8)
+
+
+class UploadLimitsOut(BaseModel):
+    max_parallel_uploads: int
+    chunk_concurrency: int
+
+
 class BatchUploadItem(BaseModel):
     filename: str
     ok: bool

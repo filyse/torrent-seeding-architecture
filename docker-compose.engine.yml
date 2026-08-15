@@ -20,8 +20,8 @@ name: seeding-engine
 services:
   engine:
     build:
-      context: ./engine
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: engine/Dockerfile
     container_name: ${SEEDING_ENGINE_ID:-engine}-seeding
     restart: unless-stopped
     # Запас на graceful shutdown: сохранить fastresume/session.state по SIGTERM.
@@ -58,6 +58,13 @@ services:
       # (peer-check/import-direct). Без него auto-выбор всегда падает на http через
       # оркестратор. Движки делят один self-signed cert, поэтому CA = сам cert.
       SEEDING_ENGINE_TLS_CA: ${SEEDING_ENGINE_TLS_CA:-/certs/engine.crt}
+      # Вшитая загрузка файлов (/upload/v1). Пусто = выкл.
+      SEEDING_UPLOAD_TICKET_SECRET: ${SEEDING_UPLOAD_TICKET_SECRET:-}
+      UPLOAD_CHUNK_SIZE: ${UPLOAD_CHUNK_SIZE:-8388608}
+      UPLOAD_GC_MINUTES: ${UPLOAD_GC_MINUTES:-30}
+      UPLOAD_CORS_ORIGINS: ${UPLOAD_CORS_ORIGINS:-https://seedbox2.hw-s.ru,https://seedbox.hw-s.ru}
+      UPLOAD_CONTENT_UID: ${UPLOAD_CONTENT_UID:-1000}
+      UPLOAD_CONTENT_GID: ${UPLOAD_CONTENT_GID:-1000}
     ports:
       # Внутренний API движка — нужен оркестратору (метаданные + tar-стрим контента).
       # БЕЗОПАСНОСТЬ: закрой этот порт файрволом на IP оркестратора (аутентификации пока нет).

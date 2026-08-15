@@ -77,7 +77,13 @@ fi
 
 # --- сборка и запуск ---
 info "Сборка и запуск движка…"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
+compose_args=(--env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+if [[ -n "${SEEDING_UPLOAD_TICKET_SECRET:-}" ]]; then
+  docker network create seeding-upload >/dev/null 2>&1 || true
+  compose_args+=(-f docker-compose.engine.upload.yml)
+  info "Загрузка файлов: вшита (сеть seeding-upload)"
+fi
+docker compose "${compose_args[@]}" up -d --build
 
 # --- ожидание health ---
 cname="${SEEDING_ENGINE_ID}-seeding"

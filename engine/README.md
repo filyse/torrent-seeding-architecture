@@ -1,6 +1,10 @@
 # Движок (`seeding_engine`)
 
-HTTP-сервис с **внутренним API** (`/internal/v1/*`) и плuggable-рантаймом раздачи.
+HTTP-сервис с **внутренним API** (`/internal/v1/*`), плuggable-рантаймом раздачи
+и опциональной загрузкой файлов (`/upload/v1/*`, HMAC-ticket — не `X-Engine-Token`).
+
+Образ собирается из **корня репозитория** (`dockerfile: engine/Dockerfile`): в образ
+копируется пакет `upload/seeding_upload`.
 
 ## Рантайм
 
@@ -17,6 +21,7 @@ HTTP-сервис с **внутренним API** (`/internal/v1/*`) и плugga
 
 ## Переменные окружения
 
+- **`SEEDING_UPLOAD_TICKET_SECRET`** — секрет HMAC для `/upload/v1` (пусто = загрузка выкл.).
 - **`ENGINE_HTTP_PORT`** — порт HTTP (по умолчанию `8081`).
 - **`SEEDING_DATA_ROOT`** — корень данных на диске (логи/состояние; торренты привязываются к `save_path` из API).
 - **`SEEDING_LT_STATE_FILE`** — путь к файлу состояния сессии libtorrent (bencode): при старте загружается, при остановке перезаписывается.

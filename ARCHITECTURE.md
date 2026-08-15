@@ -264,6 +264,10 @@ API-restore (ниже) остаётся как восстановление по
 - Применение изменений кода: образы собираются на этапе build, поэтому нужен
   `… build <service>` + `… up -d <service>`. Web можно пересобирать независимо (не трогает раздачи).
 - Файрвол для внешнего доступа: 8000, 3000 и BitTorrent-порты 50001–50006 (tcp+udp).
+- Загрузка файлов с веба: `/upload/v1` в процессе движка, на data-host тонкий
+  nginx `upload-edge` (:8090). Публичный вход — NPM `/u/b/` и `/u/a/` (не менять).
+  Выкат и откат: [`docs/UPDATE-UPLOAD-EMBED.md`](docs/UPDATE-UPLOAD-EMBED.md),
+  контракт: [`docs/FILE_UPLOAD.md`](docs/FILE_UPLOAD.md).
 
 **Точки риска:** консистентность путей `save_path` ↔ префикс движка; данные/том БД вне
 слоя контейнера; graceful shutdown движка (сохранение fastresume/session.state).

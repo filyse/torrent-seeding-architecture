@@ -1,0 +1,20 @@
+# HTTPS на :8445 — порт 443 занят xray на RU VDS.
+# HTTP :80 нужен для Let's Encrypt HTTP-01.
+
+{
+	auto_https disable_redirects
+}
+
+http://185-185-143-207.sslip.io {
+}
+
+185-185-143-207.sslip.io:8445 {
+	tls {
+		issuer acme {
+			disable_tlsalpn_challenge
+			alt_http_port 80
+		}
+	}
+	encode gzip
+	reverse_proxy 127.0.0.1:8091
+}

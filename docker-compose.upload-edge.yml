@@ -1,0 +1,34 @@
+# Тонкий вход загрузки на data-host (171 / 243). Меняет Python-sidecar на :8090.
+# Движки должны быть в сети seeding-upload (имя контейнера {id}-seeding).
+#
+#   docker network create seeding-upload
+#   bash scripts/upload-edge-attach.sh
+#   docker compose -f docker-compose.upload-edge.yml up -d
+#
+# NPM по-прежнему: /u/b/ → :8090 и /u/a/ → :8090.
+# Браузер ходит на /u/b/{engine_id}/upload/v1/… (SEEDING_UPLOAD_PER_ENGINE=1).
+
+name: seeding-upload-edge
+
+services:
+  upload-edge:
+    image: nginx:1.27-alpine
+    container_name: seeding-upload-edge
+    restart: unless-stopped
+    ports:
+      - "${UPLOAD_PUBLISH_PORT:-8090}:8090"
+    volumes:
+      - ./upload-edge/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - seeding-upload
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+networks:
+  seeding-upload:
+    external: true
+    name: seeding-upload

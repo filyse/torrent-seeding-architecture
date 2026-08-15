@@ -1,0 +1,13 @@
+# Прод-оверрей a-host (192.168.2.243): bind на /home/rudub2/storage/aN.
+services:
+  upload:
+    environment:
+      UPLOAD_ENGINE_ROOTS: >-
+        {"a1":"/data/a1","a2":"/data/a2","a3":"/data/a3"}
+      UPLOAD_CORS_ORIGINS: "https://seedbox2.hw-s.ru,https://seedbox.hw-s.ru,https://192.168.1.101"
+    ports:
+      - "8090:8090"
+    volumes:
+      - /home/rudub2/storage/a1:/data/a1
+      - /home/rudub2/storage/a2:/data/a2
+      - /home/rudub2/storage/a3:/data/a3
