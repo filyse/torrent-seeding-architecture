@@ -2121,8 +2121,7 @@ input.file-input::file-selector-button:hover {
   background: var(--danger);
 }
 
-/* Таблица движков внутри канала. Шкала сжимается, цифры — по содержимому,
-   чтобы «Всего отдано» (байты + текущая ↑) не вылезало из карточки в 52rem. */
+/* Таблица движков внутри канала. Колонки фиксированы — шкалы одной длины, цифры в ряд. */
 .wan-engines {
   display: flex;
   flex-direction: column;
@@ -2134,19 +2133,15 @@ input.file-input::file-selector-button:hover {
 
 .wan-eng {
   display: grid;
-  grid-template-columns: 2.2rem max-content minmax(0, 1fr) 2.6rem max-content max-content;
+  grid-template-columns: 2.2rem 6.2rem minmax(0, 1fr) 2.6rem 5rem 4.5rem;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
   min-width: 0;
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
 }
 
 .wan-eng__bar {
-  min-width: 0;
-}
-
-.wan-eng__bar .wan-meter {
   min-width: 0;
 }
 
@@ -2184,7 +2179,7 @@ input.file-input::file-selector-button:hover {
 
 @media (max-width: 560px) {
   .wan-eng {
-    grid-template-columns: 2.2rem max-content minmax(0, 1fr) 2.6rem;
+    grid-template-columns: 2.2rem 5.6rem minmax(0, 1fr) 2.6rem;
   }
   .wan-eng__peers,
   .wan-eng__act {

@@ -6980,7 +6980,6 @@ function fmtBitRate(bps: number): string {
 
 type WanTotals = {
   rate: number;
-  liveRate: number;
   torrentRate: number;
   fileRate: number;
   transferred: number;
@@ -7012,7 +7011,6 @@ function sumEngines(
 ): WanTotals {
   const acc: WanTotals = {
     rate: 0,
-    liveRate: 0,
     torrentRate: 0,
     fileRate: 0,
     transferred: 0,
@@ -7030,13 +7028,11 @@ function sumEngines(
       acc.transferred += side === "down" ? (st.total_downloaded ?? 0) : (st.total_uploaded ?? 0);
       acc.peers += st.peers ?? 0;
       acc.active += st.torrents_active ?? 0;
-      acc.liveRate += side === "down" ? (st.download_rate ?? 0) : (st.upload_rate ?? 0);
     }
     acc.rate += r.total;
     acc.torrentRate += r.torrent;
     acc.fileRate += r.files;
   }
-  if (side === "down") acc.liveRate += acc.fileRate;
   return acc;
 }
 
@@ -7057,12 +7053,11 @@ function wanEngineRow(
   const r = engineSideRate(st, fileBps, side);
   const offline = (!st || st.error) && r.total <= 0;
   const share = linkRate > 0 ? (r.total / linkRate) * 100 : 0;
-  const volume = side === "uploaded";
   const arrow = side === "down" ? "↓" : "↑";
   const rateEl = el("span", { className: "wan-eng__rate" });
   if (offline) {
     rateEl.append("офлайн");
-  } else if (volume) {
+  } else if (side === "uploaded") {
     rateEl.append(fmtBytes(r.total));
   } else {
     rateEl.append(`${arrow} ${fmtRate(r.total)}`);
@@ -7070,22 +7065,13 @@ function wanEngineRow(
       rateEl.append(el("span", { className: "wan-eng__files" }, [`файлы ${fmtRate(r.files)}`]));
     }
   }
-  const extra = volume
-    ? offline
-      ? "—"
-      : `↑ ${fmtRate(st?.upload_rate ?? 0)}`
-    : offline
-      ? "—"
-      : `${st?.peers ?? 0} пиров`;
-  const row = el("div", {
-    className: `wan-eng${volume ? " wan-eng--vol" : ""}${offline ? " wan-eng--off" : ""}`,
-  });
+  const row = el("div", { className: `wan-eng${offline ? " wan-eng--off" : ""}` });
   row.append(
     el("span", { className: "wan-eng__id" }, [id]),
     rateEl,
     el("span", { className: "wan-eng__bar" }, [meterRow(share, "accent")]),
     el("span", { className: "wan-eng__share" }, [offline ? "—" : `${share.toFixed(0)}%`]),
-    el("span", { className: "wan-eng__peers" }, [extra]),
+    el("span", { className: "wan-eng__peers" }, [offline ? "—" : `${st?.peers ?? 0} пиров`]),
     el("span", { className: "wan-eng__act" }, [offline ? "—" : `${st?.torrents_active ?? 0} акт.`]),
   );
   return row;
@@ -7152,17 +7138,14 @@ function wanCard(
     );
   }
 
-  const metaBits = [
-    el("span", {}, [`${t.online}/${t.total} движков`]),
-    el("span", {}, [`${t.peers} пиров`]),
-    el("span", {}, [`${t.active} активных раздач`]),
-  ];
-  if (volume) {
-    metaBits.push(el("span", {}, [`сейчас ↑ ${fmtRate(t.liveRate)}`]));
-  } else {
-    metaBits.push(el("span", {}, [`${xferLabel} ${fmtBytes(t.transferred)}`]));
-  }
-  card.append(el("div", { className: "wan-card__meta" }, metaBits));
+  card.append(
+    el("div", { className: "wan-card__meta" }, [
+      el("span", {}, [`${t.online}/${t.total} движков`]),
+      el("span", {}, [`${t.peers} пиров`]),
+      el("span", {}, [`${t.active} активных раздач`]),
+      ...(volume ? [] : [el("span", {}, [`${xferLabel} ${fmtBytes(t.transferred)}`])]),
+    ]),
+  );
 
   const rows = el("div", { className: "wan-engines" });
   const sorted = [...engines].sort((a, b) => {
