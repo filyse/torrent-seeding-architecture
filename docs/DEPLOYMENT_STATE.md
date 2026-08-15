@@ -126,9 +126,13 @@ scripts/deploy-ct400.sh up -d --build
 Версии: web 1.19.0, api 1.11.0, engine 1.3.0.
 Полный runbook: [`UPDATE-UPLOAD-EMBED.md`](UPDATE-UPLOAD-EMBED.md).
 
-Кратко: push в `origin/main` → секрет в `.env.engine*` → rebuild b1–b6 и a1–a3
-с `docker-compose.engine.upload.yml` → edge `:8090` → sidecar `down` → на CT400
-`SEEDING_UPLOAD_PER_ENGINE=1` и только `scripts/deploy-ct400.sh`. NPM не менять.
+**Сделано 2026-08-16** (`3620b5d`): b1–b6 и a1–a3 = engine 1.3.0 + `seeding-upload-edge`;
+sidecar снят; CT400 api 1.11.0 / web 1.19.0, `SEEDING_UPLOAD_PER_ENGINE=1`;
+health всех 9 движков ok. NPM не меняли.
+
+Кратко на следующий раз: push → секрет в `.env.engine*` → rebuild движков →
+`docker stop/rm seeding-upload` → edge `:8090` → на CT400 флаг и
+`scripts/deploy-ct400.sh`.
 
 ## 7. Откат
 

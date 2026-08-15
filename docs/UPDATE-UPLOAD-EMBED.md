@@ -1,6 +1,6 @@
 # Обновление: загрузка файлов вшита в движок
 
-> Выкат **2026-08-16**. Код: ветка `main` репозитория
+> Выкат **2026-08-16 выполнен** (`3620b5d` и этот follow-up). Код: ветка `main` репозитория
 > [torrent-seeding-architecture](https://github.com/filyse/torrent-seeding-architecture).
 > Контракт и схема: [`FILE_UPLOAD.md`](FILE_UPLOAD.md).
 > Топология хостов: [`DEPLOYMENT_STATE.md`](DEPLOYMENT_STATE.md).
@@ -169,8 +169,8 @@ done
 
 bash scripts/upload-edge-attach.sh
 
-# занять :8090: сначала гасим sidecar, сразу поднимаем edge
-docker compose -f docker-compose.upload.yml -f docker-compose.upload.b-host.yml down
+# занять :8090: гасим sidecar по имени (compose down требует env sidecar'а)
+docker stop seeding-upload && docker rm seeding-upload
 docker compose -f docker-compose.upload-edge.yml up -d
 
 curl -sS http://127.0.0.1:8090/health
@@ -222,7 +222,7 @@ docker network create seeding-upload 2>/dev/null || true
 docker compose -p seeding-engines-a -f docker-compose.a-host.yml up -d --build
 bash scripts/upload-edge-attach.sh
 
-docker compose -f docker-compose.upload.yml -f docker-compose.upload.a-host.yml down
+docker stop seeding-upload && docker rm seeding-upload
 docker compose -f docker-compose.upload-edge.yml up -d
 
 curl -sS http://127.0.0.1:8090/health
@@ -298,6 +298,7 @@ curl -sS http://127.0.0.1:8090/internal/v1/meta   # 404 от edge, не движ
    docker compose -f docker-compose.upload-edge.yml down
    docker compose -f docker-compose.upload.yml -f docker-compose.upload.b-host.yml up -d   # 171
    docker compose -f docker-compose.upload.yml -f docker-compose.upload.a-host.yml up -d   # 243
+   # sidecar compose требует SEEDING_UPLOAD_TICKET_SECRET и UPLOAD_ENGINE_ROOTS в env
    ```
 3. Уже залитые файлы не трогаем. Движки можно не откатывать: лишний `/upload/v1`
    на движке при работе sidecar не мешает.

@@ -489,7 +489,8 @@
   `/internal/v1` не публикуется. NPM `/u/b` `/u/a` без изменений.
 - ✅ API `SEEDING_UPLOAD_PER_ENGINE` дописывает id в `upload_base_url` (релей тоже).
 - ✅ One-liner: секрет в `.env.engine` → `deploy-engine.sh` подключает сеть `seeding-upload`.
-- ⬜ Выкат на 171/243 + флаг на CT400, затем `compose …upload down` (sidecar).
+- ✅ Выкат на 171/243 + флаг на CT400, sidecar снят (2026-08-16). Runbook:
+  [`docs/UPDATE-UPLOAD-EMBED.md`](docs/UPDATE-UPLOAD-EMBED.md).
 - ✅ Лимиты параллели/чанков в «Настройки → Лимиты» (admin, api 1.11.0 / web 1.19.0).
 
 ---

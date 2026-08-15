@@ -17,8 +17,8 @@ services:
     container_name: seeding-upload
     restart: unless-stopped
     environment:
-      SEEDING_UPLOAD_TICKET_SECRET: ${SEEDING_UPLOAD_TICKET_SECRET:?set secret}
-      UPLOAD_ENGINE_ROOTS: ${UPLOAD_ENGINE_ROOTS:?json map engine_id->path}
+      SEEDING_UPLOAD_TICKET_SECRET: ${SEEDING_UPLOAD_TICKET_SECRET:-}
+      UPLOAD_ENGINE_ROOTS: ${UPLOAD_ENGINE_ROOTS:-}
       UPLOAD_CHUNK_SIZE: ${UPLOAD_CHUNK_SIZE:-8388608}
       UPLOAD_GC_MINUTES: ${UPLOAD_GC_MINUTES:-30}
       UPLOAD_CORS_ORIGINS: ${UPLOAD_CORS_ORIGINS:-https://seedbox2.hw-s.ru,https://seedbox.hw-s.ru}
