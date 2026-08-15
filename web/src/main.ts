@@ -300,7 +300,7 @@ type TorrentDetailOut = TorrentOut & { runtime: RuntimeOut | null; peer_list?: T
 type TorrentPageOut = { items: TorrentOut[]; total: number; limit: number; offset: number };
 type UpdateMatchItem = { filename: string; candidates: TorrentOut[] };
 type UpdateMatchResult = { items: UpdateMatchItem[] };
-type NetworkSide = "up" | "down";
+type NetworkSide = "up" | "down" | "uploaded";
 type Route =
   | { view: "list" }
   | { view: "detail"; id: number }
@@ -1179,6 +1179,9 @@ function parseRoute(): Route {
   if (path === "/network/download" || path === "/network/download/") {
     return { view: "network", side: "down" };
   }
+  if (path === "/network/uploaded" || path === "/network/uploaded/") {
+    return { view: "network", side: "uploaded" };
+  }
   if (path === "/network" || path === "/network/") return { view: "network", side: "up" };
   return { view: "list" };
 }
@@ -1207,6 +1210,10 @@ function setHashNetwork(): void {
 
 function setHashNetworkDownload(): void {
   pushPath("/network/download");
+}
+
+function setHashNetworkUploaded(): void {
+  pushPath("/network/uploaded");
 }
 
 function navLink(label: string, onClick: () => void): HTMLElement {
@@ -1350,7 +1357,13 @@ function mountSessionBar(stats: SessionStats | null, changed?: Set<string>): HTM
         window.dispatchEvent(new HashChangeEvent("hashchange"));
       },
     }),
-    statChip(fmtBytes(stats.total_uploaded), "Всего отдано", undefined, f("uploaded")),
+    statChip(fmtBytes(stats.total_uploaded), "Всего отдано", undefined, f("uploaded"), {
+      hint: "Показать всего отдано по каналам и движкам",
+      run: () => {
+        setHashNetworkUploaded();
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+      },
+    }),
   );
   if (enginesNote) bar.append(statChip(enginesNote, "Онлайн", undefined, f("engines")));
   return bar;
@@ -6967,6 +6980,7 @@ function fmtBitRate(bps: number): string {
 
 type WanTotals = {
   rate: number;
+  liveRate: number;
   torrentRate: number;
   fileRate: number;
   transferred: number;
@@ -6981,6 +6995,10 @@ function engineSideRate(
   fileBps: number,
   side: NetworkSide,
 ): { torrent: number; files: number; total: number } {
+  if (side === "uploaded") {
+    const torrent = st?.error ? 0 : (st?.total_uploaded ?? 0);
+    return { torrent, files: 0, total: torrent };
+  }
   const torrent = side === "up" ? (st?.upload_rate ?? 0) : (st?.download_rate ?? 0);
   const files = side === "down" ? fileBps : 0;
   return { torrent, files, total: torrent + files };
@@ -6994,6 +7012,7 @@ function sumEngines(
 ): WanTotals {
   const acc: WanTotals = {
     rate: 0,
+    liveRate: 0,
     torrentRate: 0,
     fileRate: 0,
     transferred: 0,
@@ -7008,14 +7027,16 @@ function sumEngines(
     if ((!st || st.error) && r.total <= 0) continue;
     if (st && !st.error) {
       acc.online += 1;
-      acc.transferred += side === "up" ? (st.total_uploaded ?? 0) : (st.total_downloaded ?? 0);
+      acc.transferred += side === "down" ? (st.total_downloaded ?? 0) : (st.total_uploaded ?? 0);
       acc.peers += st.peers ?? 0;
       acc.active += st.torrents_active ?? 0;
+      acc.liveRate += side === "down" ? (st.download_rate ?? 0) : (st.upload_rate ?? 0);
     }
     acc.rate += r.total;
     acc.torrentRate += r.torrent;
     acc.fileRate += r.files;
   }
+  if (side === "down") acc.liveRate += acc.fileRate;
   return acc;
 }
 
@@ -7025,7 +7046,7 @@ function meterRow(pct: number, tone: "accent" | "warn" | "danger"): HTMLElement 
   return el("span", { className: "wan-meter" }, [fill]);
 }
 
-/** Строка движка внутри карточки канала: скорость, доля внутри канала, пиры, активные. */
+/** Строка движка внутри карточки канала: скорость или объём, доля внутри канала, пиры, активные. */
 function wanEngineRow(
   id: string,
   st: EngineSessionStats | undefined,
@@ -7036,23 +7057,35 @@ function wanEngineRow(
   const r = engineSideRate(st, fileBps, side);
   const offline = (!st || st.error) && r.total <= 0;
   const share = linkRate > 0 ? (r.total / linkRate) * 100 : 0;
-  const arrow = side === "up" ? "↑" : "↓";
+  const volume = side === "uploaded";
+  const arrow = side === "down" ? "↓" : "↑";
   const rateEl = el("span", { className: "wan-eng__rate" });
   if (offline) {
     rateEl.append("офлайн");
+  } else if (volume) {
+    rateEl.append(fmtBytes(r.total));
   } else {
     rateEl.append(`${arrow} ${fmtRate(r.total)}`);
     if (r.files > 0) {
       rateEl.append(el("span", { className: "wan-eng__files" }, [`файлы ${fmtRate(r.files)}`]));
     }
   }
-  const row = el("div", { className: `wan-eng${offline ? " wan-eng--off" : ""}` });
+  const extra = volume
+    ? offline
+      ? "—"
+      : `↑ ${fmtRate(st?.upload_rate ?? 0)}`
+    : offline
+      ? "—"
+      : `${st?.peers ?? 0} пиров`;
+  const row = el("div", {
+    className: `wan-eng${volume ? " wan-eng--vol" : ""}${offline ? " wan-eng--off" : ""}`,
+  });
   row.append(
     el("span", { className: "wan-eng__id" }, [id]),
     rateEl,
     el("span", { className: "wan-eng__bar" }, [meterRow(share, "accent")]),
     el("span", { className: "wan-eng__share" }, [offline ? "—" : `${share.toFixed(0)}%`]),
-    el("span", { className: "wan-eng__peers" }, [offline ? "—" : `${st?.peers ?? 0} пиров`]),
+    el("span", { className: "wan-eng__peers" }, [extra]),
     el("span", { className: "wan-eng__act" }, [offline ? "—" : `${st?.torrents_active ?? 0} акт.`]),
   );
   return row;
@@ -7069,17 +7102,21 @@ function wanCard(
   side: NetworkSide,
 ): HTMLElement {
   const t = sumEngines(engines, byEngine, fileInbound, side);
+  const volume = side === "uploaded";
   // скорости — байты/с, ёмкость канала — биты/с, поэтому множитель 8.
-  const util = capacityBps > 0 ? ((t.rate * 8) / capacityBps) * 100 : null;
+  // Для «всего отдано» ёмкость канала не применима — это счётчик, не скорость.
+  const util = !volume && capacityBps > 0 ? ((t.rate * 8) / capacityBps) * 100 : null;
   const share = totalRate > 0 ? (t.rate / totalRate) * 100 : 0;
   const tone: "accent" | "warn" | "danger" = util == null || util < 70 ? "accent" : util < 90 ? "warn" : "danger";
-  const arrow = side === "up" ? "↑" : "↓";
-  const shareLabel = side === "up" ? "от общей отдачи" : "от общего скачивания";
-  const xferLabel = side === "up" ? "отдано" : "принято";
+  const arrow = side === "down" ? "↓" : "↑";
+  const shareLabel =
+    side === "up" ? "от общей отдачи" : side === "down" ? "от общего скачивания" : "от всего отдано";
+  const xferLabel = side === "down" ? "принято" : "отдано";
+  const headline = volume ? fmtBytes(t.transferred) : `${arrow} ${fmtRate(t.rate)}`;
 
   const card = el("section", { className: "wan-card" });
   const rateBlock = el("div", { className: "wan-card__rate" }, [
-    el("span", { className: "wan-card__rate-val" }, [`${arrow} ${fmtRate(t.rate)}`]),
+    el("span", { className: "wan-card__rate-val" }, [headline]),
     el("span", { className: "wan-card__rate-share" }, [`${share.toFixed(0)}% ${shareLabel}`]),
   ]);
   if (side === "down" && t.fileRate > 0) {
@@ -7097,7 +7134,14 @@ function wanCard(
     rateBlock,
   );
 
-  if (util != null) {
+  if (volume) {
+    card.append(
+      el("div", { className: "wan-card__util" }, [
+        meterRow(share, "accent"),
+        el("div", { className: "wan-card__util-note" }, [`${share.toFixed(1)}% от всего отдано`]),
+      ]),
+    );
+  } else if (util != null) {
     card.append(
       el("div", { className: "wan-card__util" }, [
         meterRow(util, tone),
@@ -7108,14 +7152,17 @@ function wanCard(
     );
   }
 
-  card.append(
-    el("div", { className: "wan-card__meta" }, [
-      el("span", {}, [`${t.online}/${t.total} движков`]),
-      el("span", {}, [`${t.peers} пиров`]),
-      el("span", {}, [`${t.active} активных раздач`]),
-      el("span", {}, [`${xferLabel} ${fmtBytes(t.transferred)}`]),
-    ]),
-  );
+  const metaBits = [
+    el("span", {}, [`${t.online}/${t.total} движков`]),
+    el("span", {}, [`${t.peers} пиров`]),
+    el("span", {}, [`${t.active} активных раздач`]),
+  ];
+  if (volume) {
+    metaBits.push(el("span", {}, [`сейчас ↑ ${fmtRate(t.liveRate)}`]));
+  } else {
+    metaBits.push(el("span", {}, [`${xferLabel} ${fmtBytes(t.transferred)}`]));
+  }
+  card.append(el("div", { className: "wan-card__meta" }, metaBits));
 
   const rows = el("div", { className: "wan-engines" });
   const sorted = [...engines].sort((a, b) => {
@@ -7182,7 +7229,9 @@ function mountNetworkShell(root: HTMLElement): void {
   const hint =
     side === "up"
       ? "Отдача в разрезе каналов и движков"
-      : "Скачивание в разрезе каналов и движков (торрент + заливка файлов)";
+      : side === "down"
+        ? "Скачивание в разрезе каналов и движков (торрент + заливка файлов)"
+        : "Всего отдано в разрезе каналов и движков";
   const tabBar = el("div", { className: "wan-tabs", role: "tablist" });
   const mkTab = (label: string, target: NetworkSide, go: () => void) => {
     const btn = el("button", { type: "button", className: "wan-tab", role: "tab" }, [label]) as HTMLButtonElement;
@@ -7198,6 +7247,7 @@ function mountNetworkShell(root: HTMLElement): void {
   tabBar.append(
     mkTab("Отдача", "up", setHashNetwork),
     mkTab("Скачивание", "down", setHashNetworkDownload),
+    mkTab("Всего отдано", "uploaded", setHashNetworkUploaded),
   );
   const header = el("header", { className: "app-header" }, [
     el("div", {}, [el("h1", {}, ["Сеть"]), el("p", { className: "field__hint" }, [hint])]),
@@ -7209,7 +7259,9 @@ function mountNetworkShell(root: HTMLElement): void {
   const note = el("p", { className: "wan-note" }, [
     side === "up"
       ? "Скорости — payload libtorrent, без протокольного оверхеда: фактическая загрузка канала выше на 5–15%."
-      : "Торрент — payload libtorrent. «Файлы» — очередь меню «Файл» (браузер → этот движок), тоже входящий трафик на канал. Оверхед протокола не учтён.",
+      : side === "down"
+        ? "Торрент — payload libtorrent. «Файлы» — очередь меню «Файл» (браузер → этот движок), тоже входящий трафик на канал. Оверхед протокола не учтён."
+        : "Счётчик — payload libtorrent за текущую инкарнацию на движке (all_time_upload). Совпадает с чипом «Всего отдано» в шапке. В списке раздач колонка «Отдано» — накопитель БД: он переживает перенос, этот экран — нет.",
   ]);
   root.append(back, header, host, note);
 

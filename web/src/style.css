@@ -109,6 +109,8 @@ body.layout-wide #app {
 .app-header__actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.75rem;
 }
 
@@ -2158,6 +2160,10 @@ input.file-input::file-selector-button:hover {
   white-space: nowrap;
 }
 
+.wan-eng--vol {
+  grid-template-columns: 2.2rem 7rem 1fr 2.6rem 6.2rem 4.5rem;
+}
+
 .wan-eng--off {
   opacity: 0.55;
 }
@@ -2169,7 +2175,8 @@ input.file-input::file-selector-button:hover {
 }
 
 @media (max-width: 560px) {
-  .wan-eng {
+  .wan-eng,
+  .wan-eng--vol {
     grid-template-columns: 2.2rem 5.6rem 1fr 2.6rem;
   }
   .wan-eng__peers,
