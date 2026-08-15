@@ -125,6 +125,41 @@ export function uploadFeatureEnabled(): boolean {
   return Boolean(featuresCache?.enabled && deps?.canWrite());
 }
 
+/** Входящая скорость заливки файлов (браузер → движок), байт/с, по engine_id. */
+export function fileUploadInboundByEngine(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const item of queue) {
+    if (item.status !== "uploading" || item.speedBps <= 0) continue;
+    out[item.engineId] = (out[item.engineId] ?? 0) + item.speedBps;
+  }
+  return out;
+}
+
+export function fileUploadInboundTotal(): number {
+  let n = 0;
+  for (const v of Object.values(fileUploadInboundByEngine())) n += v;
+  return n;
+}
+
+const fileRateListeners = new Set<() => void>();
+let fileRateNotifyTimer: number | null = null;
+
+function notifyFileUploadRates(): void {
+  if (fileRateNotifyTimer != null) return;
+  fileRateNotifyTimer = window.setTimeout(() => {
+    fileRateNotifyTimer = null;
+    for (const cb of fileRateListeners) cb();
+  }, 400);
+}
+
+/** Живые скорости очереди «Файл» — для чипа «Скачивание» и экрана сети. */
+export function subscribeFileUploadRates(cb: () => void): () => void {
+  fileRateListeners.add(cb);
+  return () => {
+    fileRateListeners.delete(cb);
+  };
+}
+
 function maxParallel(): number {
   return featuresCache?.max_parallel_uploads ?? 4;
 }
@@ -217,6 +252,7 @@ function folderLeaf(path: string): string {
 }
 
 function renderQueue(): void {
+  notifyFileUploadRates();
   if (!queueUi || !deps) return;
   const d = deps;
   queueUi.replaceChildren();

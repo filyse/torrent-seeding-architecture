@@ -1978,8 +1978,7 @@ input.file-input::file-selector-button:hover {
   letter-spacing: 0.04em;
 }
 
-/* Кликабельная карточка статистики («Отдача» → экран «Сеть»): выглядит как обычная,
-   но реагирует на наведение и доступна с клавиатуры (это <button>). */
+/* Кликабельная карточка статистики («Отдача» / «Скачивание» → экран «Сеть»). */
 .stat-chip--link {
   font: inherit;
   text-align: left;
@@ -2048,6 +2047,38 @@ input.file-input::file-selector-button:hover {
   color: var(--muted);
 }
 
+.wan-card__rate-files {
+  flex-basis: 100%;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.wan-tabs {
+  display: inline-flex;
+  gap: 0.15rem;
+  padding: 0.15rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+}
+
+.wan-tab {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.7rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.wan-tab.is-active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
 .wan-card__util-note {
   margin-top: 0.25rem;
   font-size: 0.75rem;
@@ -2111,6 +2142,12 @@ input.file-input::file-selector-button:hover {
 
 .wan-eng__rate {
   white-space: nowrap;
+}
+
+.wan-eng__files {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--muted);
 }
 
 .wan-eng__share,

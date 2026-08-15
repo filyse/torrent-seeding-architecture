@@ -231,7 +231,7 @@ API-restore (ниже) остаётся как восстановление по
 | GET | `/labels` | список меток |
 | GET | `/session/stats` | агрегированная статистика по всем движкам (+ разрез `by_engine`) |
 | POST | `/session/limits` | глобальные лимиты сессии |
-| GET | `/network/links` | карта WAN-каналов: движки и ёмкость аплинков ([`docs/NETWORK.md`](docs/NETWORK.md)) |
+| GET | `/network/links` | карта WAN-каналов: движки и ёмкость аплинков; UI `/network` (отдача) и `/network/download` (скачивание + файлы) ([`docs/NETWORK.md`](docs/NETWORK.md)) |
 | POST | `/jobs/*` | постановка фоновых задач (sync, restore, health, bulk-register) |
 
 Внутренний API движка (`:8081`, не публичный) зеркалит торрент-операции на уровне `db_id`

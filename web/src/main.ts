@@ -1,9 +1,12 @@
 import "./style.css";
 import {
   applyUploadLimits,
+  fileUploadInboundByEngine,
+  fileUploadInboundTotal,
   loadUploadFeatures,
   openFileUploadDialog,
   openUploadQueueDialog,
+  subscribeFileUploadRates,
   uploadFeatureEnabled,
   type FileUploadDeps,
 } from "./fileUpload";
@@ -297,15 +300,18 @@ type TorrentDetailOut = TorrentOut & { runtime: RuntimeOut | null; peer_list?: T
 type TorrentPageOut = { items: TorrentOut[]; total: number; limit: number; offset: number };
 type UpdateMatchItem = { filename: string; candidates: TorrentOut[] };
 type UpdateMatchResult = { items: UpdateMatchItem[] };
+type NetworkSide = "up" | "down";
 type Route =
   | { view: "list" }
   | { view: "detail"; id: number }
   | { view: "settings" }
-  | { view: "network" };
+  | { view: "network"; side: NetworkSide };
 type DeleteTorrentChoice = "cancel" | "torrent_only" | "torrent_and_files";
 
 let networkPollTimer: ReturnType<typeof setTimeout> | null = null;
 let networkStatsUnsub: (() => void) | null = null;
+let networkFileRatesUnsub: (() => void) | null = null;
+let listFileRatesUnsub: (() => void) | null = null;
 let listPollTimer: ReturnType<typeof setTimeout> | null = null;
 let listStream: EventSource | null = null;
 let listStatsUnsub: (() => void) | null = null;
@@ -519,6 +525,10 @@ function clearViewPolls(): void {
   }
   networkStatsUnsub?.();
   networkStatsUnsub = null;
+  networkFileRatesUnsub?.();
+  networkFileRatesUnsub = null;
+  listFileRatesUnsub?.();
+  listFileRatesUnsub = null;
   settingsEnginesUnsub?.();
   settingsEnginesUnsub = null;
   listAbort?.abort();
@@ -1166,7 +1176,10 @@ function parseRoute(): Route {
   const m = /^\/torrent\/(\d+)\/?$/.exec(path);
   if (m) return { view: "detail", id: Number(m[1]) };
   if (path === "/settings" || path === "/settings/") return { view: "settings" };
-  if (path === "/network" || path === "/network/") return { view: "network" };
+  if (path === "/network/download" || path === "/network/download/") {
+    return { view: "network", side: "down" };
+  }
+  if (path === "/network" || path === "/network/") return { view: "network", side: "up" };
   return { view: "list" };
 }
 
@@ -1190,6 +1203,10 @@ function setHashSettings(): void {
 
 function setHashNetwork(): void {
   pushPath("/network");
+}
+
+function setHashNetworkDownload(): void {
+  pushPath("/network/download");
 }
 
 function navLink(label: string, onClick: () => void): HTMLElement {
@@ -1319,7 +1336,13 @@ function mountSessionBar(stats: SessionStats | null, changed?: Set<string>): HTM
     bar.append(statChip(fmtBytes(stats.total_size), "Объём раздач", undefined, f("size")));
   }
   bar.append(
-    statChip(`↓ ${fmtRate(stats.download_rate)}`, "Скачивание", "dl", f("dl")),
+    statChip(`↓ ${fmtRate((stats.download_rate ?? 0) + fileUploadInboundTotal())}`, "Скачивание", "dl", f("dl"), {
+      hint: "Показать скачивание по каналам и движкам",
+      run: () => {
+        setHashNetworkDownload();
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+      },
+    }),
     statChip(`↑ ${fmtRate(stats.upload_rate)}`, "Отдача", "ul", f("ul"), {
       hint: "Показать отдачу по каналам и движкам",
       run: () => {
@@ -2866,6 +2889,7 @@ function scheduleListPoll(
 // чтобы дорисовывать «Объём раздач» в живую панель, которая обновляется из потока.
 let lastTotalContentSize: number | null = null;
 let lastSessionStats: SessionStats | null = null;
+let lastFileInboundTotal = 0;
 
 function applySessionStats(sessionBarHost: HTMLElement, stats?: SessionStats | null): void {
   if (parseRoute().view !== "list") return;
@@ -2880,11 +2904,13 @@ function applySessionStats(sessionBarHost: HTMLElement, stats?: SessionStats | n
     if (prev.torrents !== stats.torrents || prev.torrents_active !== stats.torrents_active) changed.add("torrents");
     if (prev.total_size !== stats.total_size) changed.add("size");
     if (prev.download_rate !== stats.download_rate) changed.add("dl");
+    if (fileUploadInboundTotal() !== lastFileInboundTotal) changed.add("dl");
     if (prev.upload_rate !== stats.upload_rate) changed.add("ul");
     if (prev.total_uploaded !== stats.total_uploaded) changed.add("uploaded");
     if (prev.engines_ok !== stats.engines_ok || prev.engines_total !== stats.engines_total) changed.add("engines");
   }
   lastSessionStats = stats;
+  lastFileInboundTotal = fileUploadInboundTotal();
   sessionBarHost.replaceChildren(mountSessionBar(stats, changed));
 }
 
@@ -4375,6 +4401,9 @@ function mountListShell(root: HTMLElement): void {
   });
 
   const startStream = () => startListStream(listRefs, sessionBarHost, () => void refresh());
+  listFileRatesUnsub = subscribeFileUploadRates(() => {
+    if (lastSessionStats) applySessionStats(sessionBarHost, lastSessionStats);
+  });
 
   const onVisibility = () => {
     if (parseRoute().view !== "list") return;
@@ -6937,24 +6966,55 @@ function fmtBitRate(bps: number): string {
 }
 
 type WanTotals = {
-  upload: number;
-  uploaded: number;
+  rate: number;
+  torrentRate: number;
+  fileRate: number;
+  transferred: number;
   peers: number;
   active: number;
   online: number;
   total: number;
 };
 
-function sumEngines(ids: string[], byEngine: Record<string, EngineSessionStats>): WanTotals {
-  const acc: WanTotals = { upload: 0, uploaded: 0, peers: 0, active: 0, online: 0, total: ids.length };
+function engineSideRate(
+  st: EngineSessionStats | undefined,
+  fileBps: number,
+  side: NetworkSide,
+): { torrent: number; files: number; total: number } {
+  const torrent = side === "up" ? (st?.upload_rate ?? 0) : (st?.download_rate ?? 0);
+  const files = side === "down" ? fileBps : 0;
+  return { torrent, files, total: torrent + files };
+}
+
+function sumEngines(
+  ids: string[],
+  byEngine: Record<string, EngineSessionStats>,
+  fileInbound: Record<string, number>,
+  side: NetworkSide,
+): WanTotals {
+  const acc: WanTotals = {
+    rate: 0,
+    torrentRate: 0,
+    fileRate: 0,
+    transferred: 0,
+    peers: 0,
+    active: 0,
+    online: 0,
+    total: ids.length,
+  };
   for (const id of ids) {
     const st = byEngine[id];
-    if (!st || st.error) continue;
-    acc.online += 1;
-    acc.upload += st.upload_rate ?? 0;
-    acc.uploaded += st.total_uploaded ?? 0;
-    acc.peers += st.peers ?? 0;
-    acc.active += st.torrents_active ?? 0;
+    const r = engineSideRate(st, fileInbound[id] ?? 0, side);
+    if ((!st || st.error) && r.total <= 0) continue;
+    if (st && !st.error) {
+      acc.online += 1;
+      acc.transferred += side === "up" ? (st.total_uploaded ?? 0) : (st.total_downloaded ?? 0);
+      acc.peers += st.peers ?? 0;
+      acc.active += st.torrents_active ?? 0;
+    }
+    acc.rate += r.total;
+    acc.torrentRate += r.torrent;
+    acc.fileRate += r.files;
   }
   return acc;
 }
@@ -6966,14 +7026,30 @@ function meterRow(pct: number, tone: "accent" | "warn" | "danger"): HTMLElement 
 }
 
 /** Строка движка внутри карточки канала: скорость, доля внутри канала, пиры, активные. */
-function wanEngineRow(id: string, st: EngineSessionStats | undefined, linkUpload: number): HTMLElement {
-  const offline = !st || st.error;
-  const rate = st?.upload_rate ?? 0;
-  const share = linkUpload > 0 ? (rate / linkUpload) * 100 : 0;
+function wanEngineRow(
+  id: string,
+  st: EngineSessionStats | undefined,
+  linkRate: number,
+  fileBps: number,
+  side: NetworkSide,
+): HTMLElement {
+  const r = engineSideRate(st, fileBps, side);
+  const offline = (!st || st.error) && r.total <= 0;
+  const share = linkRate > 0 ? (r.total / linkRate) * 100 : 0;
+  const arrow = side === "up" ? "↑" : "↓";
+  const rateEl = el("span", { className: "wan-eng__rate" });
+  if (offline) {
+    rateEl.append("офлайн");
+  } else {
+    rateEl.append(`${arrow} ${fmtRate(r.total)}`);
+    if (r.files > 0) {
+      rateEl.append(el("span", { className: "wan-eng__files" }, [`файлы ${fmtRate(r.files)}`]));
+    }
+  }
   const row = el("div", { className: `wan-eng${offline ? " wan-eng--off" : ""}` });
   row.append(
     el("span", { className: "wan-eng__id" }, [id]),
-    el("span", { className: "wan-eng__rate" }, [offline ? "офлайн" : `↑ ${fmtRate(rate)}`]),
+    rateEl,
     el("span", { className: "wan-eng__bar" }, [meterRow(share, "accent")]),
     el("span", { className: "wan-eng__share" }, [offline ? "—" : `${share.toFixed(0)}%`]),
     el("span", { className: "wan-eng__peers" }, [offline ? "—" : `${st?.peers ?? 0} пиров`]),
@@ -6988,24 +7064,37 @@ function wanCard(
   engines: string[],
   byEngine: Record<string, EngineSessionStats>,
   capacityBps: number,
-  totalUpload: number,
+  totalRate: number,
+  fileInbound: Record<string, number>,
+  side: NetworkSide,
 ): HTMLElement {
-  const t = sumEngines(engines, byEngine);
-  // upload_rate — байты/с, ёмкость канала — биты/с, поэтому множитель 8.
-  const util = capacityBps > 0 ? ((t.upload * 8) / capacityBps) * 100 : null;
-  const share = totalUpload > 0 ? (t.upload / totalUpload) * 100 : 0;
+  const t = sumEngines(engines, byEngine, fileInbound, side);
+  // скорости — байты/с, ёмкость канала — биты/с, поэтому множитель 8.
+  const util = capacityBps > 0 ? ((t.rate * 8) / capacityBps) * 100 : null;
+  const share = totalRate > 0 ? (t.rate / totalRate) * 100 : 0;
   const tone: "accent" | "warn" | "danger" = util == null || util < 70 ? "accent" : util < 90 ? "warn" : "danger";
+  const arrow = side === "up" ? "↑" : "↓";
+  const shareLabel = side === "up" ? "от общей отдачи" : "от общего скачивания";
+  const xferLabel = side === "up" ? "отдано" : "принято";
 
   const card = el("section", { className: "wan-card" });
+  const rateBlock = el("div", { className: "wan-card__rate" }, [
+    el("span", { className: "wan-card__rate-val" }, [`${arrow} ${fmtRate(t.rate)}`]),
+    el("span", { className: "wan-card__rate-share" }, [`${share.toFixed(0)}% ${shareLabel}`]),
+  ]);
+  if (side === "down" && t.fileRate > 0) {
+    rateBlock.append(
+      el("span", { className: "wan-card__rate-files" }, [
+        `торрент ${fmtRate(t.torrentRate)} · файлы ${fmtRate(t.fileRate)}`,
+      ]),
+    );
+  }
   card.append(
     el("div", { className: "wan-card__head" }, [
       el("div", { className: "wan-card__title" }, [title]),
       el("div", { className: "wan-card__sub" }, [subtitle]),
     ]),
-    el("div", { className: "wan-card__rate" }, [
-      el("span", { className: "wan-card__rate-val" }, [`↑ ${fmtRate(t.upload)}`]),
-      el("span", { className: "wan-card__rate-share" }, [`${share.toFixed(0)}% от общей отдачи`]),
-    ]),
+    rateBlock,
   );
 
   if (util != null) {
@@ -7024,26 +7113,39 @@ function wanCard(
       el("span", {}, [`${t.online}/${t.total} движков`]),
       el("span", {}, [`${t.peers} пиров`]),
       el("span", {}, [`${t.active} активных раздач`]),
-      el("span", {}, [`отдано ${fmtBytes(t.uploaded)}`]),
+      el("span", {}, [`${xferLabel} ${fmtBytes(t.transferred)}`]),
     ]),
   );
 
   const rows = el("div", { className: "wan-engines" });
-  // Внутри канала сортируем по текущей отдаче — сверху те, кто реально грузит аплинк.
-  const sorted = [...engines].sort(
-    (a, b) => (byEngine[b]?.upload_rate ?? 0) - (byEngine[a]?.upload_rate ?? 0),
-  );
-  for (const id of sorted) rows.append(wanEngineRow(id, byEngine[id], t.upload));
+  const sorted = [...engines].sort((a, b) => {
+    const ra = engineSideRate(byEngine[a], fileInbound[a] ?? 0, side).total;
+    const rb = engineSideRate(byEngine[b], fileInbound[b] ?? 0, side).total;
+    return rb - ra;
+  });
+  for (const id of sorted) {
+    rows.append(wanEngineRow(id, byEngine[id], t.rate, fileInbound[id] ?? 0, side));
+  }
   card.append(rows);
   return card;
 }
 
-function renderWanCards(data: NetworkLinksOut, stats: SessionStats | null): HTMLElement[] {
+function renderWanCards(
+  data: NetworkLinksOut,
+  stats: SessionStats | null,
+  side: NetworkSide,
+): HTMLElement[] {
   const byEngine = stats?.by_engine ?? {};
-  const totalUpload = Object.values(byEngine).reduce(
-    (acc, st) => acc + (st && !st.error ? st.upload_rate ?? 0 : 0),
-    0,
-  );
+  const fileInbound = side === "down" ? fileUploadInboundByEngine() : {};
+  let totalRate = 0;
+  for (const id of Object.keys(byEngine)) {
+    const st = byEngine[id];
+    if (!st || st.error) continue;
+    totalRate += engineSideRate(st, fileInbound[id] ?? 0, side).total;
+  }
+  for (const [id, bps] of Object.entries(fileInbound)) {
+    if (!byEngine[id] || byEngine[id].error) totalRate += bps;
+  }
   const cards = data.links.map((l) =>
     wanCard(
       l.name,
@@ -7051,39 +7153,72 @@ function renderWanCards(data: NetworkLinksOut, stats: SessionStats | null): HTML
       l.engines,
       byEngine,
       l.capacity_bps,
-      totalUpload,
+      totalRate,
+      fileInbound,
+      side,
     ),
   );
   if (data.unassigned.length) {
     cards.push(
-      wanCard("Вне карты", "подсеть не сопоставлена каналу", data.unassigned, byEngine, 0, totalUpload),
+      wanCard(
+        "Вне карты",
+        "подсеть не сопоставлена каналу",
+        data.unassigned,
+        byEngine,
+        0,
+        totalRate,
+        fileInbound,
+        side,
+      ),
     );
   }
   return cards;
 }
 
 function mountNetworkShell(root: HTMLElement): void {
+  const route = parseRoute();
+  const side: NetworkSide = route.view === "network" ? route.side : "up";
   const back = navLink("← Назад к списку", () => setHashList());
+  const hint =
+    side === "up"
+      ? "Отдача в разрезе каналов и движков"
+      : "Скачивание в разрезе каналов и движков (торрент + заливка файлов)";
+  const tabBar = el("div", { className: "wan-tabs", role: "tablist" });
+  const mkTab = (label: string, target: NetworkSide, go: () => void) => {
+    const btn = el("button", { type: "button", className: "wan-tab", role: "tab" }, [label]) as HTMLButtonElement;
+    btn.classList.toggle("is-active", side === target);
+    btn.setAttribute("aria-selected", side === target ? "true" : "false");
+    btn.addEventListener("click", () => {
+      if (side === target) return;
+      go();
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    return btn;
+  };
+  tabBar.append(
+    mkTab("Отдача", "up", setHashNetwork),
+    mkTab("Скачивание", "down", setHashNetworkDownload),
+  );
   const header = el("header", { className: "app-header" }, [
-    el("div", {}, [
-      el("h1", {}, ["Сеть"]),
-      el("p", { className: "field__hint" }, ["Отдача в разрезе каналов и движков"]),
-    ]),
-    el("div", { className: "app-header__actions" }, [profileControl()]),
+    el("div", {}, [el("h1", {}, ["Сеть"]), el("p", { className: "field__hint" }, [hint])]),
+    el("div", { className: "app-header__actions" }, [tabBar, profileControl()]),
   ]);
   const host = el("div", { className: "wan-grid" }, [
     el("p", { className: "wan-note" }, ["Загрузка карты каналов…"]),
   ]);
   const note = el("p", { className: "wan-note" }, [
-    "Скорости — payload libtorrent, без протокольного оверхеда: фактическая загрузка канала выше на 5–15%.",
+    side === "up"
+      ? "Скорости — payload libtorrent, без протокольного оверхеда: фактическая загрузка канала выше на 5–15%."
+      : "Торрент — payload libtorrent. «Файлы» — очередь меню «Файл» (браузер → этот движок), тоже входящий трафик на канал. Оверхед протокола не учтён.",
   ]);
   root.append(back, header, host, note);
 
   let links: NetworkLinksOut | null = null;
 
   const paint = (stats: SessionStats | null) => {
-    if (parseRoute().view !== "network" || links === null) return;
-    host.replaceChildren(...renderWanCards(links, stats));
+    const now = parseRoute();
+    if (now.view !== "network" || now.side !== side || links === null) return;
+    host.replaceChildren(...renderWanCards(links, stats, side));
   };
 
   void (async () => {
@@ -7096,8 +7231,6 @@ function mountNetworkShell(root: HTMLElement): void {
       return;
     }
     if (parseRoute().view !== "network") return;
-    // Мгновенная отрисовка из последнего известного агрегата (переход со списка),
-    // дальше — живые обновления из того же потока, что кормит панель сверху.
     paint(lastSessionStats);
 
     const tick = async () => {
@@ -7105,7 +7238,6 @@ function mountNetworkShell(root: HTMLElement): void {
       const s = await loadSessionStats();
       if (s) paint(s);
       if (parseRoute().view === "network" && !document.hidden) {
-        // При живом WS пуш приходит сам — поллинг остаётся редким бэкстопом.
         networkPollTimer = setTimeout(() => void tick(), wsAvailable() ? 20000 : 3000);
       }
     };
@@ -7116,6 +7248,9 @@ function mountNetworkShell(root: HTMLElement): void {
       const d = msg.data as { stats?: SessionStats } | undefined;
       if (d?.stats) paint(d.stats);
     });
+    if (side === "down") {
+      networkFileRatesUnsub = subscribeFileUploadRates(() => paint(lastSessionStats));
+    }
   })();
 }
 

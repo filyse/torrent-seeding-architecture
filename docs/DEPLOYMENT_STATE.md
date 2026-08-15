@@ -134,6 +134,19 @@ health всех 9 движков ok. NPM не меняли.
 `docker stop/rm seeding-upload` → edge `:8090` → на CT400 флаг и
 `scripts/deploy-ct400.sh`.
 
+## 7б. Скачивание по WAN — 2026-08-16
+
+web **1.20.0**: чип «Скачивание» → `/network/download`, те же WAN1/WAN2, плюс
+скорость очереди «Файл». Только CT400, только `web`:
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Движки на 171/243 не трогать. После выката — Ctrl+F5, клик по «Скачивание».
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

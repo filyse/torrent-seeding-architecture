@@ -23,7 +23,7 @@
 - [`docs/PLAN_BY_AGENT.md`](docs/PLAN_BY_AGENT.md) — пошаговые планы кода по ролям
 - [`docs/INTEGRATION.md`](docs/INTEGRATION.md) — границы модулей и контракты
 - [`docs/CREATOR.md`](docs/CREATOR.md) — создание `.torrent` из контента на диске движка
-- [`docs/NETWORK.md`](docs/NETWORK.md) — экран «Сеть»: отдача по WAN-каналам и движкам
+- [`docs/NETWORK.md`](docs/NETWORK.md) — экран «Сеть»: отдача и скачивание по WAN-каналам
 - [`docs/BACKUP.md`](docs/BACKUP.md) — суточные бэкапы БД и состояния движков, восстановление
 - [`docs/FILE_UPLOAD.md`](docs/FILE_UPLOAD.md) — загрузка файлов в том движка (ticket + edge)
 - [`docs/UPDATE-UPLOAD-EMBED.md`](docs/UPDATE-UPLOAD-EMBED.md) — выкат вшитой загрузки на 171/243/CT400
