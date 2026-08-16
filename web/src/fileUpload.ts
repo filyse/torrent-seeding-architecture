@@ -408,6 +408,28 @@ async function cancelItem(item: QueuedUpload): Promise<void> {
   pumpQueue();
 }
 
+/** Повтор на 5xx/сеть: релей RU→дом иногда рвёт чанк, второй заход проходит. */
+async function putChunk(url: string, ticket: string, body: Uint8Array): Promise<Response> {
+  let last: Response | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      last = await fetch(url, {
+        method: "PUT",
+        headers: { "X-Upload-Ticket": ticket },
+        body: body as unknown as Blob,
+      });
+    } catch (e) {
+      if (attempt === 2) throw e;
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      continue;
+    }
+    if (last.ok || (last.status < 500 && last.status !== 429)) return last;
+    if (attempt === 2) return last;
+    await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+  }
+  return last as Response;
+}
+
 async function runUpload(item: QueuedUpload): Promise<void> {
   const d = deps!;
   item.status = "uploading";
@@ -488,13 +510,10 @@ async function runUpload(item: QueuedUpload): Promise<void> {
         const end = Math.min(item.file.size, start + chunkSize);
         const blob = item.file.slice(start, end);
         const buf = new Uint8Array(await blob.arrayBuffer());
-        const res = await fetch(
+        const res = await putChunk(
           `${ticket.upload_base_url}/upload/v1/uploads/${created.id}/chunks/${index}`,
-          {
-            method: "PUT",
-            headers: { "X-Upload-Ticket": ticket.ticket },
-            body: buf,
-          },
+          ticket.ticket,
+          buf,
         );
         if (!res.ok) throw new Error(await res.text());
         doneBytes += buf.byteLength;

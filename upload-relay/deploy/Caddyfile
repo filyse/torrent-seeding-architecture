@@ -1,8 +1,12 @@
 # HTTPS на :8445 — порт 443 занят xray на RU VDS.
 # HTTP :80 нужен для Let's Encrypt HTTP-01.
+# h3/QUIC на заливке чанков даёт обрывы (часть PUT → 502). Только h1/h2.
 
 {
 	auto_https disable_redirects
+	servers :8445 {
+		protocols h1 h2
+	}
 }
 
 http://185-185-143-207.sslip.io {
@@ -15,6 +19,12 @@ http://185-185-143-207.sslip.io {
 			alt_http_port 80
 		}
 	}
-	encode gzip
-	reverse_proxy 127.0.0.1:8091
+	reverse_proxy 127.0.0.1:8091 {
+		flush_interval -1
+		transport http {
+			read_timeout 10m
+			write_timeout 10m
+			dial_timeout 10s
+		}
+	}
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -30,6 +31,9 @@ HOP_BY_HOP = {
     "content-encoding",
 }
 
+# Сколько раз повторить PUT/POST на seedbox, если канал оборвался.
+_UPSTREAM_RETRIES = 3
+
 
 def _cors_origins() -> list[str]:
     raw = os.getenv("UPLOAD_CORS_ORIGINS", "*").strip()
@@ -53,6 +57,23 @@ def _upstreams() -> dict[str, str]:
     return {str(k).strip().lower(): str(v).rstrip("/") for k, v in data.items()}
 
 
+def format_upstream_error(exc: BaseException) -> str:
+    """Текст для 502: httpx часто даёт пустой str(exc) на RST/EOF."""
+    msg = str(exc).strip()
+    cause = exc.__cause__ or exc.__context__
+    cause_s = ""
+    if cause is not None and cause is not exc:
+        cause_s = str(cause).strip() or type(cause).__name__
+    bits = [type(exc).__name__]
+    if msg:
+        bits.append(msg)
+    if cause_s and cause_s != msg:
+        bits.append(cause_s)
+    if len(bits) == 1:
+        bits.append("connection dropped")
+    return ": ".join(bits)
+
+
 UPSTREAMS = _upstreams()
 _client: httpx.AsyncClient | None = None
 
@@ -60,10 +81,13 @@ _client: httpx.AsyncClient | None = None
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global _client
+    # Keep-alive на пути RU→дом часто отдаёт полузакрытый сокет: следующий чанк
+    # падает с пустым RequestError. Новое соединение на каждый запрос надёжнее.
     _client = httpx.AsyncClient(
         timeout=httpx.Timeout(600.0, connect=30.0),
         follow_redirects=False,
         http2=False,
+        limits=httpx.Limits(max_keepalive_connections=0, max_connections=16),
     )
     log.info("relay up version=%s contours=%s", __version__, sorted(UPSTREAMS))
     try:
@@ -127,20 +151,37 @@ async def proxy(contour: str, full_path: str, request: Request) -> Response:
     # Чанки до ~8 МБ — держим в RAM и сразу шлём апстриму (без диска).
     body = await request.body()
     assert _client is not None
-    try:
-        upstream = await _client.request(
-            request.method,
-            url,
-            headers=_filter_req_headers(request),
-            content=body if body else None,
-        )
-    except httpx.RequestError as exc:
-        log.warning("upstream %s %s failed: %s", request.method, url, exc)
-        raise HTTPException(status_code=502, detail=f"upstream error: {exc}") from exc
+    headers = _filter_req_headers(request)
+    last_exc: httpx.RequestError | None = None
+    for attempt in range(1, _UPSTREAM_RETRIES + 1):
+        try:
+            upstream = await _client.request(
+                request.method,
+                url,
+                headers=headers,
+                content=body if body else None,
+            )
+            return Response(
+                content=upstream.content,
+                status_code=upstream.status_code,
+                headers=_filter_resp_headers(upstream.headers),
+                media_type=upstream.headers.get("content-type"),
+            )
+        except httpx.RequestError as exc:
+            last_exc = exc
+            detail = format_upstream_error(exc)
+            log.warning(
+                "upstream %s %s failed attempt=%s/%s: %s",
+                request.method,
+                url,
+                attempt,
+                _UPSTREAM_RETRIES,
+                detail,
+            )
+            if attempt < _UPSTREAM_RETRIES:
+                await asyncio.sleep(0.4 * attempt)
 
-    return Response(
-        content=upstream.content,
-        status_code=upstream.status_code,
-        headers=_filter_resp_headers(upstream.headers),
-        media_type=upstream.headers.get("content-type"),
-    )
+    assert last_exc is not None
+    raise HTTPException(
+        status_code=502, detail=f"upstream error: {format_upstream_error(last_exc)}"
+    ) from last_exc
