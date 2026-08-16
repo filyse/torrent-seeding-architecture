@@ -60,14 +60,10 @@ async def list_engines(pool: EnginePoolDep, session: DbSession):
     return out
 
 
-@router.post("/{engine_id}/limits", response_model=EngineOut)
-async def set_engine_limits(
-    engine_id: str, body: EngineLimitsIn, session: DbSession, pool: EnginePoolDep
-):
-    """Постоянные лимиты сессии движка (байт/с; 0 = без лимита).
-
-    Сохраняем в реестр БД и сразу применяем к живой сессии. Значения переживают
-    перезапуск движка — переприменяются при следующей саморегистрации."""
+async def persist_and_apply_engine_limits(
+    engine_id: str, body: EngineLimitsIn, session, pool
+) -> EngineOut:
+    """Сохранить постоянные лимиты движка и применить к живой сессии."""
     spec = pool.spec(engine_id)
     if spec is None:
         raise HTTPException(status_code=404, detail=f"unknown engine_id: {engine_id}")
@@ -83,6 +79,8 @@ async def set_engine_limits(
             listen_port=spec.listen_port,
         )
         row = await repo.set_limits(engine_id, body.download_limit, body.upload_limit)
+    if row is None:
+        raise HTTPException(status_code=500, detail=f"failed to persist limits for {engine_id}")
     await session.commit()
 
     online = True
@@ -102,6 +100,17 @@ async def set_engine_limits(
         download_limit=row.download_limit,
         upload_limit=row.upload_limit,
     )
+
+
+@router.post("/{engine_id}/limits", response_model=EngineOut)
+async def set_engine_limits(
+    engine_id: str, body: EngineLimitsIn, session: DbSession, pool: EnginePoolDep
+):
+    """Постоянные лимиты сессии движка (байт/с; 0 = без лимита).
+
+    Сохраняем в реестр БД и сразу применяем к живой сессии. Значения переживают
+    перезапуск движка — переприменяются при следующей саморегистрации."""
+    return await persist_and_apply_engine_limits(engine_id, body, session, pool)
 
 
 @router.get("/registry", response_model=list[EngineRegistryItem])

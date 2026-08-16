@@ -41,6 +41,16 @@ class EngineLimitsIn(BaseModel):
     upload_limit: int | None = Field(default=None, ge=0)
 
 
+class WanLimitsOut(BaseModel):
+    id: str
+    name: str
+    engines: list[str]
+    applied: int
+    saved: int
+    download_limit: int | None = None
+    upload_limit: int | None = None
+
+
 class EngineRegistryItem(BaseModel):
     id: str
     url: str

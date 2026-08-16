@@ -494,6 +494,8 @@
 - ✅ Выкат на 171/243 + флаг на CT400, sidecar снят (2026-08-16). Runbook:
   [`docs/UPDATE-UPLOAD-EMBED.md`](docs/UPDATE-UPLOAD-EMBED.md).
 - ✅ Лимиты параллели/чанков в «Настройки → Лимиты» (admin, api 1.11.0 / web 1.19.0).
+- ✅ Штамп лимитов по WAN в «Настройки → Лимиты» (api 1.12.0 / web 1.22.0): одно число
+  на каждый движок канала, не потолок суммы. `POST /network/links/{id}/limits`.
 
 ---
 

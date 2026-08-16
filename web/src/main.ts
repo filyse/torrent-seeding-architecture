@@ -1411,7 +1411,9 @@ function mountGlobalLimitsPanel(): HTMLElement {
     }
   });
   body.append(
-    el("p", { className: "field__hint" }, ["Лимиты сессии libtorrent (0 = без ограничения)"]),
+    el("p", { className: "field__hint" }, [
+      "Штамп на каждый движок фермы, не сумма каналов. 0 = без ограничения. Чтобы ограничить один аплинк — блок «Лимиты каналов» выше.",
+    ]),
     el("div", { className: "limits-form" }, [
       el("label", { className: "limits-form__field" }, ["↓ КБ/с", dlInput]),
       el("label", { className: "limits-form__field" }, ["↑ КБ/с", ulInput]),
@@ -1419,6 +1421,113 @@ function mountGlobalLimitsPanel(): HTMLElement {
     ]),
   );
   panel.append(el("summary", {}, ["Глобальные лимиты"]), body);
+  return panel;
+}
+
+let reloadEngineLimitsPanel: (() => Promise<void>) | null = null;
+
+function commonLimitKb(values: Array<number | null | undefined>): { value: string; mixed: boolean } {
+  const kb = values.map((v) => (v && v > 0 ? Math.round(v / 1024) : 0));
+  if (kb.length === 0) return { value: "", mixed: false };
+  const first = kb[0];
+  if (kb.every((n) => n === first)) {
+    return { value: first > 0 ? String(first) : "", mixed: false };
+  }
+  return { value: "", mixed: true };
+}
+
+function mountWanLimitsPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  panel.append(el("div", { className: "panel__head" }, ["Лимиты каналов"]));
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, [
+    "Одно число ставится на каждый движок канала. Это не потолок суммы: 50 МБ/с на WAN1 с шестью движками — до 300 МБ/с на канале. 0 = без ограничения. Сохраняется как лимит движка.",
+  ]);
+  const list = el("div", { className: "keys-list" });
+  body.append(hint, list);
+  panel.append(body);
+
+  const parse = (s: string) => {
+    const n = Number(s.trim());
+    return Number.isFinite(n) && n > 0 ? Math.round(n * 1024) : 0;
+  };
+
+  const reload = async () => {
+    try {
+      const [links, engines] = await Promise.all([
+        fetchJson<NetworkLinksOut>("/network/links"),
+        fetchJson<EngineOut[]>("/engines"),
+      ]);
+      const byId = new Map(engines.map((e) => [e.id, e]));
+      list.replaceChildren();
+      if (links.links.length === 0) {
+        list.append(el("p", { className: "field__hint" }, ["Каналы не заданы"]));
+        return;
+      }
+      for (const link of links.links) {
+        const members = link.engines.map((id) => byId.get(id)).filter((e): e is EngineOut => !!e);
+        const dlCommon = commonLimitKb(members.map((e) => e.download_limit));
+        const ulCommon = commonLimitKb(members.map((e) => e.upload_limit));
+        const row = el("div", { className: "key-row" });
+        const names = link.engines.length ? link.engines.join(", ") : "нет движков";
+        const meta = el("div", { className: "key-row__meta" }, [
+          el("span", { className: "key-row__name" }, [link.name]),
+          el("span", { className: "key-row__sub" }, [
+            `${link.router || link.id} · ${names}`,
+          ]),
+        ]);
+        const dl = el("input", {
+          type: "number",
+          min: "0",
+          placeholder: dlCommon.mixed ? "разные" : "∞",
+          value: dlCommon.value,
+        }) as HTMLInputElement;
+        const ul = el("input", {
+          type: "number",
+          min: "0",
+          placeholder: ulCommon.mixed ? "разные" : "∞",
+          value: ulCommon.value,
+        }) as HTMLInputElement;
+        const apply = el("button", { type: "button", className: "btn btn--sm btn--primary" }, [
+          "Применить",
+        ]);
+        apply.disabled = link.engines.length === 0;
+        apply.addEventListener("click", async () => {
+          apply.disabled = true;
+          try {
+            const out = await fetchJson<{ saved: number; applied: number; name: string }>(
+              `/network/links/${encodeURIComponent(link.id)}/limits`,
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  download_limit: parse(dl.value),
+                  upload_limit: parse(ul.value),
+                }),
+              },
+            );
+            showToast(`Лимиты ${out.name}: сохранено ${out.saved}, онлайн ${out.applied}`);
+            await reload();
+            await reloadEngineLimitsPanel?.();
+          } catch (err) {
+            showToast(err instanceof Error ? err.message : String(err), true);
+          } finally {
+            apply.disabled = link.engines.length === 0;
+          }
+        });
+        const controls = el("div", { className: "engine-limits__controls" }, [
+          el("label", { className: "limits-form__field" }, ["↓ КБ/с", dl]),
+          el("label", { className: "limits-form__field" }, ["↑ КБ/с", ul]),
+          apply,
+        ]);
+        row.append(meta, controls);
+        list.append(row);
+      }
+    } catch (e) {
+      list.replaceChildren(el("p", { className: "field__hint" }, [e instanceof Error ? e.message : String(e)]));
+    }
+  };
+
+  void reload();
   return panel;
 }
 
@@ -1501,6 +1610,7 @@ function mountEngineLimitsPanel(): HTMLElement {
   };
 
   refreshBtn.addEventListener("click", () => void reload());
+  reloadEngineLimitsPanel = reload;
   void reload();
   return panel;
 }
@@ -7348,6 +7458,7 @@ function mountSettingsShell(root: HTMLElement): void {
       visible: canWrite(),
       panels: () => {
         const out: HTMLElement[] = [];
+        if (canWrite()) out.push(mountWanLimitsPanel());
         if (globalLimits) out.push(globalLimits);
         out.push(mountEngineLimitsPanel(), mountQuotasPanel(), mountNetSettingsPanel());
         if (isAdmin()) out.push(mountUploadLimitsPanel());

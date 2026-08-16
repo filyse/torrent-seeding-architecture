@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -114,3 +115,28 @@ def link_for_url(url: str, all_links: list[WanLink] | None = None) -> WanLink | 
         if link.matches(host):
             return link
     return None
+
+
+def link_by_id(wan_id: str, all_links: list[WanLink] | None = None) -> WanLink | None:
+    resolved = links() if all_links is None else all_links
+    for link in resolved:
+        if link.id == wan_id:
+            return link
+    return None
+
+
+def assign_engines(
+    engines: Iterable[tuple[str, str]],
+    all_links: list[WanLink] | None = None,
+) -> tuple[dict[str, list[str]], list[str]]:
+    """Разложить движки (id, url) по каналам. Второй элемент — вне карты."""
+    resolved = links() if all_links is None else all_links
+    buckets: dict[str, list[str]] = {link.id: [] for link in resolved}
+    unassigned: list[str] = []
+    for engine_id, url in engines:
+        link = link_for_url(url, resolved)
+        if link is None:
+            unassigned.append(engine_id)
+        else:
+            buckets[link.id].append(engine_id)
+    return buckets, unassigned

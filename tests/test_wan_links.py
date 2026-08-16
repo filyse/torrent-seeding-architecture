@@ -59,6 +59,22 @@ def test_broken_env_falls_back_to_defaults(monkeypatch):
     assert {link.id for link in wan_links.links()} == {"wan1", "wan2"}
 
 
+def test_assign_engines_groups_by_uplink():
+    buckets, unassigned = wan_links.assign_engines(
+        [
+            ("b2", "https://192.168.1.171:8082"),
+            ("a1", "https://192.168.2.243:8081"),
+            ("b1", "https://192.168.1.171:8081"),
+            ("x1", "https://10.0.0.5:8081"),
+        ]
+    )
+    assert buckets["wan1"] == ["b2", "b1"]
+    assert buckets["wan2"] == ["a1"]
+    assert unassigned == ["x1"]
+    assert wan_links.link_by_id("wan1") is not None
+    assert wan_links.link_by_id("missing") is None
+
+
 def test_malformed_entries_are_skipped_not_fatal(monkeypatch):
     monkeypatch.setenv(
         "SEEDING_WAN_LINKS",

@@ -34,6 +34,7 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("POST", re.compile(r"^/backups$"), "Создан бэкап БД"),
     ("POST", re.compile(r"^/backups/restore$"), "Восстановление БД из бэкапа"),
     ("POST", re.compile(r"^/session/limits$"), "Изменены глобальные лимиты"),
+    ("POST", re.compile(r"^/network/links/([^/]+)/limits$"), "Изменены лимиты канала {1}"),
     ("POST", re.compile(r"^/torrents$"), "Добавлен торрент"),
     ("POST", re.compile(r"^/torrents/upload(-batch)?$"), "Загружен torrent-файл"),
     ("POST", re.compile(r"^/torrents/url$"), "Добавлен торрент по ссылке"),
