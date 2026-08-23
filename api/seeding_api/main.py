@@ -268,6 +268,10 @@ app.include_router(
     dependencies=[Depends(require_auth)],
 )
 app.include_router(
+    creator_router.public_router,
+    prefix="/api/v1/creator",
+)
+app.include_router(
     creator_router.router,
     prefix="/api/v1/creator",
     dependencies=[Depends(require_auth)],

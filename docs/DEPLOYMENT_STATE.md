@@ -152,6 +152,25 @@ bash scripts/deploy-ct400.sh up -d --build web
 
 Движки на 171/243 не трогать. После выката — Ctrl+F5, клик по «Всего отдано».
 
+## 7г. Creator → MPW (`creator.task.deleted`) — 2026-08-23
+
+api **1.13.0**, engine **1.3.1**. Пуш в Kafka при DELETE и при TTL.
+Топик `creator.task.deleted`, брокер `SEEDING_KAFKA_BOOTSTRAP` (на CT400
+дефолт `192.168.1.223:9092`). Движки новых env не требуют: TTL уходит на
+`POST /api/v1/creator/events/deleted` с уже заданным `X-Register-Key`.
+
+```bash
+# CT400
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build api
+
+# b-host / a-host — как в §5 (пересборка engine)
+```
+
+Проверка: `GET /api/v1/health`; в контейнере api есть `SEEDING_KAFKA_BOOTSTRAP`;
+`DELETE /api/v1/creator/tasks/{engine}/{id}` → в топике сообщение с `task_key`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

@@ -10,14 +10,17 @@ import os
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Response
 from seeding_db.models import TorrentStatus
 from seeding_db.repository import TorrentRepository
 
 from seeding_api.deps import DbSession, EnginePoolDep
 from seeding_api.engine_client import EngineClient
+from seeding_api.kafka_notify import publish_creator_deleted_async
+from seeding_api.routers.engines import _require_register_key
 from seeding_api.schemas import (
     CreatorBrowseItem,
+    CreatorDeletedBatchIn,
     CreatorSeedIn,
     CreatorTaskCreate,
     CreatorTaskOut,
@@ -25,6 +28,7 @@ from seeding_api.schemas import (
 )
 
 router = APIRouter()
+public_router = APIRouter()
 
 
 def _client(pool: EnginePoolDep, engine_id: str) -> EngineClient:
@@ -130,7 +134,28 @@ async def delete_task(engine_id: str, task_id: int, pool: EnginePoolDep):
         raise HTTPException(status_code=502, detail="engine unavailable") from exc
     if not ok:
         raise HTTPException(status_code=404, detail="task not found")
+    await publish_creator_deleted_async(engine_id, task_id, reason="deleted")
     return {"ok": True}
+
+
+@public_router.post("/events/deleted")
+async def creator_deleted_from_engine(
+    body: CreatorDeletedBatchIn,
+    x_register_key: str | None = Header(None, alias="X-Register-Key"),
+):
+    """TTL-reaper движка: задача стёрта из RAM, оркестратор шлёт событие в Kafka."""
+    _require_register_key(x_register_key)
+    published = 0
+    for item in body.tasks:
+        if await publish_creator_deleted_async(
+            body.engine_id,
+            item.id,
+            reason=item.reason or "ttl",
+            name=item.name,
+            source_path=item.source_path,
+        ):
+            published += 1
+    return {"ok": True, "published": published}
 
 
 @router.get("/tasks/{engine_id}/{task_id}/download")

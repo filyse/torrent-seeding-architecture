@@ -1,6 +1,6 @@
 # Torrent seeding platform
 
-Репозиторий платформы раздачи торрентов (сидирование), не создание `.torrent`.
+Репозиторий платформы раздачи торрентов (сидирование) и создание `.torrent`. Старый seedbox-API заморожен в `Project/Backup/torrent-api`.
 
 ## Структура
 
@@ -22,7 +22,7 @@
 - [`AGENTS.md`](AGENTS.md) — роли агентов и сдача работ координатору
 - [`docs/PLAN_BY_AGENT.md`](docs/PLAN_BY_AGENT.md) — пошаговые планы кода по ролям
 - [`docs/INTEGRATION.md`](docs/INTEGRATION.md) — границы модулей и контракты
-- [`docs/CREATOR.md`](docs/CREATOR.md) — создание `.torrent` из контента на диске движка
+- [`docs/CREATOR.md`](docs/CREATOR.md) — создание `.torrent` из контента; Kafka `creator.task.deleted` → MPW
 - [`docs/NETWORK.md`](docs/NETWORK.md) — экран «Сеть»: отдача и скачивание по WAN-каналам
 - [`docs/BACKUP.md`](docs/BACKUP.md) — суточные бэкапы БД и состояния движков, восстановление
 - [`docs/FILE_UPLOAD.md`](docs/FILE_UPLOAD.md) — загрузка файлов в том движка (ticket + edge)

@@ -5,6 +5,9 @@
 ## Публичная граница
 
 - **Браузер / десктоп** ↔ только **`api`** (HTTPS или HTTP в dev), пути вида `/api/v1/...`. Торренты: CRUD-образно список/создать/детали/пауза/возобновить/**удалить** (`DELETE /api/v1/torrents/{id}` — БД + снятие с движка). Опционально **`X-API-Key`**, если задано `SEEDING_API_KEYS` на API.
+- **`api` → Kafka → MPW**: при удалении задачи creator (кнопка или TTL) оркестратор
+  публикует `creator.task.deleted` (`SEEDING_KAFKA_BOOTSTRAP`). Вкладка Torrent
+  снимает строку `a1:0`. Это не список раздач (`/api/v1/torrents`).
 - **`api`** ↔ **`engine`(s)**: один или несколько движков. Реестр: `ENGINES_CONFIG` / `ENGINES_CONFIG_FILE` (см. `docs/MULTI_ENGINE.md`); fallback — `ENGINE_URL`. Маршрутизация по `save_path` → `engine_id`. Префикс внутреннего REST: **`/internal/v1`**. При старте API — **параллельное восстановление** по каждому движку (`SEEDING_ENGINE_RESTORE=0` отключает).
 
   | Метод | Путь | Назначение |

@@ -1,9 +1,11 @@
 # Архитектура: платформа раздачи торрентов
 
 > Назначение: сервис **раздаёт (сидирует)** торренты через libtorrent — реальная сессия,
-> пиры, трекеры, DHT. Создание `.torrent` из контента — отдельная задача и здесь не делается.
+> пиры, трекеры, DHT. Создание `.torrent` из контента на диске движка — `/api/v1/creator`
+> (не путать со списком раздач `/api/v1/torrents`). Вкладка MPW ходит в creator;
+> при удалении задачи (кнопка или TTL) оркестратор шлёт в Kafka `creator.task.deleted`.
 
-Актуально на: июнь 2026 (после фаз 0–2, multi-engine на CT 400).
+Актуально на: август 2026 (фазы 0–9, creator, выкат на CT 400 + движки 171/243).
 
 ---
 
@@ -234,9 +236,14 @@ API-restore (ниже) остаётся как восстановление по
 | GET | `/network/links` | карта WAN-каналов: движки и ёмкость аплинков; UI `/network` (отдача), `/network/download` (скачивание + файлы), `/network/uploaded` (всего отдано) ([`docs/NETWORK.md`](docs/NETWORK.md)) |
 | POST | `/network/links/{id}/limits` | штамп постоянных лимитов на все движки канала (не потолок суммы) |
 | POST | `/jobs/*` | постановка фоновых задач (sync, restore, health, bulk-register) |
+| GET/POST/DELETE | `/creator/*` | создание `.torrent` из папки на диске движка; см. [`docs/CREATOR.md`](docs/CREATOR.md) |
+| POST | `/creator/events/deleted` | движок сообщает о TTL (`X-Register-Key`); API публикует Kafka |
 
 Внутренний API движка (`:8081`, не публичный) зеркалит торрент-операции на уровне `db_id`
-плюс `/health`, `/session/stats`, `/session/limits`.
+плюс `/health`, `/session/stats`, `/session/limits` и `/internal/v1/creator/*`.
+
+**MPW:** топик `creator.task.deleted` (`SEEDING_KAFKA_BOOTSTRAP`, дефолт
+`192.168.1.223:9092`). Тело: `task_key` вида `a1:0`, `reason` = `deleted` | `ttl`.
 
 ---
 
@@ -245,7 +252,9 @@ API-restore (ниже) остаётся как восстановление по
 **API:** `DATABASE_URL`, `REDIS_URL`, `ENGINES_CONFIG_FILE` (путь к engines.json),
 `SEEDING_RESTORE_CONCURRENCY`, `SEEDING_ENGINE_RESTORE`, `SEEDING_API_KEYS` (+ заголовок
 `X-API-Key`), `SEEDING_REQUIRE_ENGINE_FOR_DELETE`, `SEEDING_WAN_LINKS` (карта WAN-каналов
-для экрана «Сеть», см. [`docs/NETWORK.md`](docs/NETWORK.md)).
+для экрана «Сеть», см. [`docs/NETWORK.md`](docs/NETWORK.md)),
+`SEEDING_KAFKA_BOOTSTRAP` (пуш `creator.task.deleted` в MPW; пусто = удаление без пуша),
+`SEEDING_KAFKA_TOPIC_CREATOR_DELETED` (дефолт `creator.task.deleted`).
 
 **Движок:** `ENGINE_HTTP_PORT=8081`, `SEEDING_ENGINE_BACKEND=libtorrent`, `SEEDING_DATA_ROOT=/data`,
 `ENGINE_STORAGE_SUBDIR=bX`, `SEEDING_LT_STATE_FILE`, `SEEDING_FASTRESUME_DIR`,

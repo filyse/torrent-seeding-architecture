@@ -20,3 +20,5 @@ certs/
 *.key
 *.crt
 *.srl
+# Локальные пароли панели (не коммитить)
+seedbox-users.md

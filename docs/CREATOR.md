@@ -5,7 +5,7 @@
 `torrent_api` (libtorrent 1.2) под libtorrent 2.0 (v1-only) и встроена в движок,
 поэтому доступна на любом свежеразвёрнутом движке автоматически.
 
-Версии на момент документа: `engine 1.1.3`, `api 1.5.3`, `web 1.7.2`.
+Версии на момент документа: `engine 1.3.1`, `api 1.13.0`, `web 1.22.0`.
 
 ## Компоненты и поток
 
@@ -61,9 +61,25 @@ web (модал «Создать торрент» / «Очередь созда�
 | POST | `/tasks` | создать задачу |
 | GET | `/tasks/{engine_id}/{id}` | статус |
 | POST | `/tasks/{engine_id}/{id}/cancel` | отмена |
-| DELETE | `/tasks/{engine_id}/{id}` | удалить задачу из очереди/памяти |
+| DELETE | `/tasks/{engine_id}/{id}` | удалить задачу из очереди/памяти; в Kafka уходит `creator.task.deleted` |
 | GET | `/tasks/{engine_id}/{id}/download` | скачать `.torrent` |
 | POST | `/tasks/{engine_id}/{id}/seed` | поставить на раздачу |
+
+Движок → оркестратор (`X-Register-Key`, без `require_auth`):
+
+| Метод | Путь | Назначение |
+|-------|------|------------|
+| POST | `/events/deleted` | TTL-reaper: задача стёрта из RAM, API публикует то же Kafka-событие |
+
+Тело события Kafka (`SEEDING_KAFKA_BOOTSTRAP`, топик `SEEDING_KAFKA_TOPIC_CREATOR_DELETED`,
+дефолт `creator.task.deleted`):
+
+```json
+{"event":"creator.task.deleted","engine_id":"a1","task_id":0,"task_key":"a1:0","reason":"ttl"}
+```
+
+`reason`: `deleted` (кнопка / API) или `ttl` (срок жизни задачи). MPW снимает строку
+по `task_key`. Без брокера удаление на движке не ломается — пуш просто не уходит.
 
 ## Очередь создания — архитектура
 
@@ -77,7 +93,9 @@ web (модал «Создать торрент» / «Очередь созда�
 - после перезапуска движка список его задач создания пуст (готовые `.torrent`, если
   их не скачали/не поставили на раздачу, теряются — это by design, они эфемерны);
 - **автоочистка по TTL:** задача живёт не дольше `SEEDING_CREATOR_TASK_TTL` (сек, дефолт
-  86400 = 24 ч), затем автоудаляется (фоновый reaper + прунинг при обращении). Также
+  86400 = 24 ч), затем автоудаляется (фоновый reaper + прунинг при обращении). Reaper
+  сообщает оркестратору (`POST /api/v1/creator/events/deleted`), тот публикует
+  `creator.task.deleted` в Kafka — вкладка MPW снимает ту же строку. Также
   задачу можно удалить вручную кнопкой «Удалить» (`DELETE …/creator/tasks/{id}`).
 
 ## Автопапка движка (web)

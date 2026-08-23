@@ -9,6 +9,15 @@
 
 ---
 
+## engine 1.3.1 · api 1.13.0 — 2026-08-23
+
+- **Creator → MPW: задача удалена.** После `DELETE /api/v1/creator/tasks/{engine}/{id}`
+  оркестратор публикует в Kafka `creator.task.deleted` (`task_key` вида `a1:0`).
+  TTL-reaper на движке шлёт пачку на `POST /api/v1/creator/events/deleted`
+  (`X-Register-Key`); API публикует те же события. Без `SEEDING_KAFKA_BOOTSTRAP`
+  удаление работает как раньше, пуш молчит. MPW снимает строку по событию,
+  без опроса готовой очереди.
+
 ## web 1.22.0 · api 1.12.0 — 2026-08-17
 
 - **Лимиты по WAN.** В «Настройки → Лимиты» блок «Лимиты каналов»: одно число

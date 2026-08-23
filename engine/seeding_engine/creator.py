@@ -298,14 +298,32 @@ class TaskCancelled(Exception):
     pass
 
 
+def _default_on_deleted(reason: str, tasks: list[dict]) -> None:
+    """HTTP к оркестратору в отдельном потоке — иначе deadlock с API DELETE/GET."""
+    from seeding_engine.creator_notify import notify_orchestrator_deleted
+
+    threading.Thread(
+        target=notify_orchestrator_deleted,
+        args=(reason, tasks),
+        name="creator-deleted-notify",
+        daemon=True,
+    ).start()
+
+
 class CreatorService:
     """Управление задачами создания торрентов (in-memory, эфемерно)."""
 
-    def __init__(self, max_workers: int | None = None, task_ttl: int | None = None) -> None:
+    def __init__(
+        self,
+        max_workers: int | None = None,
+        task_ttl: int | None = None,
+        on_deleted=None,
+    ) -> None:
         self._tasks: dict[int, CreateTask] = {}
         self._cancelled: set[int] = set()
         self._counter = 0
         self._lock = threading.Lock()
+        self._on_deleted = on_deleted or _default_on_deleted
         workers = max_workers if max_workers is not None else _default_workers()
         # Потоки-надзиратели: каждый управляет одним дочерним процессом хеширования и
         # лишь перекачивает прогресс (в основном спит на queue.get → GIL свободен).
@@ -322,31 +340,55 @@ class CreatorService:
         self._stop.set()
         self._executor.shutdown(wait=False, cancel_futures=True)
 
-    def _prune_locked(self, now: float | None = None) -> None:
+    def _prune_locked(self, now: float | None = None) -> list[CreateTask]:
         """Удалить задачи старше TTL. Вызывать под self._lock."""
         now = now if now is not None else time.time()
         stale = [tid for tid, t in self._tasks.items() if now - t.created_at > self._ttl]
+        removed: list[CreateTask] = []
         for tid in stale:
-            self._tasks.pop(tid, None)
+            task = self._tasks.pop(tid, None)
             self._cancelled.discard(tid)
+            if task is not None:
+                removed.append(task)
+        return removed
+
+    def _emit_deleted(self, tasks: list[CreateTask], reason: str) -> None:
+        if not tasks:
+            return
+        snapshots = [
+            {
+                "id": task.id,
+                "name": task.name or "",
+                "source_path": task.source_path or "",
+            }
+            for task in tasks
+        ]
+        try:
+            self._on_deleted(reason, snapshots)
+        except Exception:  # noqa: BLE001
+            log.warning("creator deleted notify failed", exc_info=True)
 
     def _reap_loop(self) -> None:
         # Проверяем не реже раза в 10 минут (и не реже TTL).
         interval = min(self._ttl, 600)
         while not self._stop.wait(interval):
             with self._lock:
-                self._prune_locked()
+                removed = self._prune_locked()
+            self._emit_deleted(removed, "ttl")
 
     def get(self, task_id: int) -> CreateTask | None:
         with self._lock:
-            self._prune_locked()
-            return self._tasks.get(task_id)
+            removed = self._prune_locked()
+            task = self._tasks.get(task_id)
+        self._emit_deleted(removed, "ttl")
+        return task
 
     def list_all(self) -> list[dict[str, object]]:
         """Все задачи (свежие сверху) — для очереди создания в UI."""
         with self._lock:
-            self._prune_locked()
+            removed = self._prune_locked()
             tasks = sorted(self._tasks.values(), key=lambda t: t.id, reverse=True)
+        self._emit_deleted(removed, "ttl")
         return [t.to_public() for t in tasks]
 
     def delete(self, task_id: int) -> bool:

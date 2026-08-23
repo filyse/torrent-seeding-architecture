@@ -97,6 +97,9 @@ services:
       SEEDING_LOG_JSON: "1"
       # WebSocket (Фаза 7): по умолчанию выключен, текущий SSE/поллинг — fallback.
       SEEDING_WS_ENABLED: ${SEEDING_WS_ENABLED:-0}
+      # Пуш «задача создания удалена» → MPW (топик creator.task.deleted).
+      SEEDING_KAFKA_BOOTSTRAP: ${SEEDING_KAFKA_BOOTSTRAP:-192.168.1.223:9092}
+      SEEDING_KAFKA_TOPIC_CREATOR_DELETED: ${SEEDING_KAFKA_TOPIC_CREATOR_DELETED:-creator.task.deleted}
       # Тестовая загрузка файлов (docs/FILE_UPLOAD.md). По умолчанию выкл.
       SEEDING_UPLOAD_ENABLED: ${SEEDING_UPLOAD_ENABLED:-0}
       SEEDING_UPLOAD_TICKET_SECRET: ${SEEDING_UPLOAD_TICKET_SECRET:-}

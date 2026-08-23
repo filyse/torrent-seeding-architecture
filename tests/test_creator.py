@@ -85,7 +85,10 @@ def test_creator_service_ttl_prunes_on_access(tmp_path):
 
     from seeding_engine.creator import CreateStatus, CreateTask, CreatorService
 
-    svc = CreatorService(task_ttl=1)
+    captured: list[tuple[str, list]] = []
+    svc = CreatorService(
+        task_ttl=1, on_deleted=lambda reason, tasks: captured.append((reason, tasks))
+    )
     try:
         old = CreateTask(
             id=0, source_path="b1/x", name="x", status=CreateStatus.COMPLETED
@@ -94,6 +97,26 @@ def test_creator_service_ttl_prunes_on_access(tmp_path):
         svc._tasks[0] = old
         assert svc.list_all() == []  # прунится при обращении
         assert svc.get(0) is None
+        assert captured
+        assert captured[0][0] == "ttl"
+        assert captured[0][1][0]["id"] == 0
+        assert captured[0][1][0]["source_path"] == "b1/x"
+    finally:
+        svc.shutdown()
+
+
+def test_creator_service_manual_delete_does_not_notify():
+    """Ручной delete() молчит: Kafka публикует оркестратор, иначе deadlock."""
+    from seeding_engine.creator import CreateStatus, CreateTask, CreatorService
+
+    captured: list = []
+    svc = CreatorService(on_deleted=lambda reason, tasks: captured.append(tasks))
+    try:
+        svc._tasks[0] = CreateTask(
+            id=0, source_path="b1/x", name="x", status=CreateStatus.COMPLETED
+        )
+        assert svc.delete(0) is True
+        assert captured == []
     finally:
         svc.shutdown()
 
@@ -275,7 +298,16 @@ def test_creator_list_tasks_aggregates(api_module):
             assert body[0]["id"] == 0
 
 
-def test_creator_delete_task_proxies(api_module):
+def test_creator_delete_task_proxies(api_module, monkeypatch):
+    published: list[tuple] = []
+
+    async def _fake_publish(engine_id, task_id, **kwargs):
+        published.append((engine_id, task_id, kwargs.get("reason")))
+        return True
+
+    monkeypatch.setattr(
+        "seeding_api.routers.creator.publish_creator_deleted_async", _fake_publish
+    )
     with respx.mock(assert_all_called=False) as mock:
         _wire_health(mock)
         route = mock.delete(f"{ENGINE}/internal/v1/creator/tasks/0").mock(
@@ -286,6 +318,56 @@ def test_creator_delete_task_proxies(api_module):
             assert r.status_code == 200, r.text
             assert r.json()["ok"] is True
             assert route.called
+            assert published == [("default", 0, "deleted")]
+
+
+def test_creator_deleted_event_from_engine(api_module, monkeypatch):
+    monkeypatch.setenv("SEEDING_ENGINE_REGISTER_KEY", "test-register")
+    published: list[tuple] = []
+
+    async def _fake_publish(engine_id, task_id, **kwargs):
+        published.append((engine_id, task_id, kwargs.get("reason"), kwargs.get("name")))
+        return True
+
+    monkeypatch.setattr(
+        "seeding_api.routers.creator.publish_creator_deleted_async", _fake_publish
+    )
+    with respx.mock(assert_all_called=False) as mock:
+        _wire_health(mock)
+        with TestClient(api_module.app) as client:
+            r = client.post(
+                "/api/v1/creator/events/deleted",
+                json={
+                    "engine_id": "a1",
+                    "tasks": [
+                        {
+                            "id": 3,
+                            "name": "Show",
+                            "source_path": "a1/Show",
+                            "reason": "ttl",
+                        }
+                    ],
+                },
+                headers={"X-Register-Key": "test-register"},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["published"] == 1
+            assert published == [("a1", 3, "ttl", "Show")]
+            denied = client.post(
+                "/api/v1/creator/events/deleted",
+                json={"engine_id": "a1", "tasks": [{"id": 1}]},
+            )
+            assert denied.status_code == 401
+
+
+def test_creator_deleted_payload_has_composite_key():
+    from seeding_api.kafka_notify import CREATOR_DELETED_EVENT, creator_deleted_payload
+
+    payload = creator_deleted_payload("A1", 0, reason="ttl", name="Show")
+    assert payload["event"] == CREATOR_DELETED_EVENT
+    assert payload["task_key"] == "a1:0"
+    assert payload["engine_id"] == "a1"
+    assert payload["reason"] == "ttl"
 
 
 def test_creator_delete_task_not_found(api_module):

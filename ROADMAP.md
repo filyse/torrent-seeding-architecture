@@ -496,6 +496,10 @@
 - ✅ Лимиты параллели/чанков в «Настройки → Лимиты» (admin, api 1.11.0 / web 1.19.0).
 - ✅ Штамп лимитов по WAN в «Настройки → Лимиты» (api 1.12.0 / web 1.22.0): одно число
   на каждый движок канала, не потолок суммы. `POST /network/links/{id}/limits`.
+- ✅ Creator → MPW: событие `creator.task.deleted` (api 1.13.0, engine 1.3.1).
+  `DELETE /creator/tasks/{engine}/{id}` и TTL-reaper движка публикуют в Kafka
+  `task_key` (`a1:0`). Вкладка MPW снимает строку, готовую очередь не опрашивает.
+  Контракт: [`docs/CREATOR.md`](docs/CREATOR.md).
 
 ---
 

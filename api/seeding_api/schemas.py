@@ -141,6 +141,18 @@ class CreatorSeedIn(BaseModel):
     display_name: str = Field(default="", max_length=512)
 
 
+class CreatorDeletedTaskIn(BaseModel):
+    id: int
+    name: str = ""
+    source_path: str = ""
+    reason: str = "ttl"
+
+
+class CreatorDeletedBatchIn(BaseModel):
+    engine_id: str = Field(..., min_length=1, max_length=64)
+    tasks: list[CreatorDeletedTaskIn] = Field(..., min_length=1)
+
+
 class TorrentPeerOut(BaseModel):
     endpoint: str
     client: str | None = None

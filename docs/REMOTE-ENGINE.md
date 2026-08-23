@@ -54,6 +54,11 @@ docker logs -f <id>-seeding
 
 После регистрации движок появится в выборе целевого движка при переносе раздачи в веб-UI.
 
+TTL задач creator (по умолчанию 24 ч) чистит RAM на движке и сообщает оркестратору
+`POST /api/v1/creator/events/deleted` (тот же `SEEDING_ORCHESTRATOR_URL` и
+`X-Register-Key`). Оркестратор публикует Kafka `creator.task.deleted` — вкладка MPW
+снимает строку. Новых переменных в `.env.engine` для этого нет.
+
 ## Жизненный цикл / выбытие
 
 Движок шлёт heartbeat каждые `SEEDING_ENGINE_HEARTBEAT_INTERVAL` секунд. Если оркестратор не
