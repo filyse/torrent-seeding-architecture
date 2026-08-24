@@ -92,6 +92,15 @@ body.layout-wide #app {
   margin-bottom: 1.5rem;
 }
 
+.app-header__lead {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.app-header__lead .field__hint {
+  margin: 0.2rem 0 0;
+}
+
 .app-header h1 {
   margin: 0;
   font-size: 1.35rem;
@@ -109,7 +118,8 @@ body.layout-wide #app {
 .app-header__actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
   justify-content: flex-end;
   gap: 0.75rem;
 }
@@ -2395,7 +2405,7 @@ input.file-input::file-selector-button:hover {
 
 .wan-tabs {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.15rem;
   padding: 0.15rem;
   border: 1px solid var(--border);

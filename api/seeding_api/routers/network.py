@@ -41,8 +41,9 @@ async def uploaded_history(
     session: DbSession,
     pool: EnginePoolDep,
     period: Literal["day", "week", "month"] = Query("week"),
+    metric: Literal["uploaded", "downloaded"] = Query("uploaded"),
 ):
-    """Объём отдачи за корзину: день (24 часа), неделя (7 дней), месяц (30 дней)."""
+    """Объём отдачи или приёма за корзину: день (24 часа), неделя (7 дней), месяц (30 дней)."""
     all_links = wan_links.links()
     wan_ids = [link.id for link in all_links]
     engine_wan = wan_links.engine_wan_map((spec.id, spec.url) for spec in pool.specs)
@@ -51,6 +52,7 @@ async def uploaded_history(
         now=datetime.now(timezone.utc),
         wan_ids=wan_ids,
         engine_wan=engine_wan,
+        metric=metric,
     )
     return UploadedHistoryOut(
         period=period,

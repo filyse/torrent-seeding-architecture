@@ -312,13 +312,17 @@ async def restore_all_engines(ctx):
 
 
 async def sample_upload_stats(ctx):
-    """Снимок all_time_upload фермы / WAN / движков раз в 15 минут."""
+    """Снимок all_time_upload / all_time_download фермы / WAN / движков раз в 15 минут."""
     specs = await resolve_specs()
     if not specs:
         return {"ok": True, "written": 0, "engines": 0}
     live_stats = await fetch_all_session_stats()
-    live = {
+    live_up = {
         eid: int(st.get("total_uploaded") or 0)
+        for eid, st in live_stats.items()
+    }
+    live_down = {
+        eid: int(st.get("total_downloaded") or 0)
         for eid, st in live_stats.items()
     }
     known = {s.id for s in specs}
@@ -330,18 +334,29 @@ async def sample_upload_stats(ctx):
     try:
         async with sf() as session:
             repo = UploadSampleRepository(session)
-            last = await repo.latest_engine_totals()
-            merged = merge_engine_totals(live, last, known)
-            if not merged:
+            last_up = await repo.latest_engine_totals("uploaded")
+            last_down = await repo.latest_engine_totals("downloaded")
+            merged_up = merge_engine_totals(live_up, last_up, known)
+            merged_down = merge_engine_totals(live_down, last_down, known)
+            if not merged_up:
                 return {"ok": True, "written": 0, "engines": 0}
-            rows = build_sample_rows(datetime.now(timezone.utc), merged, engine_wan)
+            at = datetime.now(timezone.utc)
+            up_rows = build_sample_rows(at, merged_up, engine_wan)
+            down_map = {
+                (scope, sid): val
+                for _, scope, sid, val in build_sample_rows(at, merged_down, engine_wan)
+            }
+            rows = [
+                (t, scope, sid, up, down_map.get((scope, sid)))
+                for t, scope, sid, up in up_rows
+            ]
             written = await repo.insert_many(rows)
             await session.commit()
     finally:
         await eng.dispose()
 
-    log.info("upload sample written=%s live=%s known=%s", written, len(live), len(known))
-    return {"ok": True, "written": written, "engines": len(merged), "live": len(live)}
+    log.info("upload sample written=%s live=%s known=%s", written, len(live_up), len(known))
+    return {"ok": True, "written": written, "engines": len(merged_up), "live": len(live_up)}
 
 
 async def _on_startup(ctx) -> None:

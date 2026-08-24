@@ -7194,8 +7194,9 @@ function takeMiniChart(
   history: UploadedHistory,
   wanId: string,
   engines: string[],
+  verb = "отдано",
 ): HTMLElement {
-  const tag = miniChartTag(history, wanId);
+  const tag = `${miniChartTag(history, wanId)}|${verb}`;
   const prev = cache?.get(wanId);
   if (prev && prev.tag === tag) return prev.wrap;
 
@@ -7209,7 +7210,7 @@ function takeMiniChart(
   wrap.append(
     chartBox,
     el("div", { className: "wan-card__chart-note" }, [
-      `отдано ${periodPhrase(history.period)}: ${fmtBytes(history.total.wan[wanId] ?? 0)}`,
+      `${verb} ${periodPhrase(history.period)}: ${fmtBytes(history.total.wan[wanId] ?? 0)}`,
     ]),
     tip,
   );
@@ -7222,6 +7223,8 @@ function renderUploadedCharts(
   data: NetworkLinksOut,
   history: UploadedHistory,
   cache: Map<string, MiniChartSlot>,
+  title = "Отдача за период",
+  verb = "отдано",
 ): HTMLElement {
   const frame = el("section", { className: "wan-charts" });
   const since = history.first_sampled_at
@@ -7235,7 +7238,7 @@ function renderUploadedCharts(
   frame.append(
     el("div", { className: "wan-charts__head" }, [
       el("div", { className: "wan-charts__title-wrap" }, [
-        el("div", { className: "wan-charts__title" }, ["Отдача за период"]),
+        el("div", { className: "wan-charts__title" }, [title]),
         since ? el("div", { className: "wan-charts__since" }, [since]) : "",
       ]),
       el("div", { className: "wan-charts__sub" }, [periodPhrase(history.period)]),
@@ -7246,7 +7249,7 @@ function renderUploadedCharts(
     const cell = el("div", { className: "wan-charts__cell" });
     cell.append(
       el("div", { className: `wan-charts__wan wan-charts__wan--${link.id}` }, [link.name]),
-      takeMiniChart(cache, history, link.id, link.engines),
+      takeMiniChart(cache, history, link.id, link.engines, verb),
     );
     grid.append(cell);
   }
@@ -7425,7 +7428,7 @@ function mountNetworkShell(root: HTMLElement): void {
     side === "up"
       ? "Отдача в разрезе каналов и движков"
       : side === "down"
-        ? "Скачивание в разрезе каналов и движков (торрент + заливка файлов)"
+        ? "Скачивание в разрезе каналов и движков"
         : side === "uploaded"
           ? "Всего отдано в разрезе каналов и движков"
           : "Отдача фермы за день, неделю и месяц";
@@ -7448,7 +7451,10 @@ function mountNetworkShell(root: HTMLElement): void {
     mkTab("История", "history", setHashNetworkHistory),
   );
   const header = el("header", { className: "app-header" }, [
-    el("div", {}, [el("h1", {}, ["Сеть"]), el("p", { className: "field__hint" }, [hint])]),
+    el("div", { className: "app-header__lead" }, [
+      el("h1", {}, ["Сеть"]),
+      el("p", { className: "field__hint" }, [hint]),
+    ]),
     el("div", { className: "app-header__actions" }, [tabBar, profileControl()]),
   ]);
   const host = el("div", { className: "wan-grid" }, [
@@ -7457,8 +7463,8 @@ function mountNetworkShell(root: HTMLElement): void {
   const historyHost = el("section", { className: "upload-history upload-history--page" });
   historyHost.append(el("p", { className: "wan-note" }, ["Загрузка истории отдачи…"]));
   const chartsHost = el("div", { className: "wan-charts-host" });
-  if (side === "uploaded") {
-    chartsHost.append(el("p", { className: "wan-note" }, ["Загрузка истории отдачи…"]));
+  if (side === "uploaded" || side === "up" || side === "down") {
+    chartsHost.append(el("p", { className: "wan-note" }, ["Загрузка истории…"]));
   }
   const note = el("p", { className: "wan-note" }, [
     side === "up"
@@ -7471,10 +7477,8 @@ function mountNetworkShell(root: HTMLElement): void {
   ]);
   if (side === "history") {
     root.append(back, header, historyHost, note);
-  } else if (side === "uploaded") {
-    root.append(back, header, host, chartsHost, note);
   } else {
-    root.append(back, header, host, note);
+    root.append(back, header, host, chartsHost, note);
   }
 
   let links: NetworkLinksOut | null = null;
@@ -7490,11 +7494,20 @@ function mountNetworkShell(root: HTMLElement): void {
   };
 
   const paintCharts = () => {
-    if (side !== "uploaded" || !links || !lastHistory) return;
-    const tag = `${lastHistory.period}|${lastHistory.last_sampled_at ?? ""}|${lastHistory.buckets.length}`;
+    if (side === "history" || !links || !lastHistory) return;
+    const tag = `${side}|${lastHistory.period}|${lastHistory.last_sampled_at ?? ""}|${lastHistory.buckets.length}`;
     if (chartsHost.dataset.tag === tag && chartsHost.querySelector(".wan-charts")) return;
     chartsHost.dataset.tag = tag;
-    chartsHost.replaceChildren(renderUploadedCharts(links, lastHistory, miniCache));
+    const down = side === "down";
+    chartsHost.replaceChildren(
+      renderUploadedCharts(
+        links,
+        lastHistory,
+        miniCache,
+        down ? "Скачивание за период" : "Отдача за период",
+        down ? "принято" : "отдано",
+      ),
+    );
   };
 
   const paintHistory = () => {
@@ -7602,10 +7615,11 @@ function mountNetworkShell(root: HTMLElement): void {
   };
 
   const loadHistory = async () => {
-    if (side !== "history" && side !== "uploaded") return;
+    if (side !== "history" && side !== "uploaded" && side !== "up" && side !== "down") return;
+    const metric = side === "down" ? "downloaded" : "uploaded";
     try {
       lastHistory = await fetchJson<UploadedHistory>(
-        `/network/uploaded-history?period=${historyPeriod}`,
+        `/network/uploaded-history?period=${historyPeriod}&metric=${metric}`,
       );
     } catch (e) {
       lastHistory = null;
@@ -7636,7 +7650,7 @@ function mountNetworkShell(root: HTMLElement): void {
     }
     if (parseRoute().view !== "network") return;
     paint(lastSessionStats);
-    if (side === "uploaded") void loadHistory();
+    void loadHistory();
 
     const tick = async () => {
       if (parseRoute().view !== "network") return;

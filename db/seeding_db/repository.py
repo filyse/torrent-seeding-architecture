@@ -857,21 +857,24 @@ class UploadSampleRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def insert_many(self, rows: list[SampleRow]) -> int:
-        for sampled_at, scope, scope_id, uploaded in rows:
+    async def insert_many(self, rows: list) -> int:
+        for row in rows:
+            sampled_at, scope, scope_id, uploaded = row[:4]
+            downloaded = row[4] if len(row) > 4 else None
             self._session.add(
                 UploadSample(
                     sampled_at=sampled_at,
                     scope=scope,
                     scope_id=scope_id,
                     uploaded=int(uploaded),
+                    downloaded=None if downloaded is None else int(downloaded),
                 )
             )
         if rows:
             await self._session.flush()
         return len(rows)
 
-    async def latest_engine_totals(self) -> dict[str, int]:
+    async def latest_engine_totals(self, metric: str = "uploaded") -> dict[str, int]:
         """Последний снимок каждого движка — чтобы офлайн не записать как 0."""
         subq = (
             select(UploadSample.scope_id, func.max(UploadSample.sampled_at).label("mx"))
@@ -889,7 +892,17 @@ class UploadSampleRepository:
             )
         )
         result = await self._session.execute(stmt)
-        return {row.scope_id: int(row.uploaded or 0) for row in result.scalars() if row.scope_id}
+        out: dict[str, int] = {}
+        for row in result.scalars():
+            if not row.scope_id:
+                continue
+            if metric == "downloaded":
+                if row.downloaded is None:
+                    continue
+                out[row.scope_id] = int(row.downloaded)
+            else:
+                out[row.scope_id] = int(row.uploaded or 0)
+        return out
 
     async def _engine_samples_since(self, since: datetime) -> list[UploadSample]:
         recent = await self._session.execute(
@@ -921,14 +934,21 @@ class UploadSampleRepository:
         now: datetime,
         wan_ids: list[str],
         engine_wan: dict[str, str],
+        metric: str = "uploaded",
     ) -> UploadHistory:
         _, _buckets, prev_buckets = period_windows(period, now)
         step = prev_buckets[1] - prev_buckets[0] if len(prev_buckets) > 1 else timedelta(hours=1)
         since = prev_buckets[0] - step
         rows = await self._engine_samples_since(since)
-        samples: list[SampleRow] = [
-            (r.sampled_at, r.scope, r.scope_id, int(r.uploaded or 0)) for r in rows
-        ]
+        samples: list[SampleRow] = []
+        for r in rows:
+            if metric == "downloaded":
+                if r.downloaded is None:
+                    continue
+                val = int(r.downloaded)
+            else:
+                val = int(r.uploaded or 0)
+            samples.append((r.sampled_at, r.scope, r.scope_id, val))
         return history_from_samples(samples, period, now, wan_ids, engine_wan)
 
 

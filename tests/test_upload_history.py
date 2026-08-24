@@ -232,3 +232,22 @@ async def test_repository_history_reads_engine_rows(db_session: AsyncSession):
     assert hist.total.farm == 3 * GB
     assert hist.total.wan["wan1"] == 3 * GB
     assert hist.total.wan["wan2"] == 0
+
+
+@pytest.mark.asyncio
+async def test_repository_download_metric_skips_null(db_session: AsyncSession):
+    repo = UploadSampleRepository(db_session)
+    now = ts(2026, 8, 24, 15, 30)
+    await repo.insert_many(build_sample_rows(ts(2026, 8, 24, 10), {"b1": 4 * GB}, {"b1": "wan1"}))
+    await repo.insert_many(
+        [(ts(2026, 8, 24, 14), "engine", "b1", 7 * GB, 2 * GB)],
+    )
+    up = await repo.history(
+        period="day", now=now, wan_ids=["wan1"], engine_wan={"b1": "wan1"}, metric="uploaded"
+    )
+    down = await repo.history(
+        period="day", now=now, wan_ids=["wan1"], engine_wan={"b1": "wan1"}, metric="downloaded"
+    )
+    assert up.total.farm == 3 * GB
+    assert down.total.farm == 0
+    assert down.first_sampled_at == ts(2026, 8, 24, 14)

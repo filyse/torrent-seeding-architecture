@@ -232,3 +232,5 @@ class UploadSample(Base):
     # "" | wan1 | b3
     scope_id: Mapped[str] = mapped_column(String(32), default="")
     uploaded: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    # NULL = сэмпл ещё без приёма (строки до 0016). Не писать 0 — это раздуло бы дельту.
+    downloaded: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
