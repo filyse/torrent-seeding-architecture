@@ -7218,6 +7218,42 @@ function takeMiniChart(
   return wrap;
 }
 
+function renderUploadedCharts(
+  data: NetworkLinksOut,
+  history: UploadedHistory,
+  cache: Map<string, MiniChartSlot>,
+): HTMLElement {
+  const frame = el("section", { className: "wan-charts" });
+  const since = history.first_sampled_at
+    ? `учёт с ${new Date(history.first_sampled_at).toLocaleString("ru-RU", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      })}`
+    : "";
+  frame.append(
+    el("div", { className: "wan-charts__head" }, [
+      el("div", { className: "wan-charts__title-wrap" }, [
+        el("div", { className: "wan-charts__title" }, ["Отдача за период"]),
+        since ? el("div", { className: "wan-charts__since" }, [since]) : "",
+      ]),
+      el("div", { className: "wan-charts__sub" }, [periodPhrase(history.period)]),
+    ]),
+  );
+  const grid = el("div", { className: "wan-charts__grid" });
+  for (const link of data.links) {
+    const cell = el("div", { className: "wan-charts__cell" });
+    cell.append(
+      el("div", { className: `wan-charts__wan wan-charts__wan--${link.id}` }, [link.name]),
+      takeMiniChart(cache, history, link.id, link.engines),
+    );
+    grid.append(cell);
+  }
+  frame.append(grid);
+  return frame;
+}
+
 /** Строка движка внутри карточки канала: скорость или объём, доля внутри канала, пиры, активные. */
 function wanEngineRow(
   id: string,
@@ -7262,8 +7298,6 @@ function wanCard(
   totalRate: number,
   fileInbound: Record<string, number>,
   side: NetworkSide,
-  mini?: { history: UploadedHistory; wanId: string; engines: string[] },
-  miniCache?: Map<string, MiniChartSlot>,
 ): HTMLElement {
   const t = sumEngines(engines, byEngine, fileInbound, side);
   const volume = side === "uploaded";
@@ -7297,10 +7331,6 @@ function wanCard(
     ]),
     rateBlock,
   );
-
-  if (volume && mini) {
-    card.append(takeMiniChart(miniCache, mini.history, mini.wanId, mini.engines));
-  }
 
   if (volume) {
     card.append(
@@ -7346,8 +7376,6 @@ function renderWanCards(
   data: NetworkLinksOut,
   stats: SessionStats | null,
   side: NetworkSide,
-  history: UploadedHistory | null = null,
-  miniCache?: Map<string, MiniChartSlot>,
 ): HTMLElement[] {
   const byEngine = stats?.by_engine ?? {};
   const fileInbound = side === "down" ? fileUploadInboundByEngine() : {};
@@ -7360,7 +7388,6 @@ function renderWanCards(
   for (const [id, bps] of Object.entries(fileInbound)) {
     if (!byEngine[id] || byEngine[id].error) totalRate += bps;
   }
-  const volume = side === "uploaded";
   const cards = data.links.map((l) =>
     wanCard(
       l.name,
@@ -7371,10 +7398,6 @@ function renderWanCards(
       totalRate,
       fileInbound,
       side,
-      volume && history
-        ? { history, wanId: l.id, engines: l.engines }
-        : undefined,
-      miniCache,
     ),
   );
   if (data.unassigned.length) {
@@ -7433,17 +7456,23 @@ function mountNetworkShell(root: HTMLElement): void {
   ]);
   const historyHost = el("section", { className: "upload-history upload-history--page" });
   historyHost.append(el("p", { className: "wan-note" }, ["Загрузка истории отдачи…"]));
+  const chartsHost = el("div", { className: "wan-charts-host" });
+  if (side === "uploaded") {
+    chartsHost.append(el("p", { className: "wan-note" }, ["Загрузка истории отдачи…"]));
+  }
   const note = el("p", { className: "wan-note" }, [
     side === "up"
       ? "Скорости — payload libtorrent, без протокольного оверхеда: фактическая загрузка канала выше на 5–15%."
       : side === "down"
         ? "Торрент — payload libtorrent. «Файлы» — очередь меню «Файл» (браузер → этот движок), тоже входящий трафик на канал. Оверхед протокола не учтён."
         : side === "uploaded"
-          ? "Счётчик — payload libtorrent за текущую инкарнацию на движке (all_time_upload). Совпадает с чипом «Всего отдано» в шапке. В списке раздач колонка «Отдано» — накопитель БД: он переживает перенос, этот экран — нет. График периода — на вкладке «История»; здесь мини-график канала за неделю, наведение на столбик показывает интервал, долю и движки."
+          ? "Счётчик — payload libtorrent за текущую инкарнацию на движке (all_time_upload). Совпадает с чипом «Всего отдано» в шапке. В списке раздач колонка «Отдано» — накопитель БД: он переживает перенос, этот экран — нет. Графики периода — в рамке под карточками; наведение на столбик показывает интервал, долю и движки."
           : "Столбик — дельта за корзину из своих сэмплов (раз в 15 минут), не колонка «Отдано» в списке и не живой накопитель на «Всего отдано».",
   ]);
   if (side === "history") {
     root.append(back, header, historyHost, note);
+  } else if (side === "uploaded") {
+    root.append(back, header, host, chartsHost, note);
   } else {
     root.append(back, header, host, note);
   }
@@ -7457,7 +7486,15 @@ function mountNetworkShell(root: HTMLElement): void {
   const paint = (stats: SessionStats | null) => {
     const now = parseRoute();
     if (now.view !== "network" || now.side !== side || links === null) return;
-    host.replaceChildren(...renderWanCards(links, stats, side, lastHistory, miniCache));
+    host.replaceChildren(...renderWanCards(links, stats, side));
+  };
+
+  const paintCharts = () => {
+    if (side !== "uploaded" || !links || !lastHistory) return;
+    const tag = `${lastHistory.period}|${lastHistory.last_sampled_at ?? ""}|${lastHistory.buckets.length}`;
+    if (chartsHost.dataset.tag === tag && chartsHost.querySelector(".wan-charts")) return;
+    chartsHost.dataset.tag = tag;
+    chartsHost.replaceChildren(renderUploadedCharts(links, lastHistory, miniCache));
   };
 
   const paintHistory = () => {
@@ -7572,15 +7609,16 @@ function mountNetworkShell(root: HTMLElement): void {
       );
     } catch (e) {
       lastHistory = null;
+      const msg = e instanceof Error ? e.message : String(e);
       if (side === "history") {
-        historyHost.replaceChildren(
-          el("p", { className: "wan-note" }, [e instanceof Error ? e.message : String(e)]),
-        );
+        historyHost.replaceChildren(el("p", { className: "wan-note" }, [msg]));
+      } else {
+        chartsHost.replaceChildren(el("p", { className: "wan-note" }, [msg]));
       }
       return;
     }
     if (side === "history") paintHistory();
-    else paint(lastSessionStats);
+    else paintCharts();
   };
 
   void (async () => {

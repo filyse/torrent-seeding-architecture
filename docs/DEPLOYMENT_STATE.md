@@ -232,6 +232,20 @@ bash scripts/deploy-ct400.sh up -d --build web
 Проверка: Ctrl+F5 на `/network/uploaded`; наведение на столбик мини-графика
 показывает интервал и движки; пустые корзины штрихом.
 
+## 7и. Графики в отдельной рамке — 2026-08-24
+
+web **1.28.0**. На «Всего отдано» карточки снова без графика; мини-графики
+ниже, в отдельной рамке. API не трогаем, движки не трогать. Только CT400, `web`:
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Проверка: Ctrl+F5 на `/network/uploaded`; в карточке WAN нет столбиков;
+под сеткой рамка «Отдача за период».
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
