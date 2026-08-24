@@ -136,6 +136,7 @@ class HistoryBucket:
     farm: int
     wan: dict[str, int]
     engines: dict[str, int] = field(default_factory=dict)
+    sampled: bool = False
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,26 @@ class UploadHistory:
     buckets: list[HistoryBucket]
     total: HistoryTotals
     previous_total: HistoryTotals
+    first_sampled_at: datetime | None = None
+    last_sampled_at: datetime | None = None
+
+
+def bucket_is_sampled(
+    t: datetime,
+    step: timedelta,
+    first: datetime | None,
+    last: datetime | None,
+) -> bool:
+    """Корзина пересекается с интервалом [first, last] — есть чем мерить.
+
+    Пустая корзина до первого / после последнего сэмпла — «данных ещё нет»,
+    не «отдали ноль».
+    """
+    if first is None or last is None:
+        return False
+    start = aware(t)
+    end = start + step
+    return aware(first) < end and aware(last) >= start
 
 
 def _group_engine_points(samples: list[SampleRow]) -> dict[str, list[tuple[datetime, int]]]:
@@ -199,8 +220,18 @@ def history_from_samples(
     cur_engines, cur_farm, cur_wan = pack(buckets)
     _prev_engines, prev_farm, prev_wan = pack(prev_buckets)
 
+    sample_times = [aware(t) for t, scope, sid, _ in samples if scope == SCOPE_ENGINE and sid]
+    first = min(sample_times) if sample_times else None
+    last = max(sample_times) if sample_times else None
+
     history_buckets = [
-        HistoryBucket(t=buckets[i], farm=cur_farm[i], wan=cur_wan[i], engines=cur_engines[i])
+        HistoryBucket(
+            t=buckets[i],
+            farm=cur_farm[i],
+            wan=cur_wan[i],
+            engines=cur_engines[i],
+            sampled=bucket_is_sampled(buckets[i], step, first, last),
+        )
         for i in range(len(buckets))
     ]
     return UploadHistory(
@@ -208,4 +239,6 @@ def history_from_samples(
         buckets=history_buckets,
         total=HistoryTotals(farm=sum(cur_farm), wan=_sum_maps(cur_wan, wan_ids)),
         previous_total=HistoryTotals(farm=sum(prev_farm), wan=_sum_maps(prev_wan, wan_ids)),
+        first_sampled_at=first,
+        last_sampled_at=last,
     )

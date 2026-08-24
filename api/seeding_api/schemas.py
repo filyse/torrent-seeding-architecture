@@ -57,6 +57,7 @@ class UploadedHistoryBucket(BaseModel):
     farm: int
     wan: dict[str, int]
     engines: dict[str, int] = Field(default_factory=dict)
+    sampled: bool = False
 
 
 class UploadedHistoryTotals(BaseModel):
@@ -69,6 +70,8 @@ class UploadedHistoryOut(BaseModel):
     buckets: list[UploadedHistoryBucket]
     total: UploadedHistoryTotals
     previous_total: UploadedHistoryTotals
+    first_sampled_at: datetime | None = None
+    last_sampled_at: datetime | None = None
 
 
 class EngineRegistryItem(BaseModel):

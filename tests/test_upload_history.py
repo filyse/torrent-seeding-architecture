@@ -6,6 +6,7 @@ import pytest
 from seeding_db.models import Base
 from seeding_db.repository import UploadSampleRepository
 from seeding_db.upload_history import (
+    bucket_is_sampled,
     build_sample_rows,
     counter_delta,
     history_from_samples,
@@ -159,6 +160,32 @@ def test_history_single_engine_reset_does_not_inflate_other_wan():
     assert hour_11.wan["wan1"] == 2 * GB
     assert hour_11.wan["wan2"] == 1 * GB
     assert hour_11.farm == 3 * GB
+
+
+def test_single_sample_marks_only_that_bucket_sampled():
+    now = ts(2026, 8, 24, 15, 30)
+    hist = history_from_samples(
+        [(ts(2026, 8, 24, 9, 54), "engine", "b1", 10 * GB)],
+        "day",
+        now,
+        wan_ids=["wan1"],
+        engine_wan={"b1": "wan1"},
+    )
+    marked = [b for b in hist.buckets if b.sampled]
+    assert len(marked) == 1
+    assert marked[0].t == ts(2026, 8, 24, 9)
+    assert hist.first_sampled_at == ts(2026, 8, 24, 9, 54)
+    assert all(not b.sampled for b in hist.buckets if b.t != ts(2026, 8, 24, 9))
+
+
+def test_bucket_coverage_between_first_and_last():
+    step = timedelta(hours=1)
+    first = ts(2026, 8, 24, 10, 5)
+    last = ts(2026, 8, 24, 12, 20)
+    assert bucket_is_sampled(ts(2026, 8, 24, 10), step, first, last)
+    assert bucket_is_sampled(ts(2026, 8, 24, 12), step, first, last)
+    assert not bucket_is_sampled(ts(2026, 8, 24, 9), step, first, last)
+    assert not bucket_is_sampled(ts(2026, 8, 24, 13), step, first, last)
 
 
 def test_week_rollup_from_daily_points():

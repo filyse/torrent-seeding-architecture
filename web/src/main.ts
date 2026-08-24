@@ -12,11 +12,16 @@ import {
 } from "./fileUpload";
 import {
   HISTORY_PERIODS,
+  avgUnit,
+  bindFarmHover,
+  bucketRangeLabel,
+  bucketSampled,
   periodPhrase,
   previousPhrase,
   renderFarmChart,
   renderMiniChart,
   wanColor,
+  wanName,
   type HistoryPeriod,
   type UploadedHistory,
 } from "./uploadChart";
@@ -7208,7 +7213,7 @@ function wanCard(
   totalRate: number,
   fileInbound: Record<string, number>,
   side: NetworkSide,
-  mini?: { values: number[]; caption: string; color: string },
+  mini?: { values: number[]; sampled: boolean[]; caption: string; color: string; id: string },
 ): HTMLElement {
   const t = sumEngines(engines, byEngine, fileInbound, side);
   const volume = side === "uploaded";
@@ -7245,7 +7250,7 @@ function wanCard(
 
   if (volume && mini) {
     const chartBox = el("div", { className: "wan-card__chart" });
-    chartBox.append(renderMiniChart(mini.values, mini.color));
+    chartBox.append(renderMiniChart(mini.values, mini.color, mini.sampled, `mini-${mini.id}`));
     card.append(chartBox, el("div", { className: "wan-card__chart-note" }, [mini.caption]));
   }
 
@@ -7320,8 +7325,10 @@ function renderWanCards(
       volume && history
         ? {
             values: history.buckets.map((b) => b.wan[l.id] ?? 0),
+            sampled: history.buckets.map((b) => bucketSampled(b)),
             caption: `отдано ${periodPhrase(history.period)}: ${fmtBytes(history.total.wan[l.id] ?? 0)}`,
             color: wanColor(l.id),
+            id: l.id,
           }
         : undefined,
     ),
@@ -7395,6 +7402,7 @@ function mountNetworkShell(root: HTMLElement): void {
   let links: NetworkLinksOut | null = null;
   let lastHistory: UploadedHistory | null = null;
   let historyPeriod: HistoryPeriod = "week";
+  let unbindFarmHover: (() => void) | null = null;
 
   const paint = (stats: SessionStats | null) => {
     const now = parseRoute();
@@ -7404,6 +7412,8 @@ function mountNetworkShell(root: HTMLElement): void {
 
   const paintHistory = () => {
     if (side !== "uploaded") return;
+    unbindFarmHover?.();
+    unbindFarmHover = null;
     const segs = el("div", { className: "wan-tabs", role: "tablist" });
     for (const p of HISTORY_PERIODS) {
       const btn = el("button", { type: "button", className: "wan-tab", role: "tab" }, [p.label]) as HTMLButtonElement;
@@ -7416,29 +7426,92 @@ function mountNetworkShell(root: HTMLElement): void {
       });
       segs.append(btn);
     }
+    const since = lastHistory?.first_sampled_at
+      ? `учёт с ${new Date(lastHistory.first_sampled_at).toLocaleString("ru-RU", {
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`
+      : "";
     const head = el("div", { className: "upload-history__head" }, [
-      el("div", { className: "upload-history__title" }, ["За период"]),
+      el("div", { className: "upload-history__title-wrap" }, [
+        el("div", { className: "upload-history__title" }, ["Отдача за период"]),
+        since ? el("div", { className: "upload-history__since" }, [since]) : "",
+      ]),
       segs,
     ]);
-    const legend = el("div", { className: "upload-history__legend" }, [
-      el("span", { className: "upload-history__swatch upload-history__swatch--wan1" }, ["WAN1"]),
-      el("span", { className: "upload-history__swatch upload-history__swatch--wan2" }, ["WAN2"]),
-    ]);
-    const chartBox = el("div", { className: "upload-history__chart" });
-    if (lastHistory) chartBox.append(renderFarmChart(lastHistory));
-    const meta = el("div", { className: "upload-history__meta" });
+
+    const stats = el("div", { className: "upload-history__stats" });
+    const wans = el("div", { className: "upload-history__wans" });
+    const facts = el("div", { className: "upload-history__facts" });
     if (lastHistory) {
-      const cur = lastHistory.total.farm;
-      const prev = lastHistory.previous_total.farm;
+      const hist = lastHistory;
+      const cur = hist.total.farm;
+      const prev = hist.previous_total.farm;
+      const hero = el("div", { className: "upload-history__hero" }, [
+        el("div", { className: "upload-history__total" }, [fmtBytes(cur)]),
+        el("div", { className: "upload-history__total-sub" }, [periodPhrase(hist.period)]),
+      ]);
       const cmp =
         prev <= 0
           ? "прошлого периода ещё нет"
-          : `${cur >= prev ? "+" : ""}${(((cur - prev) / prev) * 100).toFixed(0)}% ${previousPhrase(lastHistory.period)}`;
-      meta.append(`${periodPhrase(lastHistory.period)}: ${fmtBytes(cur)} · ${cmp}`);
+          : `${cur >= prev ? "+" : "−"}${fmtBytes(Math.abs(cur - prev))} · ${cur >= prev ? "+" : ""}${(((cur - prev) / prev) * 100).toFixed(0)}% ${previousPhrase(hist.period)}`;
+      hero.append(el("div", { className: "upload-history__cmp" }, [cmp]));
+      stats.append(hero);
+
+      const wanIds = ["wan1", "wan2"].filter((id) => id in hist.total.wan || hist.buckets.some((b) => id in b.wan));
+      const wanBar = el("div", { className: "upload-history__share" });
+      for (const id of wanIds.length ? wanIds : ["wan1", "wan2"]) {
+        const val = hist.total.wan[id] ?? 0;
+        const pct = cur > 0 ? (val / cur) * 100 : 0;
+        const cell = el("div", { className: `upload-history__wan upload-history__wan--${id}` }, [
+          el("div", { className: "upload-history__wan-val" }, [fmtBytes(val)]),
+          el("div", { className: "upload-history__wan-lab" }, [`${wanName(id)} · ${pct.toFixed(0)}%`]),
+        ]);
+        wans.append(cell);
+        const fill = el("span", { className: `upload-history__share-seg upload-history__share-seg--${id}` });
+        fill.style.width = `${Math.max(0, pct)}%`;
+        wanBar.append(fill);
+      }
+      stats.append(wans);
+
+      const covered = hist.buckets.filter(bucketSampled);
+      const peak = covered.reduce<(typeof covered)[0] | null>((acc, b) => (!acc || b.farm > acc.farm ? b : acc), null);
+      const avg = covered.length ? cur / covered.length : 0;
+      const bits: string[] = [];
+      if (peak && peak.farm > 0) {
+        bits.push(`пик ${bucketRangeLabel(peak.t, hist.period)} · ${fmtBytes(peak.farm)}`);
+      }
+      if (covered.length) {
+        bits.push(`среднее ${fmtBytes(avg)}/${avgUnit(hist.period)}`);
+      }
+      const first = hist.first_sampled_at ? new Date(hist.first_sampled_at).getTime() : 0;
+      const last = hist.last_sampled_at ? new Date(hist.last_sampled_at).getTime() : 0;
+      if (cur > 0 && last > first) {
+        bits.push(`${fmtRate(cur / ((last - first) / 1000))} средняя`);
+      }
+      if (!covered.length) bits.push("график заполнится после следующих сэмплов (раз в 15 минут)");
+      facts.append(bits.join(" · ") || "данных ещё нет");
+      stats.append(wanBar);
     } else {
-      meta.append("График заполнится после первых сэмплов (раз в 15 минут).");
+      facts.append("График заполнится после первых сэмплов (раз в 15 минут).");
     }
-    historyHost.replaceChildren(head, legend, chartBox, meta);
+
+    const legend = el("div", { className: "upload-history__legend" }, [
+      el("span", { className: "upload-history__swatch upload-history__swatch--wan1" }, ["WAN1"]),
+      el("span", { className: "upload-history__swatch upload-history__swatch--wan2" }, ["WAN2"]),
+      el("span", { className: "upload-history__swatch upload-history__swatch--empty" }, ["нет данных"]),
+    ]);
+    const chartBox = el("div", { className: "upload-history__chart" });
+    const tip = el("div", { className: "upload-tip" }) as HTMLElement;
+    tip.hidden = true;
+    if (lastHistory) {
+      const svg = renderFarmChart(lastHistory);
+      chartBox.append(svg);
+      unbindFarmHover = bindFarmHover(svg, lastHistory, tip, fmtBytes);
+    }
+    historyHost.replaceChildren(head, stats, legend, chartBox, facts, tip);
   };
 
   const loadHistory = async () => {

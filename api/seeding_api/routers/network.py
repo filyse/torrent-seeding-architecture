@@ -55,13 +55,17 @@ async def uploaded_history(
     return UploadedHistoryOut(
         period=period,
         buckets=[
-            UploadedHistoryBucket(t=b.t, farm=b.farm, wan=b.wan, engines=b.engines)
+            UploadedHistoryBucket(
+                t=b.t, farm=b.farm, wan=b.wan, engines=b.engines, sampled=b.sampled
+            )
             for b in hist.buckets
         ],
         total=UploadedHistoryTotals(farm=hist.total.farm, wan=hist.total.wan),
         previous_total=UploadedHistoryTotals(
             farm=hist.previous_total.farm, wan=hist.previous_total.wan
         ),
+        first_sampled_at=hist.first_sampled_at,
+        last_sampled_at=hist.last_sampled_at,
     )
 
 
