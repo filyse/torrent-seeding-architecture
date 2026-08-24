@@ -261,6 +261,18 @@ bash scripts/deploy-ct400.sh up -d --build api queue_worker web
 Проверка: Ctrl+F5; на `/network/download` кабинет в одной строке с вкладками;
 под карточками рамка графиков. `GET /api/v1/network/uploaded-history?metric=downloaded`.
 
+## 7л. Чипы флагов пиров — 2026-08-24
+
+web **1.30.0**. Только CT400, `web`:
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Проверка: Ctrl+F5; деталь раздачи → Пиры: чипы вместо простыни флагов.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

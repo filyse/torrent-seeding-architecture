@@ -2050,6 +2050,90 @@ function buildDetailsSpoiler(summary: string, inner: HTMLElement): HTMLDetailsEl
   return d;
 }
 
+type PeerFlagTone = "muted" | "accent" | "warn" | "success";
+
+const PEER_FLAG_META: Record<string, { label: string; title: string; tone: PeerFlagTone; hide?: boolean }> = {
+  interesting: { label: "хотим", title: "Нам интересны куски этого пира", tone: "accent" },
+  choked: { label: "нам choke", title: "Пир нас задушил — качать не даёт", tone: "warn" },
+  remote_interested: { label: "хочет", title: "Пир хочет наши куски", tone: "accent" },
+  remote_choked: { label: "мы choke", title: "Мы его задушили — не отдаём", tone: "warn" },
+  supports_extensions: { label: "ext", title: "Есть BEP-10 расширения", tone: "muted", hide: true },
+  local_connection: { label: "исход.", title: "Исходящее соединение — подключились мы", tone: "muted" },
+  handshake: { label: "handshake", title: "Идёт рукопожатие", tone: "muted" },
+  connecting: { label: "коннект", title: "Ещё подключаемся", tone: "muted" },
+  on_parole: { label: "пароль", title: "On parole — проверяем после бана", tone: "warn" },
+  seed: { label: "сид", title: "Пир — сид, у него всё есть", tone: "success" },
+  optimistic_unchoke: { label: "оптим.", title: "Optimistic unchoke", tone: "accent" },
+  snubbed: { label: "snub", title: "Пир нас снубит — куски не отдаёт", tone: "warn" },
+  upload_only: { label: "только ↑", title: "Пир только раздаёт", tone: "success" },
+  endgame_mode: { label: "эндгейм", title: "Режим endgame", tone: "muted" },
+  holepunched: { label: "HP", title: "Holepunch через NAT", tone: "muted" },
+  utp_socket: { label: "uTP", title: "Соединение по uTP", tone: "muted" },
+  ssl_socket: { label: "SSL", title: "SSL-сокет", tone: "muted" },
+  rc4_encrypted: { label: "RC4", title: "Шифрование RC4", tone: "muted" },
+  plaintext_encrypted: { label: "MSE", title: "MSE / plaintext encrypted", tone: "muted", hide: true },
+};
+
+const PEER_SOURCE_BITS: { bit: number; label: string }[] = [
+  { bit: 1, label: "трекер" },
+  { bit: 2, label: "DHT" },
+  { bit: 4, label: "PEX" },
+  { bit: 8, label: "LSD" },
+  { bit: 16, label: "resume" },
+  { bit: 32, label: "вх." },
+];
+
+function fmtPeerClient(raw: string | null): string {
+  if (!raw) return "—";
+  let s = raw.trim();
+  const m = /^b(['"])(.*)\1$/.exec(s);
+  if (m) {
+    s = m[2]
+      .replace(/\\x([0-9a-fA-F]{2})/g, (_, h) => {
+        const n = Number.parseInt(h, 16);
+        return n >= 32 && n < 127 ? String.fromCharCode(n) : "";
+      })
+      .replace(/\\['"]/g, (ch) => ch.slice(1));
+  }
+  s = s.replace(/[\u0000-\u001f]/g, "").trim();
+  return s || "—";
+}
+
+function fmtPeerSource(raw: string | null): string {
+  if (!raw) return "—";
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return raw;
+  const parts = PEER_SOURCE_BITS.filter((s) => n & s.bit).map((s) => s.label);
+  return parts.length ? parts.join(" · ") : raw;
+}
+
+function peerFlagChips(raw: string | null): HTMLElement {
+  const box = el("div", { className: "peer-flags" });
+  if (!raw) {
+    box.append("—");
+    return box;
+  }
+  const names = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const hidden: string[] = [];
+  for (const name of names) {
+    const meta = PEER_FLAG_META[name];
+    if (meta?.hide) {
+      hidden.push(meta.title);
+      continue;
+    }
+    const chip = el("span", { className: `peer-flag peer-flag--${meta?.tone ?? "muted"}` }, [meta?.label ?? name]);
+    chip.title = meta?.title ?? name;
+    box.append(chip);
+  }
+  if (hidden.length) {
+    const more = el("span", { className: "peer-flag peer-flag--muted" }, ["···"]);
+    more.title = hidden.join("\n");
+    box.append(more);
+  }
+  if (!box.childNodes.length) box.append("—");
+  return box;
+}
+
 function buildPeersSpoiler(peers: TorrentPeerOut[], torrentId: number): HTMLDetailsElement {
   const inner = el("div", { className: "details-block__content" });
   if (peers.length === 0) {
@@ -2070,12 +2154,12 @@ function buildPeersSpoiler(peers: TorrentPeerOut[], torrentId: number): HTMLDeta
       p.progress === null || p.progress === undefined ? "—" : `${Math.round(p.progress * 1000) / 10}%`;
     row.append(
       el("td", { className: "peer-table__mono" }, [p.endpoint || "—"]),
-      el("td", {}, [p.client || "—"]),
+      el("td", {}, [fmtPeerClient(p.client)]),
       el("td", { className: "peer-table__num" }, [pct]),
       el("td", { className: "peer-table__num" }, [fmtRate(p.download_rate)]),
       el("td", { className: "peer-table__num" }, [fmtRate(p.upload_rate)]),
-      el("td", { className: "peer-table__flags" }, [p.flags || "—"]),
-      el("td", {}, [p.source || "—"]),
+      el("td", { className: "peer-table__flags" }, [peerFlagChips(p.flags)]),
+      el("td", { className: "peer-table__src" }, [fmtPeerSource(p.source)]),
     );
     body.append(row);
   }

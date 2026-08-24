@@ -1436,10 +1436,50 @@ input.file-input::file-selector-button:hover {
 }
 
 .peer-table__flags {
-  font-size: 0.7rem;
+  max-width: 18rem;
+}
+
+.peer-table__src {
+  white-space: nowrap;
   color: var(--muted);
-  max-width: 8rem;
-  word-break: break-word;
+}
+
+.peer-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+
+.peer-flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  white-space: nowrap;
+  background: rgba(127, 127, 127, 0.12);
+  color: var(--muted);
+}
+
+.peer-flag--accent {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.peer-flag--warn {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
+}
+
+.peer-flag--success {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+
+.peer-flag--muted {
+  background: rgba(127, 127, 127, 0.12);
+  color: var(--muted);
 }
 
 /* —— toast / status —— */
