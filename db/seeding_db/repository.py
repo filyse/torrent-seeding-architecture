@@ -562,6 +562,9 @@ class SessionRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_id(self, session_id: int) -> SessionRecord | None:
+        return await self._session.get(SessionRecord, session_id)
+
     async def delete_by_hash(self, token_hash: str) -> bool:
         row = await self.get_by_hash(token_hash)
         if row is None:
@@ -579,6 +582,14 @@ class SessionRepository:
                 continue
             await self._session.delete(row)
         await self._session.flush()
+
+    async def list_for_user(self, user_id: int) -> list[SessionRecord]:
+        result = await self._session.execute(
+            select(SessionRecord)
+            .where(SessionRecord.user_id == user_id)
+            .order_by(nullslast(SessionRecord.last_used_at.desc()), SessionRecord.id.desc())
+        )
+        return list(result.scalars())
 
     async def touch(self, session_id: int) -> None:
         row = await self._session.get(SessionRecord, session_id)

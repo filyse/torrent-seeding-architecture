@@ -2,7 +2,7 @@
 
 Используйте при приёмке релиза или перед PR, затем кратко занесите результат в `docs/reports/YYYY-MM-DD-qa-agent9.md`.
 
-**Автоматически (без браузера):** из корня проекта `pip install -e "./db[dev]" -e "./api[test]" -e "./engine" && pytest`; фронт: `cd web && npm install && npm run build`. Ожидание pytest: 20 passed, 3 skipped (без compose-интеграции).
+**Автоматически (без браузера):** из корня проекта `pip install -e "./db[dev]" -e "./api[test]" -e "./engine" && pytest -m "not integration"`; фронт: `cd web && npm install && npm run build`. Ожидание pytest: 148 passed, 1 skipped (3 integration отключены).
 
 ## Предусловия
 

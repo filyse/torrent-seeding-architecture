@@ -5,9 +5,14 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from seeding_db.repository import ApiKeyRepository, SessionRepository, UserRepository
+from seeding_db.repository import (
+    ApiKeyRepository,
+    AuditRepository,
+    SessionRepository,
+    UserRepository,
+)
 
 from seeding_api.auth import (
     ROLE_LEVEL,
@@ -33,6 +38,38 @@ def _session_ttl() -> timedelta:
     except ValueError:
         hours = 720
     return timedelta(hours=max(1, hours))
+
+
+def _request_token(request: Request, x_api_key: str | None) -> str:
+    return (x_api_key or request.query_params.get("api_key") or "").strip()
+
+
+def _iso(value) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _session_out(row, *, current: bool) -> dict:
+    return {
+        "id": row.id,
+        "created_at": _iso(row.created_at),
+        "last_used_at": _iso(row.last_used_at),
+        "expires_at": _iso(row.expires_at),
+        "current": current,
+    }
+
+
+def _audit_out(row) -> dict:
+    return {
+        "id": row.id,
+        "created_at": _iso(row.created_at),
+        "actor": row.actor,
+        "role": row.role,
+        "method": row.method,
+        "path": row.path,
+        "status": row.status,
+        "ip": row.ip,
+        "summary": row.summary,
+    }
 
 
 async def _total_admins(session, *, exclude_user_id: int | None = None,
@@ -132,17 +169,32 @@ async def logout(
 
 
 @router.get("/auth/me")
-async def whoami(session: DbSession, principal: Principal = Depends(require_auth)):
+async def whoami(
+    session: DbSession,
+    request: Request,
+    principal: Principal = Depends(require_auth),
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+):
     avatar = ""
+    last_login_at = None
+    expires_at = None
     if principal.source == "session":
         user = await UserRepository(session).get_by_username(principal.name)
         if user is not None:
             avatar = user.avatar or ""
+            last_login_at = _iso(user.last_login_at)
+        token = _request_token(request, x_api_key)
+        if token:
+            srow = await SessionRepository(session).get_by_hash(hash_key(token))
+            if srow is not None:
+                expires_at = _iso(srow.expires_at)
     return {
         "name": principal.name,
         "role": principal.role,
         "source": principal.source,
         "avatar": avatar,
+        "last_login_at": last_login_at,
+        "expires_at": expires_at,
     }
 
 
@@ -201,6 +253,78 @@ async def change_my_password(
     await SessionRepository(session).delete_for_user(user.id, keep_hash=keep)
     await session.commit()
     return {"ok": True}
+
+
+async def _require_session_user(session, principal: Principal):
+    if principal.source != "session":
+        raise HTTPException(
+            status_code=400, detail="сессии доступны только после входа по логину"
+        )
+    user = await UserRepository(session).get_by_username(principal.name)
+    if user is None:
+        raise HTTPException(status_code=404, detail="пользователь не найден")
+    return user
+
+
+@router.get("/auth/me/sessions")
+async def list_my_sessions(
+    session: DbSession,
+    request: Request,
+    principal: Principal = Depends(require_identity),
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+):
+    user = await _require_session_user(session, principal)
+    token = _request_token(request, x_api_key)
+    current_hash = hash_key(token) if token else ""
+    rows = await SessionRepository(session).list_for_user(user.id)
+    return [_session_out(r, current=r.token_hash == current_hash) for r in rows]
+
+
+@router.delete("/auth/me/sessions/{session_id}")
+async def revoke_my_session(
+    session_id: int,
+    session: DbSession,
+    request: Request,
+    principal: Principal = Depends(require_identity),
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+):
+    user = await _require_session_user(session, principal)
+    srepo = SessionRepository(session)
+    row = await srepo.get_by_id(session_id)
+    if row is None or row.user_id != user.id:
+        raise HTTPException(status_code=404, detail="сессия не найдена")
+    token = _request_token(request, x_api_key)
+    if token and row.token_hash == hash_key(token):
+        raise HTTPException(status_code=400, detail="текущую сессию гасите через выход")
+    await srepo.delete_by_hash(row.token_hash)
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/auth/me/sessions/revoke-others")
+async def revoke_other_sessions(
+    session: DbSession,
+    request: Request,
+    principal: Principal = Depends(require_identity),
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+):
+    user = await _require_session_user(session, principal)
+    token = _request_token(request, x_api_key)
+    if not token:
+        raise HTTPException(status_code=400, detail="нет текущей сессии")
+    await SessionRepository(session).delete_for_user(user.id, keep_hash=hash_key(token))
+    await session.commit()
+    return {"ok": True}
+
+
+@router.get("/auth/me/audit")
+async def list_my_audit(
+    session: DbSession,
+    principal: Principal = Depends(require_identity),
+    limit: int = Query(20, ge=1, le=100),
+):
+    rows = await AuditRepository(session).list_recent(limit=limit, actor=principal.name)
+    return [_audit_out(r) for r in rows]
 
 
 @router.post("/auth/key-login")

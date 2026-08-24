@@ -24,7 +24,7 @@
 
 Тема уезжает с Настройки → Информация сюда — иначе снова дубль, как с «Аккаунт».
 
-## API (план реализации)
+## API
 
 - `GET /auth/me` — плюс `last_login_at`, `expires_at` (текущая сессия или `null`).
 - `GET /auth/me/sessions` — список своих сессий, флаг `current`.
@@ -37,11 +37,13 @@
 
 Новой схемы БД нет: таблицы `user_sessions` и `audit_log` уже пишутся.
 
+Версии: web **1.38.0**, api **1.19.0**.
+
 ## Откат
 
-Реализация — **отдельным коммитом** после этой спеки.
+Точка до фичи: `fd704cf` (только спека).
 
-1. Найти хеш: `git log --oneline -20` (сообщение `feat: personal cabinet page`).
+1. `git log --oneline -10` — коммит `feat: add /cabinet page`.
 2. `git revert <хеш>` на `main`, push.
 3. На CT400: `git fetch && git reset --hard origin/main` и
    `bash scripts/deploy-ct400.sh up -d --build api web`.

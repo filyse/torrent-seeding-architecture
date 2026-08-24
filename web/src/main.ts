@@ -321,6 +321,7 @@ type Route =
   | { view: "list" }
   | { view: "detail"; id: number }
   | { view: "settings" }
+  | { view: "cabinet" }
   | { view: "network"; side: NetworkSide };
 type DeleteTorrentChoice = "cancel" | "torrent_only" | "torrent_and_files";
 
@@ -354,7 +355,21 @@ let selectedIds = new Set<number>();
 let selectionChanged: (() => void) | null = null;
 
 type Role = "viewer" | "operator" | "admin";
-type MeOut = { name: string; role: Role; source: string; avatar?: string };
+type MeOut = {
+  name: string;
+  role: Role;
+  source: string;
+  avatar?: string;
+  last_login_at?: string | null;
+  expires_at?: string | null;
+};
+type SessionOut = {
+  id: number;
+  created_at: string | null;
+  last_used_at: string | null;
+  expires_at: string | null;
+  current: boolean;
+};
 let currentRole: Role | null = null;
 let currentMe: MeOut | null = null;
 
@@ -445,6 +460,49 @@ function applyTheme(mode: ThemeMode): void {
   if (mode === "auto") root.removeAttribute("data-theme");
   else root.setAttribute("data-theme", mode);
   lsSet("ui.theme", mode);
+}
+
+function getHistoryPeriod(): HistoryPeriod {
+  const v = lsGet("ui.historyPeriod");
+  return v === "day" || v === "month" ? v : "week";
+}
+
+function setHistoryPeriod(period: HistoryPeriod): void {
+  lsSet("ui.historyPeriod", period);
+}
+
+function currentViewPreset(): "grid" | "list" | "table" {
+  return listView === "table" ? "table" : listDensity === "compact" ? "grid" : "list";
+}
+
+function applyViewPreset(preset: "grid" | "list" | "table"): void {
+  if (preset === "table") listView = "table";
+  else {
+    listView = "cards";
+    listDensity = preset === "grid" ? "compact" : "comfortable";
+    lsSet("ui.density", listDensity);
+  }
+  lsSet("ui.view", listView);
+}
+
+function loginSourceLabel(source: string | undefined): string {
+  if (source === "session") return "по паролю";
+  if (source === "db") return "по ключу";
+  if (source === "env") return "служебный ключ";
+  if (source === "anonymous") return "без входа";
+  return source || "—";
+}
+
+function fmtCabinetWhen(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("ru-RU", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 type DetailSpoilerKey = "files" | "trackers" | "peers" | "meta";
@@ -690,6 +748,7 @@ const ICON_PATHS: Record<string, string> = {
   "log-out":
     '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+  home: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
   key: '<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
 };
 
@@ -1003,6 +1062,12 @@ function paintProfile(host: HTMLElement): void {
     });
     return b;
   };
+  menu.append(
+    item("home", "Кабинет", () => {
+      setHashCabinet();
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    }),
+  );
   if (me.source === "session") {
     menu.append(item("key", "Сменить пароль", () => openPasswordDialog({ kind: "self" })));
   }
@@ -1326,6 +1391,7 @@ function parseRoute(): Route {
   const m = /^\/torrent\/(\d+)\/?$/.exec(path);
   if (m) return { view: "detail", id: Number(m[1]) };
   if (path === "/settings" || path === "/settings/") return { view: "settings" };
+  if (path === "/cabinet" || path === "/cabinet/") return { view: "cabinet" };
   if (path === "/network/download" || path === "/network/download/") {
     return { view: "network", side: "down" };
   }
@@ -1355,6 +1421,10 @@ function setHashDetail(id: number): void {
 
 function setHashSettings(): void {
   pushPath("/settings");
+}
+
+function setHashCabinet(): void {
+  pushPath("/cabinet");
 }
 
 function setHashNetwork(): void {
@@ -7739,7 +7809,7 @@ function mountNetworkShell(root: HTMLElement): void {
 
   let links: NetworkLinksOut | null = null;
   let lastHistory: UploadedHistory | null = null;
-  let historyPeriod: HistoryPeriod = "week";
+  let historyPeriod: HistoryPeriod = getHistoryPeriod();
   let unbindFarmHover: (() => void) | null = null;
   const miniCache = new Map<string, MiniChartSlot>();
 
@@ -7778,6 +7848,7 @@ function mountNetworkShell(root: HTMLElement): void {
       btn.addEventListener("click", () => {
         if (historyPeriod === p.id) return;
         historyPeriod = p.id;
+        setHistoryPeriod(p.id);
         void loadHistory();
       });
       segs.append(btn);
@@ -7929,6 +8000,269 @@ function mountNetworkShell(root: HTMLElement): void {
   })();
 }
 
+function cabinetSeg<T extends string>(
+  options: { id: T; label: string }[],
+  current: T,
+  onPick: (id: T) => void,
+): HTMLElement {
+  const wrap = el("div", { className: "view-switch cabinet-seg", role: "group" });
+  const buttons: { id: T; btn: HTMLButtonElement }[] = [];
+  const paint = (id: T) => {
+    for (const x of buttons) {
+      const on = x.id === id;
+      x.btn.classList.toggle("is-active", on);
+      x.btn.setAttribute("aria-pressed", String(on));
+    }
+  };
+  for (const opt of options) {
+    const btn = el("button", { type: "button", className: "view-switch__btn" }, [opt.label]) as HTMLButtonElement;
+    btn.addEventListener("click", () => {
+      if (opt.id === current) return;
+      current = opt.id;
+      paint(current);
+      onPick(current);
+    });
+    buttons.push({ id: opt.id, btn });
+    wrap.append(btn);
+  }
+  paint(current);
+  return wrap;
+}
+
+function cabinetPrefRow(label: string, control: HTMLElement): HTMLElement {
+  return el("div", { className: "cabinet-pref" }, [
+    el("span", { className: "cabinet-pref__label" }, [label]),
+    control,
+  ]);
+}
+
+function cabinetFact(value: string, label: string): HTMLElement {
+  return el("div", { className: "cabinet-fact" }, [
+    el("div", { className: "cabinet-fact__value" }, [value]),
+    el("div", { className: "cabinet-fact__label" }, [label]),
+  ]);
+}
+
+function mountCabinetShell(root: HTMLElement): void {
+  const me = currentMe;
+  const back = navLink("← Назад к списку", () => setHashList());
+  const header = el("header", { className: "app-header" }, [
+    el("div", {}, [
+      el("h1", {}, ["Кабинет"]),
+      el("p", { className: "field__hint" }, ["Я, привычки этого браузера и этот вход"]),
+    ]),
+    el("div", { className: "app-header__actions" }, [profileControl()]),
+  ]);
+
+  const profile = el("section", { className: "panel" });
+  profile.append(el("div", { className: "panel__head" }, ["Профиль"]));
+  const profileBody = el("div", { className: "panel__body" });
+  if (me) {
+    const who = el("div", { className: "cabinet-who" }, [
+      avatarNode(me.avatar ?? "", me.name, 56),
+      el("div", {}, [
+        el("div", { className: "cabinet-who__name" }, [me.name || "—"]),
+        el("div", { className: "field__hint" }, [ROLE_LABEL[(me.role ?? "viewer") as Role]]),
+      ]),
+    ]);
+    const actions = el("div", { className: "btn-row" });
+    const avaBtn = el("button", { type: "button", className: "btn" }, ["Сменить аватар"]);
+    avaBtn.addEventListener("click", () => openAvatarPicker());
+    actions.append(avaBtn);
+    if (me.source === "session") {
+      const pwBtn = el("button", { type: "button", className: "btn" }, ["Сменить пароль"]);
+      pwBtn.addEventListener("click", () => openPasswordDialog({ kind: "self" }));
+      actions.append(pwBtn);
+    }
+    profileBody.append(who, actions);
+  }
+  profile.append(profileBody);
+
+  const prefs = el("section", { className: "panel" });
+  prefs.append(el("div", { className: "panel__head" }, ["Как мне удобно"]));
+  const prefsBody = el("div", { className: "panel__body cabinet-prefs" });
+  prefsBody.append(
+    cabinetPrefRow(
+      "Тема",
+      cabinetSeg(
+        [
+          { id: "auto", label: "Как в системе" },
+          { id: "light", label: "Светлая" },
+          { id: "dark", label: "Тёмная" },
+        ],
+        getThemeMode(),
+        (id) => applyTheme(id),
+      ),
+    ),
+    cabinetPrefRow(
+      "Список раздач",
+      cabinetSeg(
+        [
+          { id: "grid", label: "Плитка" },
+          { id: "list", label: "Карточки" },
+          { id: "table", label: "Таблица" },
+        ],
+        currentViewPreset(),
+        (id) => applyViewPreset(id),
+      ),
+    ),
+    cabinetPrefRow(
+      "Строк на странице",
+      cabinetSeg(
+        PAGE_SIZES.map((n) => ({ id: String(n), label: String(n) })),
+        String(listPageSize),
+        (id) => {
+          listPageSize = parseInt(id, 10) || 50;
+          lsSet("ui.pageSize", String(listPageSize));
+          listPage = 0;
+        },
+      ),
+    ),
+  );
+  const labelCombo = createLabelCombo({ storageKey: "ui.addLabel" });
+  prefsBody.append(cabinetPrefRow("Метка при добавлении", labelCombo.control));
+  void labelCombo.refresh();
+  prefsBody.append(
+    cabinetPrefRow(
+      "Период графиков",
+      cabinetSeg(
+        HISTORY_PERIODS.map((p) => ({ id: p.id, label: p.label })),
+        getHistoryPeriod(),
+        (id) => setHistoryPeriod(id),
+      ),
+    ),
+  );
+  prefs.append(prefsBody);
+
+  const facts = el("section", { className: "panel" });
+  facts.append(el("div", { className: "panel__head" }, ["Этот вход"]));
+  const factsBody = el("div", { className: "panel__body cabinet-facts" });
+  factsBody.append(
+    cabinetFact(loginSourceLabel(me?.source), "Как вошли"),
+    cabinetFact(fmtCabinetWhen(me?.last_login_at), "Последний вход"),
+    cabinetFact(me?.source === "session" ? fmtCabinetWhen(me.expires_at) : "—", "Этот браузер до"),
+  );
+  facts.append(factsBody);
+
+  const sessions = el("section", { className: "panel" });
+  sessions.append(el("div", { className: "panel__head" }, ["Сессии"]));
+  const sessionsBody = el("div", { className: "panel__body" });
+  const sessionsHint = el("p", { className: "field__hint" }, ["Загрузка…"]);
+  const sessionsList = el("div", { className: "keys-list" });
+  const revokeOthers = el(
+    "button",
+    { type: "button", className: "btn btn--sm" },
+    ["Выйти на всех, кроме этого"],
+  ) as HTMLButtonElement;
+  sessionsBody.append(sessionsHint, sessionsList, revokeOthers);
+  sessions.append(sessionsBody);
+  if (me?.source !== "session") {
+    sessions.hidden = true;
+  }
+
+  const paintSessions = (rows: SessionOut[]) => {
+    sessionsHint.textContent = rows.length
+      ? "Браузер и адрес не пишем — только даты. Текущую гасите через «Выйти»."
+      : "Других сессий нет.";
+    sessionsList.replaceChildren();
+    for (const row of rows) {
+      const title = row.current ? "Этот браузер" : `Сессия №${row.id}`;
+      const sub = [
+        row.last_used_at ? `активность ${fmtCabinetWhen(row.last_used_at)}` : "ещё не использовалась",
+        `до ${fmtCabinetWhen(row.expires_at)}`,
+      ].join(" · ");
+      const meta = el("div", { className: "key-row__meta" }, [
+        el("span", { className: "key-row__name" }, [title]),
+        el("span", { className: "key-row__sub" }, [sub]),
+      ]);
+      const item = el("div", { className: `key-row${row.current ? " key-row--current" : ""}` }, [meta]);
+      if (row.current) {
+        item.append(el("span", { className: "field__hint" }, ["текущая"]));
+      } else {
+        const btn = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["Выйти"]);
+        btn.addEventListener("click", () => void revokeSession(row.id));
+        item.append(btn);
+      }
+      sessionsList.append(item);
+    }
+    revokeOthers.hidden = rows.filter((r) => !r.current).length === 0;
+  };
+
+  const loadSessions = async () => {
+    if (me?.source !== "session") return;
+    try {
+      paintSessions(await fetchJson<SessionOut[]>("/auth/me/sessions"));
+    } catch (e) {
+      sessionsHint.textContent = e instanceof Error ? e.message : String(e);
+    }
+  };
+
+  const revokeSession = async (id: number) => {
+    try {
+      await fetchJson(`/auth/me/sessions/${id}`, { method: "DELETE" });
+      showToast("Сессия погашена");
+      await loadSessions();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    }
+  };
+
+  revokeOthers.addEventListener("click", async () => {
+    revokeOthers.disabled = true;
+    try {
+      await fetchJson("/auth/me/sessions/revoke-others", { method: "POST", body: "{}" });
+      showToast("Остальные сессии погашены");
+      await loadSessions();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      revokeOthers.disabled = false;
+    }
+  });
+
+  const audit = el("section", { className: "panel" });
+  audit.append(el("div", { className: "panel__head" }, ["Мои последние действия"]));
+  const auditBody = el("div", { className: "panel__body" });
+  const auditHint = el("p", { className: "field__hint" }, ["Загрузка…"]);
+  const auditList = el("div", { className: "audit-list" });
+  auditBody.append(auditHint, auditList);
+  audit.append(auditBody);
+
+  const loadAudit = async () => {
+    try {
+      const rows = await fetchJson<AuditItem[]>("/auth/me/audit?limit=20");
+      auditHint.textContent = rows.length ? "Только ваши строки, не весь журнал." : "Пока пусто.";
+      auditList.replaceChildren();
+      for (const r of rows) {
+        auditList.append(
+          el("div", { className: "audit-row" }, [
+            el("span", { className: `audit-status ${auditStatusClass(r.status)}` }, [String(r.status)]),
+            el("div", { className: "audit-row__meta" }, [
+              el("span", { className: "audit-row__summary" }, [r.summary]),
+              el("span", { className: "audit-row__sub" }, [
+                `${fmtCabinetWhen(r.created_at)}${r.ip ? ` · ${r.ip}` : ""}`,
+              ]),
+            ]),
+          ]),
+        );
+      }
+    } catch (e) {
+      auditHint.textContent = e instanceof Error ? e.message : String(e);
+    }
+  };
+
+  const foot = el("div", { className: "btn-row" });
+  const switchBtn = el("button", { type: "button", className: "btn btn--ghost" }, ["Сменить аккаунт"]);
+  switchBtn.addEventListener("click", () => showLoginDialog());
+  const outBtn = el("button", { type: "button", className: "btn btn--ghost" }, ["Выйти"]);
+  outBtn.addEventListener("click", () => void doLogout());
+  foot.append(switchBtn, outBtn);
+
+  root.append(back, header, profile, prefs, facts, sessions, audit, foot);
+  void loadSessions();
+  void loadAudit();
+}
+
 function mountSettingsShell(root: HTMLElement): void {
   const back = navLink("← Назад к списку", () => setHashList());
 
@@ -7942,26 +8276,6 @@ function mountSettingsShell(root: HTMLElement): void {
 
   const statsHost = el("div", { id: "settings-session-host" });
 
-  const themePanel = el("section", { className: "panel" });
-  themePanel.append(el("div", { className: "panel__head" }, ["Внешний вид"]));
-  const themeBody = el("div", { className: "panel__body" });
-  const themeSelect = el("select", { className: "select select--inline" }) as HTMLSelectElement;
-  for (const [val, label] of [
-    ["auto", "Тема: как в системе"],
-    ["light", "Тема: светлая"],
-    ["dark", "Тема: тёмная"],
-  ]) {
-    const o = el("option", { value: val }, [label]) as HTMLOptionElement;
-    if (val === getThemeMode()) o.selected = true;
-    themeSelect.append(o);
-  }
-  themeSelect.addEventListener("change", () => {
-    const v = themeSelect.value;
-    applyTheme(v === "light" || v === "dark" ? v : "auto");
-  });
-  themeBody.append(field("Тема оформления", themeSelect, "Сохраняется в этом браузере"));
-  themePanel.append(themeBody);
-
   const globalLimits = canWrite() ? mountGlobalLimitsPanel() : null;
   if (globalLimits) globalLimits.setAttribute("open", "");
 
@@ -7970,7 +8284,7 @@ function mountSettingsShell(root: HTMLElement): void {
       id: "info",
       label: "Информация",
       visible: true,
-      panels: () => [statsHost, mountAlertsPanel(), mountSystemPanel(), mountHealthPanel(), themePanel],
+      panels: () => [statsHost, mountAlertsPanel(), mountSystemPanel(), mountHealthPanel()],
     },
     {
       id: "users",
@@ -8077,6 +8391,7 @@ function render(): void {
   const route = parseRoute();
   if (route.view === "list") mountListShell(root);
   else if (route.view === "settings") mountSettingsShell(root);
+  else if (route.view === "cabinet") mountCabinetShell(root);
   else if (route.view === "network") mountNetworkShell(root);
   else mountDetailShell(root, route.id);
   root.append(appFooter());
