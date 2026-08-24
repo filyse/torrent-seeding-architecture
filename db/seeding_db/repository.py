@@ -570,11 +570,13 @@ class SessionRepository:
         await self._session.flush()
         return True
 
-    async def delete_for_user(self, user_id: int) -> None:
+    async def delete_for_user(self, user_id: int, *, keep_hash: str | None = None) -> None:
         rows = await self._session.execute(
             select(SessionRecord).where(SessionRecord.user_id == user_id)
         )
         for row in rows.scalars():
+            if keep_hash and row.token_hash == keep_hash:
+                continue
             await self._session.delete(row)
         await self._session.flush()
 

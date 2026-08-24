@@ -17,6 +17,7 @@ from seeding_api.auth import (
     new_session_token,
     require_admin,
     require_auth,
+    require_identity,
     verify_password,
 )
 from seeding_api.deps import DbSession
@@ -150,6 +151,11 @@ class AvatarIn(BaseModel):
     avatar: str = Field(default="", max_length=400_000)
 
 
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    password: str = Field(min_length=6, max_length=256)
+
+
 @router.put("/auth/me/avatar")
 async def set_my_avatar(
     body: AvatarIn, session: DbSession, principal: Principal = Depends(require_auth)
@@ -166,6 +172,35 @@ async def set_my_avatar(
     await repo.set_avatar(user.id, body.avatar)
     await session.commit()
     return {"avatar": body.avatar}
+
+
+@router.put("/auth/me/password")
+async def change_my_password(
+    body: PasswordChangeIn,
+    session: DbSession,
+    request: Request,
+    principal: Principal = Depends(require_identity),
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+):
+    """Сменить свой пароль. Только вход по логину; текущая сессия остаётся."""
+    if principal.source != "session":
+        raise HTTPException(
+            status_code=400, detail="пароль можно сменить только после входа по логину"
+        )
+    repo = UserRepository(session)
+    user = await repo.get_by_username(principal.name)
+    if user is None:
+        raise HTTPException(status_code=404, detail="пользователь не найден")
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="неверный текущий пароль")
+    if body.password == body.current_password:
+        raise HTTPException(status_code=400, detail="новый пароль совпадает со старым")
+    await repo.update(user.id, password_hash=hash_password(body.password))
+    token = (x_api_key or request.query_params.get("api_key") or "").strip()
+    keep = hash_key(token) if token else None
+    await SessionRepository(session).delete_for_user(user.id, keep_hash=keep)
+    await session.commit()
+    return {"ok": True}
 
 
 @router.post("/auth/key-login")

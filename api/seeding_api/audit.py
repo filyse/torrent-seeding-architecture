@@ -25,6 +25,8 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("POST", re.compile(r"^/auth/login$"), "Вход в систему"),
     ("POST", re.compile(r"^/auth/key-login$"), "Вход по API-ключу"),
     ("POST", re.compile(r"^/auth/logout$"), "Выход из системы"),
+    ("PUT", re.compile(r"^/auth/me/avatar$"), "Сменён аватар"),
+    ("PUT", re.compile(r"^/auth/me/password$"), "Сменён свой пароль"),
     ("POST", re.compile(r"^/auth/users$"), "Создан пользователь"),
     ("PATCH", re.compile(r"^/auth/users/(\d+)$"), "Изменён пользователь #{1}"),
     ("DELETE", re.compile(r"^/auth/users/(\d+)$"), "Удалён пользователь #{1}"),

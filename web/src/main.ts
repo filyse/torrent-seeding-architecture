@@ -690,6 +690,7 @@ const ICON_PATHS: Record<string, string> = {
   "log-out":
     '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+  key: '<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
 };
 
 /** Инлайновая SVG-иконка (Feather-стиль), наследует цвет текста кнопки. */
@@ -916,6 +917,22 @@ const ROLE_SHORT: Record<Role, string> = {
   operator: "Оператор",
   admin: "Администратор",
 };
+const ROLE_LABEL: Record<Role, string> = {
+  viewer: "Наблюдатель (только чтение)",
+  operator: "Оператор (управление раздачами)",
+  admin: "Администратор (полный доступ)",
+};
+const ROLE_VALUES: Role[] = ["admin", "operator", "viewer"];
+
+function roleName(role: string | null | undefined): string {
+  if (!role) return "—";
+  return ROLE_SHORT[role as Role] ?? role;
+}
+
+function fillRoleSelect(sel: HTMLSelectElement, selected?: string): void {
+  for (const r of ROLE_VALUES) sel.append(el("option", { value: r }, [ROLE_LABEL[r]]));
+  if (selected) sel.value = selected;
+}
 
 const profileHosts = new Set<HTMLElement>();
 
@@ -986,6 +1003,9 @@ function paintProfile(host: HTMLElement): void {
     });
     return b;
   };
+  if (me.source === "session") {
+    menu.append(item("key", "Сменить пароль", () => openPasswordDialog({ kind: "self" })));
+  }
   menu.append(
     item("user", "Сменить аватар", () => openAvatarPicker()),
     item("swap", "Сменить аккаунт", () => showLoginDialog()),
@@ -1183,6 +1203,120 @@ function openAvatarPicker(): void {
   document.body.append(overlay);
   renderPreview();
   renderGrid();
+}
+
+type PasswordDialogOpts = { kind: "self" } | { kind: "reset"; userId: number; username: string };
+
+function openPasswordDialog(opts: PasswordDialogOpts): void {
+  const overlay = el("div", { className: "modal-overlay" });
+  const dialog = el("div", {
+    className: "modal-dialog",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "password-dialog-title",
+  });
+  const close = (): void => overlay.remove();
+
+  const currentInput = el("input", {
+    type: "password",
+    autocomplete: "current-password",
+  }) as HTMLInputElement;
+  const nextInput = el("input", {
+    type: "password",
+    autocomplete: "new-password",
+  }) as HTMLInputElement;
+  const againInput = el("input", {
+    type: "password",
+    autocomplete: "new-password",
+  }) as HTMLInputElement;
+  const errLine = el("p", { className: "login-error", hidden: "" });
+
+  const title = opts.kind === "self" ? "Сменить пароль" : `Пароль для «${opts.username}»`;
+  const bodyKids: HTMLElement[] = [];
+  if (opts.kind === "self") {
+    bodyKids.push(field("Текущий пароль", currentInput));
+  } else {
+    bodyKids.push(
+      el("p", { className: "field__hint" }, [
+        "Старый пароль не нужен. После смены человеку придётся войти заново.",
+      ]),
+    );
+  }
+  bodyKids.push(
+    field("Новый пароль", nextInput, "Не меньше 6 символов"),
+    field("Ещё раз", againInput),
+    errLine,
+  );
+
+  const saveBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, ["Сохранить"]);
+  const fail = (msg: string): void => {
+    errLine.textContent = msg;
+    errLine.hidden = false;
+  };
+  const submit = async (): Promise<void> => {
+    errLine.hidden = true;
+    const next = nextInput.value;
+    const again = againInput.value;
+    if (next.length < 6) {
+      fail("Новый пароль — минимум 6 символов");
+      return;
+    }
+    if (next !== again) {
+      fail("Новые пароли не совпадают");
+      return;
+    }
+    if (opts.kind === "self") {
+      const current = currentInput.value;
+      if (!current) {
+        fail("Введите текущий пароль");
+        return;
+      }
+      if (next === current) {
+        fail("Новый пароль совпадает со старым");
+        return;
+      }
+    }
+    saveBtn.setAttribute("disabled", "");
+    try {
+      if (opts.kind === "self") {
+        await fetchJson("/auth/me/password", {
+          method: "PUT",
+          body: JSON.stringify({ current_password: currentInput.value, password: next }),
+        });
+        showToast("Пароль обновлён");
+      } else {
+        await fetchJson(`/auth/users/${opts.userId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ password: next }),
+        });
+        showToast(`Пароль для «${opts.username}» обновлён`);
+      }
+      close();
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e));
+      saveBtn.removeAttribute("disabled");
+    }
+  };
+  saveBtn.addEventListener("click", () => void submit());
+  for (const inp of [currentInput, nextInput, againInput]) {
+    inp.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") void submit();
+    });
+  }
+  const cancelBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Отмена"]);
+  cancelBtn.addEventListener("click", close);
+
+  dialog.append(
+    modalHead(title, "password-dialog-title", close),
+    el("div", { className: "modal-body" }, bodyKids),
+    el("div", { className: "modal-actions" }, [cancelBtn, saveBtn]),
+  );
+  overlay.append(dialog);
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) close();
+  });
+  document.body.append(overlay);
+  (opts.kind === "self" ? currentInput : nextInput).focus();
 }
 
 // Роутинг через History API (чистые пути, без "#"). nginx отдаёт index.html на любой путь
@@ -5570,12 +5704,6 @@ function mountHealthPanel(): HTMLElement {
   return panel;
 }
 
-const ROLE_LABEL: Record<Role, string> = {
-  viewer: "Наблюдатель (только чтение)",
-  operator: "Оператор (управление раздачами)",
-  admin: "Администратор (полный доступ)",
-};
-
 async function loadMe(): Promise<void> {
   try {
     const me = await fetchJson<MeOut>("/auth/me");
@@ -6235,6 +6363,11 @@ function mountAccountPanel(): HTMLElement {
   });
   const changeBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Сменить аккаунт"]);
   changeBtn.addEventListener("click", () => showLoginDialog());
+  if (currentMe?.source === "session") {
+    const pwBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Сменить пароль"]);
+    pwBtn.addEventListener("click", () => openPasswordDialog({ kind: "self" }));
+    btnRow.append(pwBtn);
+  }
   btnRow.append(logoutBtn, changeBtn);
   body.append(btnRow);
   panel.append(body);
@@ -6248,13 +6381,7 @@ function mountApiKeysPanel(): HTMLElement {
 
   const nameInput = el("input", { type: "text", placeholder: "Название (напр. «ноутбук»)" }) as HTMLInputElement;
   const roleSelect = el("select", { className: "select" }) as HTMLSelectElement;
-  for (const [val, label] of [
-    ["admin", "admin — полный доступ"],
-    ["operator", "operator — управление раздачами"],
-    ["viewer", "viewer — только чтение"],
-  ]) {
-    roleSelect.append(el("option", { value: val }, [label]));
-  }
+  fillRoleSelect(roleSelect);
   const createBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Создать ключ"]);
   const list = el("div", { className: "keys-list" });
 
@@ -6281,7 +6408,7 @@ function mountApiKeysPanel(): HTMLElement {
         const meta = el("div", { className: "key-row__meta" }, [
           el("span", { className: "key-row__name" }, [k.name || "(без названия)"]),
           el("span", { className: "key-row__sub" }, [
-            `${k.prefix}… · ${k.role}${k.enabled ? "" : " · выключен"}${
+            `${k.prefix}… · ${roleName(k.role)}${k.enabled ? "" : " · выключен"}${
               k.last_used_at ? ` · использован ${new Date(k.last_used_at).toLocaleDateString("ru-RU")}` : ""
             }`,
           ]),
@@ -6363,14 +6490,7 @@ function mountUsersPanel(): HTMLElement {
   const nameInput = el("input", { type: "text", placeholder: "имя пользователя" }) as HTMLInputElement;
   const passInput = el("input", { type: "password", placeholder: "пароль (мин. 6)" }) as HTMLInputElement;
   const roleSelect = el("select", { className: "select" }) as HTMLSelectElement;
-  for (const [val, label] of [
-    ["admin", "admin — полный доступ"],
-    ["operator", "operator — управление раздачами"],
-    ["viewer", "viewer — только чтение"],
-  ]) {
-    roleSelect.append(el("option", { value: val }, [label]));
-  }
-  roleSelect.value = "operator";
+  fillRoleSelect(roleSelect, "operator");
   const createBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Добавить"]);
   const list = el("div", { className: "keys-list" });
 
@@ -6390,17 +6510,16 @@ function mountUsersPanel(): HTMLElement {
             u.protected ? el("span", { className: "key-row__tag" }, ["основной"]) : "",
           ]),
           el("span", { className: "key-row__sub" }, [
-            `${u.role}${u.enabled ? "" : " · выключен"}${
+            `${roleName(u.role)}${u.enabled ? "" : " · выключен"}${
               u.last_login_at ? ` · вход ${new Date(u.last_login_at).toLocaleDateString("ru-RU")}` : ""
             }`,
           ]),
         ]);
         const roleControl: HTMLElement = u.protected
-          ? el("span", { className: "role-static" }, ["admin"])
+          ? el("span", { className: "role-static" }, [roleName("admin")])
           : (() => {
               const roleSel = el("select", { className: "select select--sm" }) as HTMLSelectElement;
-              for (const r of ["admin", "operator", "viewer"]) roleSel.append(el("option", { value: r }, [r]));
-              roleSel.value = u.role;
+              fillRoleSelect(roleSel, u.role);
               roleSel.addEventListener("change", async () => {
                 try {
                   await fetchJson(`/auth/users/${u.id}`, {
@@ -6415,18 +6534,8 @@ function mountUsersPanel(): HTMLElement {
               return roleSel;
             })();
         const pwBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Пароль"]);
-        pwBtn.addEventListener("click", async () => {
-          const np = window.prompt(`Новый пароль для «${u.username}» (мин. 6):`);
-          if (!np) return;
-          try {
-            await fetchJson(`/auth/users/${u.id}`, {
-              method: "PATCH",
-              body: JSON.stringify({ password: np }),
-            });
-            showToast("Пароль обновлён");
-          } catch (e) {
-            showToast(e instanceof Error ? e.message : String(e), true);
-          }
+        pwBtn.addEventListener("click", () => {
+          openPasswordDialog({ kind: "reset", userId: u.id, username: u.username });
         });
         const toggle = el("button", { type: "button", className: "btn btn--sm" }, [
           u.enabled ? "Выключить" : "Включить",

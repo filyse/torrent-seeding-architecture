@@ -162,6 +162,18 @@ async def require_auth(
     return principal
 
 
+async def require_identity(
+    request: Request,
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+) -> Principal:
+    """Любая валидная учётка, без проверки роли по методу (свой пароль, профиль)."""
+    principal = await resolve_principal(request, _extract_key(request, x_api_key))
+    if principal is None:
+        raise HTTPException(status_code=401, detail="invalid or missing API key")
+    request.state.principal = principal
+    return principal
+
+
 async def require_admin(
     request: Request,
     x_api_key: str | None = Header(None, alias="X-API-Key"),

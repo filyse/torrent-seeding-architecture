@@ -309,6 +309,18 @@ bash scripts/deploy-ct400.sh up -d --build web
 
 Проверка: Ctrl+F5; деталь → Пиры: «трекер · вошёл», адрес без переноса порта.
 
+## 7п. Свой пароль и русские роли — 2026-08-24
+
+web **1.34.0**, api **1.18.0**. CT400, `api` + `web` (движки не трогать):
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build api web
+```
+
+Проверка: Ctrl+F5; профиль → «Сменить пароль»; в Пользователях роли по-русски.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
