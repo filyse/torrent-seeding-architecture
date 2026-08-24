@@ -131,6 +131,22 @@ async def fetch_all_runtime() -> dict[str, list[dict]]:
     return out
 
 
+async def fetch_all_session_stats() -> dict[str, dict]:
+    """session/stats keyed by engine_id. Недоступный движок пропускаем."""
+    out: dict[str, dict] = {}
+    for spec in await resolve_specs():
+        try:
+            async with make_engine_client(spec.url, 15.0) as client:
+                r = await client.get(f"{spec.url.rstrip('/')}/internal/v1/session/stats")
+                r.raise_for_status()
+                data = r.json()
+                if isinstance(data, dict) and not data.get("error"):
+                    out[spec.id] = data
+        except httpx.HTTPError:
+            continue
+    return out
+
+
 async def check_all_engines_health() -> dict:
     results: dict[str, dict] = {}
     for spec in await resolve_specs():

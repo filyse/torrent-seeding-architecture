@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, Index, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -210,3 +210,25 @@ class AppSetting(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UploadSample(Base):
+    """Снимок накопителя отдачи для графиков /network/uploaded.
+
+    `uploaded` — тот же накопитель, что чип «Всего отдано»: сумма all_time_upload
+    по движку в момент сэмпла. Пишет queue-воркер раз в 15 минут. Дельту за корзину
+    (час/день) считает чтение, не запись.
+    """
+
+    __tablename__ = "upload_samples"
+    __table_args__ = (
+        Index("ix_upload_samples_scope_at", "scope", "scope_id", "sampled_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    sampled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    # farm | wan | engine
+    scope: Mapped[str] = mapped_column(String(16))
+    # "" | wan1 | b3
+    scope_id: Mapped[str] = mapped_column(String(32), default="")
+    uploaded: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")

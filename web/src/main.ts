@@ -10,6 +10,16 @@ import {
   uploadFeatureEnabled,
   type FileUploadDeps,
 } from "./fileUpload";
+import {
+  HISTORY_PERIODS,
+  periodPhrase,
+  previousPhrase,
+  renderFarmChart,
+  renderMiniChart,
+  wanColor,
+  type HistoryPeriod,
+  type UploadedHistory,
+} from "./uploadChart";
 import { WEB_VERSION } from "./version";
 import { onWsUnavailable, wsAvailable, wsSubscribe } from "./ws";
 
@@ -7198,6 +7208,7 @@ function wanCard(
   totalRate: number,
   fileInbound: Record<string, number>,
   side: NetworkSide,
+  mini?: { values: number[]; caption: string; color: string },
 ): HTMLElement {
   const t = sumEngines(engines, byEngine, fileInbound, side);
   const volume = side === "uploaded";
@@ -7231,6 +7242,12 @@ function wanCard(
     ]),
     rateBlock,
   );
+
+  if (volume && mini) {
+    const chartBox = el("div", { className: "wan-card__chart" });
+    chartBox.append(renderMiniChart(mini.values, mini.color));
+    card.append(chartBox, el("div", { className: "wan-card__chart-note" }, [mini.caption]));
+  }
 
   if (volume) {
     card.append(
@@ -7276,6 +7293,7 @@ function renderWanCards(
   data: NetworkLinksOut,
   stats: SessionStats | null,
   side: NetworkSide,
+  history: UploadedHistory | null = null,
 ): HTMLElement[] {
   const byEngine = stats?.by_engine ?? {};
   const fileInbound = side === "down" ? fileUploadInboundByEngine() : {};
@@ -7288,6 +7306,7 @@ function renderWanCards(
   for (const [id, bps] of Object.entries(fileInbound)) {
     if (!byEngine[id] || byEngine[id].error) totalRate += bps;
   }
+  const volume = side === "uploaded";
   const cards = data.links.map((l) =>
     wanCard(
       l.name,
@@ -7298,6 +7317,13 @@ function renderWanCards(
       totalRate,
       fileInbound,
       side,
+      volume && history
+        ? {
+            values: history.buckets.map((b) => b.wan[l.id] ?? 0),
+            caption: `отдано ${periodPhrase(history.period)}: ${fmtBytes(history.total.wan[l.id] ?? 0)}`,
+            color: wanColor(l.id),
+          }
+        : undefined,
     ),
   );
   if (data.unassigned.length) {
@@ -7351,21 +7377,84 @@ function mountNetworkShell(root: HTMLElement): void {
   const host = el("div", { className: "wan-grid" }, [
     el("p", { className: "wan-note" }, ["Загрузка карты каналов…"]),
   ]);
+  const historyHost = el("section", { className: "upload-history" });
+  historyHost.append(el("p", { className: "wan-note" }, ["Загрузка истории отдачи…"]));
   const note = el("p", { className: "wan-note" }, [
     side === "up"
       ? "Скорости — payload libtorrent, без протокольного оверхеда: фактическая загрузка канала выше на 5–15%."
       : side === "down"
         ? "Торрент — payload libtorrent. «Файлы» — очередь меню «Файл» (браузер → этот движок), тоже входящий трафик на канал. Оверхед протокола не учтён."
-        : "Счётчик — payload libtorrent за текущую инкарнацию на движке (all_time_upload). Совпадает с чипом «Всего отдано» в шапке. В списке раздач колонка «Отдано» — накопитель БД: он переживает перенос, этот экран — нет.",
+        : "Счётчик — payload libtorrent за текущую инкарнацию на движке (all_time_upload). Совпадает с чипом «Всего отдано» в шапке. В списке раздач колонка «Отдано» — накопитель БД: он переживает перенос, этот экран — нет. График — дельта за корзину из своих сэмплов, не колонка «Отдано».",
   ]);
-  root.append(back, header, host, note);
+  if (side === "uploaded") {
+    root.append(back, header, historyHost, host, note);
+  } else {
+    root.append(back, header, host, note);
+  }
 
   let links: NetworkLinksOut | null = null;
+  let lastHistory: UploadedHistory | null = null;
+  let historyPeriod: HistoryPeriod = "week";
 
   const paint = (stats: SessionStats | null) => {
     const now = parseRoute();
     if (now.view !== "network" || now.side !== side || links === null) return;
-    host.replaceChildren(...renderWanCards(links, stats, side));
+    host.replaceChildren(...renderWanCards(links, stats, side, lastHistory));
+  };
+
+  const paintHistory = () => {
+    if (side !== "uploaded") return;
+    const segs = el("div", { className: "wan-tabs", role: "tablist" });
+    for (const p of HISTORY_PERIODS) {
+      const btn = el("button", { type: "button", className: "wan-tab", role: "tab" }, [p.label]) as HTMLButtonElement;
+      btn.classList.toggle("is-active", historyPeriod === p.id);
+      btn.setAttribute("aria-selected", historyPeriod === p.id ? "true" : "false");
+      btn.addEventListener("click", () => {
+        if (historyPeriod === p.id) return;
+        historyPeriod = p.id;
+        void loadHistory();
+      });
+      segs.append(btn);
+    }
+    const head = el("div", { className: "upload-history__head" }, [
+      el("div", { className: "upload-history__title" }, ["За период"]),
+      segs,
+    ]);
+    const legend = el("div", { className: "upload-history__legend" }, [
+      el("span", { className: "upload-history__swatch upload-history__swatch--wan1" }, ["WAN1"]),
+      el("span", { className: "upload-history__swatch upload-history__swatch--wan2" }, ["WAN2"]),
+    ]);
+    const chartBox = el("div", { className: "upload-history__chart" });
+    if (lastHistory) chartBox.append(renderFarmChart(lastHistory));
+    const meta = el("div", { className: "upload-history__meta" });
+    if (lastHistory) {
+      const cur = lastHistory.total.farm;
+      const prev = lastHistory.previous_total.farm;
+      const cmp =
+        prev <= 0
+          ? "прошлого периода ещё нет"
+          : `${cur >= prev ? "+" : ""}${(((cur - prev) / prev) * 100).toFixed(0)}% ${previousPhrase(lastHistory.period)}`;
+      meta.append(`${periodPhrase(lastHistory.period)}: ${fmtBytes(cur)} · ${cmp}`);
+    } else {
+      meta.append("График заполнится после первых сэмплов (раз в 15 минут).");
+    }
+    historyHost.replaceChildren(head, legend, chartBox, meta);
+  };
+
+  const loadHistory = async () => {
+    if (side !== "uploaded") return;
+    try {
+      lastHistory = await fetchJson<UploadedHistory>(
+        `/network/uploaded-history?period=${historyPeriod}`,
+      );
+    } catch (e) {
+      historyHost.replaceChildren(
+        el("p", { className: "wan-note" }, [e instanceof Error ? e.message : String(e)]),
+      );
+      return;
+    }
+    paintHistory();
+    paint(lastSessionStats);
   };
 
   void (async () => {
@@ -7379,6 +7468,7 @@ function mountNetworkShell(root: HTMLElement): void {
     }
     if (parseRoute().view !== "network") return;
     paint(lastSessionStats);
+    if (side === "uploaded") void loadHistory();
 
     const tick = async () => {
       if (parseRoute().view !== "network") return;

@@ -2008,6 +2008,90 @@ input.file-input::file-selector-button:hover {
   margin-bottom: 0.75rem;
 }
 
+.upload-history {
+  margin-bottom: 0.75rem;
+  padding: 0.9rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.upload-history__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.55rem;
+}
+
+.upload-history__title {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.upload-history__legend {
+  display: flex;
+  gap: 0.9rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.upload-history__swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.upload-history__swatch::before {
+  content: "";
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 2px;
+}
+
+.upload-history__swatch--wan1::before {
+  background: var(--accent);
+}
+
+.upload-history__swatch--wan2::before {
+  background: var(--success);
+}
+
+.upload-history__chart {
+  width: 100%;
+  height: 160px;
+}
+
+.upload-history__chart svg,
+.wan-card__chart svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.upload-chart__tick {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.upload-history__meta {
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.wan-card__chart {
+  height: 56px;
+}
+
+.wan-card__chart-note {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 .wan-card {
   display: flex;
   flex-direction: column;

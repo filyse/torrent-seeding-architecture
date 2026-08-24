@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
@@ -9,14 +10,17 @@ from arq import cron
 from arq.connections import RedisSettings
 from seeding_db.config import get_database_url
 from seeding_db.models import TorrentStatus
-from seeding_db.repository import QuotaRepository, TorrentRepository
+from seeding_db.repository import QuotaRepository, TorrentRepository, UploadSampleRepository
 from seeding_db.session import create_engine, create_session_factory
 from seeding_db.status_from_runtime import status_from_runtime
+from seeding_db.upload_history import build_sample_rows, merge_engine_totals
+from seeding_db.wan_links import engine_wan_map
 
 from seeding_queue.engine_util import (
     check_all_engines_health,
     engine_url,
     fetch_all_runtime,
+    fetch_all_session_stats,
     make_engine_client,
     resolve_specs,
 )
@@ -307,6 +311,39 @@ async def restore_all_engines(ctx):
     return {"ok": True, "engines": list(results)}
 
 
+async def sample_upload_stats(ctx):
+    """Снимок all_time_upload фермы / WAN / движков раз в 15 минут."""
+    specs = await resolve_specs()
+    if not specs:
+        return {"ok": True, "written": 0, "engines": 0}
+    live_stats = await fetch_all_session_stats()
+    live = {
+        eid: int(st.get("total_uploaded") or 0)
+        for eid, st in live_stats.items()
+    }
+    known = {s.id for s in specs}
+    engine_wan = engine_wan_map((s.id, s.url) for s in specs)
+
+    db_url = get_database_url()
+    eng = create_engine(db_url)
+    sf = create_session_factory(eng)
+    try:
+        async with sf() as session:
+            repo = UploadSampleRepository(session)
+            last = await repo.latest_engine_totals()
+            merged = merge_engine_totals(live, last, known)
+            if not merged:
+                return {"ok": True, "written": 0, "engines": 0}
+            rows = build_sample_rows(datetime.now(timezone.utc), merged, engine_wan)
+            written = await repo.insert_many(rows)
+            await session.commit()
+    finally:
+        await eng.dispose()
+
+    log.info("upload sample written=%s live=%s known=%s", written, len(live), len(known))
+    return {"ok": True, "written": written, "engines": len(merged), "live": len(live)}
+
+
 async def _on_startup(ctx) -> None:
     setup_logging("queue")
 
@@ -317,11 +354,15 @@ class WorkerSettings:
         noop_report,
         check_engine_health,
         sync_runtime_to_db,
+        sample_upload_stats,
         bulk_register_engine,
         restore_engine,
         restore_all_engines,
     ]
-    cron_jobs = [cron(sync_runtime_to_db, minute=set(range(0, 60, 2)), run_at_startup=True)]
+    cron_jobs = [
+        cron(sync_runtime_to_db, minute=set(range(0, 60, 2)), run_at_startup=True),
+        cron(sample_upload_stats, minute={0, 15, 30, 45}, run_at_startup=True),
+    ]
     redis_settings = _redis_settings()
     max_jobs = 8
     # Чаще пишем health-key в Redis, чтобы дашборд видел свежую «живость» воркера

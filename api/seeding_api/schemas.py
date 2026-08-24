@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -49,6 +50,25 @@ class WanLimitsOut(BaseModel):
     saved: int
     download_limit: int | None = None
     upload_limit: int | None = None
+
+
+class UploadedHistoryBucket(BaseModel):
+    t: datetime
+    farm: int
+    wan: dict[str, int]
+    engines: dict[str, int] = Field(default_factory=dict)
+
+
+class UploadedHistoryTotals(BaseModel):
+    farm: int
+    wan: dict[str, int]
+
+
+class UploadedHistoryOut(BaseModel):
+    period: Literal["day", "week", "month"]
+    buckets: list[UploadedHistoryBucket]
+    total: UploadedHistoryTotals
+    previous_total: UploadedHistoryTotals
 
 
 class EngineRegistryItem(BaseModel):

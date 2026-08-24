@@ -16,7 +16,14 @@ from seeding_db.models import (
     TorrentMeter,
     TorrentRecord,
     TorrentStatus,
+    UploadSample,
     UserRecord,
+)
+from seeding_db.upload_history import (
+    SampleRow,
+    UploadHistory,
+    history_from_samples,
+    period_windows,
 )
 
 
@@ -842,6 +849,87 @@ class EngineRepository:
         if row is not None:
             row.last_seen = datetime.now(timezone.utc)
             await self._session.flush()
+
+
+class UploadSampleRepository:
+    """Снимки накопителя отдачи и rollup для /network/uploaded."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def insert_many(self, rows: list[SampleRow]) -> int:
+        for sampled_at, scope, scope_id, uploaded in rows:
+            self._session.add(
+                UploadSample(
+                    sampled_at=sampled_at,
+                    scope=scope,
+                    scope_id=scope_id,
+                    uploaded=int(uploaded),
+                )
+            )
+        if rows:
+            await self._session.flush()
+        return len(rows)
+
+    async def latest_engine_totals(self) -> dict[str, int]:
+        """Последний снимок каждого движка — чтобы офлайн не записать как 0."""
+        subq = (
+            select(UploadSample.scope_id, func.max(UploadSample.sampled_at).label("mx"))
+            .where(UploadSample.scope == "engine")
+            .group_by(UploadSample.scope_id)
+            .subquery()
+        )
+        stmt = (
+            select(UploadSample)
+            .join(
+                subq,
+                (UploadSample.scope == "engine")
+                & (UploadSample.scope_id == subq.c.scope_id)
+                & (UploadSample.sampled_at == subq.c.mx),
+            )
+        )
+        result = await self._session.execute(stmt)
+        return {row.scope_id: int(row.uploaded or 0) for row in result.scalars() if row.scope_id}
+
+    async def _engine_samples_since(self, since: datetime) -> list[UploadSample]:
+        recent = await self._session.execute(
+            select(UploadSample)
+            .where(UploadSample.scope == "engine", UploadSample.sampled_at >= since)
+            .order_by(UploadSample.sampled_at)
+        )
+        rows = list(recent.scalars())
+        baseline_sub = (
+            select(UploadSample.scope_id, func.max(UploadSample.sampled_at).label("mx"))
+            .where(UploadSample.scope == "engine", UploadSample.sampled_at < since)
+            .group_by(UploadSample.scope_id)
+            .subquery()
+        )
+        baselines = await self._session.execute(
+            select(UploadSample).join(
+                baseline_sub,
+                (UploadSample.scope == "engine")
+                & (UploadSample.scope_id == baseline_sub.c.scope_id)
+                & (UploadSample.sampled_at == baseline_sub.c.mx),
+            )
+        )
+        return list(baselines.scalars()) + rows
+
+    async def history(
+        self,
+        *,
+        period: str,
+        now: datetime,
+        wan_ids: list[str],
+        engine_wan: dict[str, str],
+    ) -> UploadHistory:
+        _, _buckets, prev_buckets = period_windows(period, now)
+        step = prev_buckets[1] - prev_buckets[0] if len(prev_buckets) > 1 else timedelta(hours=1)
+        since = prev_buckets[0] - step
+        rows = await self._engine_samples_since(since)
+        samples: list[SampleRow] = [
+            (r.sampled_at, r.scope, r.scope_id, int(r.uploaded or 0)) for r in rows
+        ]
+        return history_from_samples(samples, period, now, wan_ids, engine_wan)
 
 
 class SettingsRepository:

@@ -5,22 +5,64 @@
 `GET /session/stats`, SSE `/stream`, WS-канал `stats`), поэтому этот эндпоинт не
 опрашивает движки и вызывается один раз при открытии экрана.
 
+`GET /network/uploaded-history` — дельты отдачи за корзину (час/день) из
+`upload_samples`. Фронт дельты не считает.
+
 `POST /network/links/{id}/limits` — штамп тех же постоянных лимитов на все движки
 канала (не потолок суммы).
 """
 
-from fastapi import APIRouter, HTTPException
+from datetime import datetime, timezone
+from typing import Literal
+
+from fastapi import APIRouter, HTTPException, Query
+from seeding_db.repository import UploadSampleRepository
 
 from seeding_api import wan_links
 from seeding_api.deps import DbSession, EnginePoolDep
 from seeding_api.routers.engines import persist_and_apply_engine_limits
-from seeding_api.schemas import EngineLimitsIn, WanLimitsOut
+from seeding_api.schemas import (
+    EngineLimitsIn,
+    UploadedHistoryBucket,
+    UploadedHistoryOut,
+    UploadedHistoryTotals,
+    WanLimitsOut,
+)
 
 router = APIRouter(tags=["network"])
 
 
 def _engine_pairs(pool) -> list[tuple[str, str]]:
     return [(spec.id, spec.url) for spec in sorted(pool.specs, key=lambda s: s.id)]
+
+
+@router.get("/network/uploaded-history", response_model=UploadedHistoryOut)
+async def uploaded_history(
+    session: DbSession,
+    pool: EnginePoolDep,
+    period: Literal["day", "week", "month"] = Query("week"),
+):
+    """Объём отдачи за корзину: день (24 часа), неделя (7 дней), месяц (30 дней)."""
+    all_links = wan_links.links()
+    wan_ids = [link.id for link in all_links]
+    engine_wan = wan_links.engine_wan_map((spec.id, spec.url) for spec in pool.specs)
+    hist = await UploadSampleRepository(session).history(
+        period=period,
+        now=datetime.now(timezone.utc),
+        wan_ids=wan_ids,
+        engine_wan=engine_wan,
+    )
+    return UploadedHistoryOut(
+        period=period,
+        buckets=[
+            UploadedHistoryBucket(t=b.t, farm=b.farm, wan=b.wan, engines=b.engines)
+            for b in hist.buckets
+        ],
+        total=UploadedHistoryTotals(farm=hist.total.farm, wan=hist.total.wan),
+        previous_total=UploadedHistoryTotals(
+            farm=hist.previous_total.farm, wan=hist.previous_total.wan
+        ),
+    )
 
 
 @router.get("/network/links")
