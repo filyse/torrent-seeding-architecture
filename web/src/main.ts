@@ -2158,13 +2158,13 @@ const PEER_FLAG_META: Record<string, { label: string; title: string; tone: PeerF
   },
 };
 
-const PEER_SOURCE_BITS: { bit: number; label: string }[] = [
-  { bit: 1, label: "с трекера" },
-  { bit: 2, label: "нашёлся сам" },
-  { bit: 4, label: "от других" },
-  { bit: 8, label: "в домашней сети" },
-  { bit: 16, label: "из прошлого раза" },
-  { bit: 32, label: "он пришёл" },
+const PEER_SOURCE_BITS: { bit: number; label: string; title: string }[] = [
+  { bit: 1, label: "трекер", title: "Адрес пришёл с трекера" },
+  { bit: 2, label: "сам", title: "Нашёлся сам, через DHT" },
+  { bit: 4, label: "соседи", title: "Узнали от других пиров" },
+  { bit: 8, label: "дом", title: "В домашней сети" },
+  { bit: 16, label: "помнил", title: "Был в прошлый раз" },
+  { bit: 32, label: "вошёл", title: "Он подключился сам" },
 ];
 
 function fmtPeerClient(raw: string | null): string {
@@ -2183,12 +2183,13 @@ function fmtPeerClient(raw: string | null): string {
   return s || "—";
 }
 
-function fmtPeerSource(raw: string | null): string {
-  if (!raw) return "—";
+function fmtPeerSource(raw: string | null): { text: string; title: string } {
+  if (!raw) return { text: "—", title: "" };
   const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return raw;
-  const parts = PEER_SOURCE_BITS.filter((s) => n & s.bit).map((s) => s.label);
-  return parts.length ? parts.join(" · ") : raw;
+  if (!Number.isFinite(n) || n <= 0) return { text: raw, title: "" };
+  const hits = PEER_SOURCE_BITS.filter((s) => n & s.bit);
+  if (!hits.length) return { text: raw, title: "" };
+  return { text: hits.map((s) => s.label).join(" · "), title: hits.map((s) => s.title).join("\n") };
 }
 
 function peerFlagChips(raw: string | null, downBps = 0, upBps = 0): HTMLElement {
@@ -2251,8 +2252,11 @@ function buildPeersSpoiler(peers: TorrentPeerOut[], torrentId: number): HTMLDeta
     const row = el("tr");
     const pct =
       p.progress === null || p.progress === undefined ? "—" : `${Math.round(p.progress * 1000) / 10}%`;
+    const src = fmtPeerSource(p.source);
+    const srcTd = el("td", { className: "peer-table__src" }, [src.text]);
+    if (src.title) srcTd.title = src.title;
     row.append(
-      el("td", { className: "peer-table__mono" }, [p.endpoint || "—"]),
+      el("td", { className: "peer-table__mono peer-table__addr" }, [p.endpoint || "—"]),
       el("td", {}, [fmtPeerClient(p.client)]),
       el("td", { className: "peer-table__num" }, [pct]),
       el("td", { className: "peer-table__num" }, [fmtRate(p.download_rate)]),
@@ -2260,7 +2264,7 @@ function buildPeersSpoiler(peers: TorrentPeerOut[], torrentId: number): HTMLDeta
       el("td", { className: "peer-table__flags" }, [
         peerFlagChips(p.flags, p.download_rate ?? 0, p.upload_rate ?? 0),
       ]),
-      el("td", { className: "peer-table__src" }, [fmtPeerSource(p.source)]),
+      srcTd,
     );
     body.append(row);
   }

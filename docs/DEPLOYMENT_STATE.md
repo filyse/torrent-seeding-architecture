@@ -297,6 +297,18 @@ bash scripts/deploy-ct400.sh up -d --build web
 
 Проверка: Ctrl+F5; деталь → Пиры: при ↑ > 0 нет чипа «очередь»; одно слово на чип.
 
+## 7о. Короткие источники пиров — 2026-08-24
+
+web **1.33.0**. Только CT400, `web`:
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Проверка: Ctrl+F5; деталь → Пиры: «трекер · вошёл», адрес без переноса порта.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

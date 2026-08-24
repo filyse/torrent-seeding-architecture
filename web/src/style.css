@@ -1431,6 +1431,12 @@ input.file-input::file-selector-button:hover {
   word-break: break-all;
 }
 
+.peer-table__addr {
+  white-space: nowrap;
+  word-break: normal;
+  width: 1%;
+}
+
 .peer-table__num {
   white-space: nowrap;
 }
@@ -1441,6 +1447,7 @@ input.file-input::file-selector-button:hover {
 
 .peer-table__src {
   white-space: nowrap;
+  width: 1%;
   color: var(--muted);
 }
 
