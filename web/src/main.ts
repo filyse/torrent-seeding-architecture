@@ -2053,34 +2053,112 @@ function buildDetailsSpoiler(summary: string, inner: HTMLElement): HTMLDetailsEl
 type PeerFlagTone = "muted" | "accent" | "warn" | "success";
 
 const PEER_FLAG_META: Record<string, { label: string; title: string; tone: PeerFlagTone; hide?: boolean }> = {
-  interesting: { label: "хотим", title: "Нам интересны куски этого пира", tone: "accent" },
-  choked: { label: "нам choke", title: "Пир нас задушил — качать не даёт", tone: "warn" },
-  remote_interested: { label: "хочет", title: "Пир хочет наши куски", tone: "accent" },
-  remote_choked: { label: "мы choke", title: "Мы его задушили — не отдаём", tone: "warn" },
-  supports_extensions: { label: "ext", title: "Есть BEP-10 расширения", tone: "muted", hide: true },
-  local_connection: { label: "исход.", title: "Исходящее соединение — подключились мы", tone: "muted" },
-  handshake: { label: "handshake", title: "Идёт рукопожатие", tone: "muted" },
-  connecting: { label: "коннект", title: "Ещё подключаемся", tone: "muted" },
-  on_parole: { label: "пароль", title: "On parole — проверяем после бана", tone: "warn" },
-  seed: { label: "сид", title: "Пир — сид, у него всё есть", tone: "success" },
-  optimistic_unchoke: { label: "оптим.", title: "Optimistic unchoke", tone: "accent" },
-  snubbed: { label: "snub", title: "Пир нас снубит — куски не отдаёт", tone: "warn" },
-  upload_only: { label: "только ↑", title: "Пир только раздаёт", tone: "success" },
-  endgame_mode: { label: "эндгейм", title: "Режим endgame", tone: "muted" },
-  holepunched: { label: "HP", title: "Holepunch через NAT", tone: "muted" },
-  utp_socket: { label: "uTP", title: "Соединение по uTP", tone: "muted" },
-  ssl_socket: { label: "SSL", title: "SSL-сокет", tone: "muted" },
-  rc4_encrypted: { label: "RC4", title: "Шифрование RC4", tone: "muted" },
-  plaintext_encrypted: { label: "MSE", title: "MSE / plaintext encrypted", tone: "muted", hide: true },
+  interesting: {
+    label: "нужен нам",
+    title: "У него есть части фильма, которых у нас ещё нет",
+    tone: "accent",
+  },
+  choked: {
+    label: "нам не даёт",
+    title: "Сейчас он нам ничего не отправляет. Так бывает: очередь, лимит или он сам качает",
+    tone: "warn",
+  },
+  remote_interested: {
+    label: "нужен ему",
+    title: "Ему нужны наши части — он хочет качать у нас",
+    tone: "accent",
+  },
+  remote_choked: {
+    label: "не отдаём",
+    title: "Мы ему сейчас ничего не отправляем. Обычно из‑за очереди или лимита отдачи",
+    tone: "warn",
+  },
+  supports_extensions: {
+    label: "расш.",
+    title: "Обычные дополнительные возможности протокола. На скорость не влияет — просто «умеет как все»",
+    tone: "muted",
+    hide: true,
+  },
+  local_connection: {
+    label: "мы сами",
+    title: "Соединение открыли мы, а не он",
+    tone: "muted",
+  },
+  handshake: {
+    label: "знакомимся",
+    title: "Только договариваемся о соединении, обмен ещё не пошёл",
+    tone: "muted",
+  },
+  connecting: {
+    label: "подключаем",
+    title: "Ещё звоним — связи пока нет",
+    tone: "muted",
+  },
+  on_parole: {
+    label: "на проверке",
+    title: "Раньше вёл себя плохо. Даём ещё один шанс, смотрим, начнёт ли отдавать",
+    tone: "warn",
+  },
+  seed: {
+    label: "всё есть",
+    title: "У него уже вся раздача — качать ему нечего, только отдаёт",
+    tone: "success",
+  },
+  optimistic_unchoke: {
+    label: "пробуем",
+    title: "Даём ему немного отдачи вне очереди — вдруг качает быстрее остальных",
+    tone: "accent",
+  },
+  snubbed: {
+    label: "молчит",
+    title: "Давно ничего не присылает, хотя должен. Почти бесполезен",
+    tone: "warn",
+  },
+  upload_only: {
+    label: "только отдаёт",
+    title: "Сам уже ничего не качает, только раздаёт другим",
+    tone: "success",
+  },
+  endgame_mode: {
+    label: "добиваем",
+    title: "Осталось совсем мало — докачиваем последние куски сразу с нескольких",
+    tone: "muted",
+  },
+  holepunched: {
+    label: "через роутер",
+    title: "Пробили соединение через роутер, хотя снаружи нас не было видно",
+    tone: "muted",
+  },
+  utp_socket: {
+    label: "мягкий канал",
+    title: "Соединение, которое меньше мешает обычному интернету в доме",
+    tone: "muted",
+  },
+  ssl_socket: {
+    label: "защита",
+    title: "Соединение закрыто от посторонних",
+    tone: "muted",
+  },
+  rc4_encrypted: {
+    label: "шифр",
+    title: "Трафик шифруется — провайдеру сложнее его резать",
+    tone: "muted",
+  },
+  plaintext_encrypted: {
+    label: "шифр",
+    title: "Есть защита соединения от помех провайдера. На скорость почти не влияет",
+    tone: "muted",
+    hide: true,
+  },
 };
 
 const PEER_SOURCE_BITS: { bit: number; label: string }[] = [
-  { bit: 1, label: "трекер" },
-  { bit: 2, label: "DHT" },
-  { bit: 4, label: "PEX" },
-  { bit: 8, label: "LSD" },
-  { bit: 16, label: "resume" },
-  { bit: 32, label: "вх." },
+  { bit: 1, label: "с трекера" },
+  { bit: 2, label: "нашёлся сам" },
+  { bit: 4, label: "от других" },
+  { bit: 8, label: "в домашней сети" },
+  { bit: 16, label: "из прошлого раза" },
+  { bit: 32, label: "он пришёл" },
 ];
 
 function fmtPeerClient(raw: string | null): string {
@@ -2144,7 +2222,7 @@ function buildPeersSpoiler(peers: TorrentPeerOut[], torrentId: number): HTMLDeta
   }
   const table = el("table", { className: "peer-table" });
   const headRow = el("tr");
-  for (const label of ["Адрес", "Клиент", "%", "↓", "↑", "Флаги", "Источник"]) {
+  for (const label of ["Адрес", "Клиент", "%", "↓", "↑", "Состояние", "Откуда"]) {
     headRow.append(el("th", {}, [label]));
   }
   const body = el("tbody");
