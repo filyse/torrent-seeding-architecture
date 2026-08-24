@@ -8051,7 +8051,6 @@ function mountCabinetShell(root: HTMLElement): void {
       el("h1", {}, ["Кабинет"]),
       el("p", { className: "field__hint" }, ["Я, привычки этого браузера и этот вход"]),
     ]),
-    el("div", { className: "app-header__actions" }, [profileControl()]),
   ]);
 
   const profile = el("section", { className: "panel" });

@@ -370,6 +370,18 @@ bash scripts/deploy-ct400.sh up -d --build api web
 Проверка: Ctrl+F5; профиль → «Кабинет»; `/cabinet` после F5 не 404;
 Настройки → Информация без темы. Откат: `docs/CABINET.md`.
 
+## 7ф. Кабинет без шапочного профиля — 2026-08-25
+
+web **1.39.0**. Только CT400, `web`:
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Проверка: Ctrl+F5 `/cabinet` — справа в шапке нет аватара.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
