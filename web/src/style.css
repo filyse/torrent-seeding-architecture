@@ -3323,13 +3323,6 @@ input.file-input::file-selector-button:hover {
 }
 
 /* ---- Аккаунт / API-ключи (Фаза 5) ---- */
-.account-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.6rem;
-  font-weight: 600;
-}
 .login-input {
   width: 100%;
 }

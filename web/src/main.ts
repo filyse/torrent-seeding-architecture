@@ -6324,56 +6324,6 @@ function showLoginDialog(): void {
   userInput.focus();
 }
 
-function mountAccountPanel(): HTMLElement {
-  const panel = el("section", { className: "panel" });
-  panel.append(el("div", { className: "panel__head" }, ["Аккаунт"]));
-  const body = el("div", { className: "panel__body" });
-  const role = currentRole ?? "viewer";
-  const who =
-    currentMe && currentMe.source === "session"
-      ? `${currentMe.name} · ${ROLE_LABEL[role]}`
-      : currentMe
-        ? ROLE_LABEL[role]
-        : "Не авторизован";
-  body.append(
-    el("div", { className: "account-row" }, [
-      el("span", { className: "health-dot health-dot--ok" }),
-      el("span", {}, [who]),
-    ]),
-  );
-  if (currentMe?.source === "anonymous") {
-    body.append(
-      el("p", { className: "field__hint" }, [
-        "Учётных данных ещё нет — доступ открыт. Создайте пользователя или admin-ключ ниже, чтобы включить защиту.",
-      ]),
-    );
-  }
-  const btnRow = el("div", { className: "btn-row" });
-  const logoutBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Выйти"]);
-  logoutBtn.addEventListener("click", async () => {
-    try {
-      await fetchJson("/auth/logout", { method: "POST" });
-    } catch {
-      /* ignore */
-    }
-    setApiKey("");
-    currentMe = null;
-    currentRole = null;
-    showLoginDialog();
-  });
-  const changeBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Сменить аккаунт"]);
-  changeBtn.addEventListener("click", () => showLoginDialog());
-  if (currentMe?.source === "session") {
-    const pwBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Сменить пароль"]);
-    pwBtn.addEventListener("click", () => openPasswordDialog({ kind: "self" }));
-    btnRow.append(pwBtn);
-  }
-  btnRow.append(logoutBtn, changeBtn);
-  body.append(btnRow);
-  panel.append(body);
-  return panel;
-}
-
 function mountApiKeysPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   panel.append(el("div", { className: "panel__head" }, ["API-ключи и доступ"]));
@@ -8025,12 +7975,8 @@ function mountSettingsShell(root: HTMLElement): void {
     {
       id: "users",
       label: "Пользователи",
-      visible: true,
-      panels: () => {
-        const out = [mountAccountPanel()];
-        if (isAdmin()) out.push(mountUsersPanel(), mountApiKeysPanel());
-        return out;
-      },
+      visible: isAdmin(),
+      panels: () => [mountUsersPanel(), mountApiKeysPanel()],
     },
     {
       id: "limits",

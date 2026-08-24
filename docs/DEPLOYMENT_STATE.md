@@ -345,6 +345,18 @@ bash scripts/deploy-ct400.sh up -d --build web
 
 Проверка: Ctrl+F5 `/network/uploaded` — наведение на столбик сразу показывает полную карточку.
 
+## 7т. Без дубля «Аккаунт» — 2026-08-24
+
+web **1.37.0**. Только CT400, `web`:
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Проверка: Ctrl+F5; Настройки → нет панели «Аккаунт»; «Пользователи» только у admin.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
