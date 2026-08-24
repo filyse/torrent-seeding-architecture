@@ -399,7 +399,7 @@ const SORT_VALUES = [
   "progress",
 ] as const;
 type ListSort = (typeof SORT_VALUES)[number];
-const STATE_VALUES = ["", "active", "peers", "idle", "incomplete", "error"] as const;
+const STATE_VALUES = ["", "active", "peers", "idle", "incomplete", "migrating", "error"] as const;
 type ListState = (typeof STATE_VALUES)[number];
 type ListDensity = "comfortable" | "compact";
 type ListView = "cards" | "table";
@@ -3896,6 +3896,7 @@ function mountListShell(root: HTMLElement): void {
     ["peers", "Есть пиры"],
     ["idle", "Простаивают"],
     ["incomplete", "Незавершённые"],
+    ["migrating", "Переносящиеся"],
     ["error", "С ошибкой"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
@@ -4384,6 +4385,7 @@ function mountListShell(root: HTMLElement): void {
     peers: "Есть пиры",
     idle: "Простаивают",
     incomplete: "Незавершённые",
+    migrating: "Переносящиеся",
     error: "С ошибкой",
   };
   const makeChip = (text: string, onRemove: () => void): HTMLElement => {

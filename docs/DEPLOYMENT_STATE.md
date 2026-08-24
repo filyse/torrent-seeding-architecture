@@ -171,6 +171,20 @@ bash scripts/deploy-ct400.sh up -d --build api
 Проверка: `GET /api/v1/health`; в контейнере api есть `SEEDING_KAFKA_BOOTSTRAP`;
 `DELETE /api/v1/creator/tasks/{engine}/{id}` → в топике сообщение с `task_key`.
 
+## 7д. Фильтр «Переносящиеся» — 2026-08-24
+
+web **1.23.0**, api **1.14.0**. В «Фильтры → Состояние» пункт для раздач
+со статусом `migrating`. Движки не трогать. Только CT400, `api` + `web`:
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build api web
+```
+
+Проверка: Ctrl+F5; в поповере есть «Переносящиеся»;
+`GET /api/v1/torrents?state=migrating` и `facets.states.migrating`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

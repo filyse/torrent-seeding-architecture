@@ -53,6 +53,33 @@ async def test_repository_list_for_engine_restore(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_list_page_and_facets_migrating_state(db_session: AsyncSession):
+    repo = TorrentRepository(db_session)
+    seeding = await repo.create(
+        display_name="live",
+        save_path="/p",
+        magnet_uri="magnet:?xt=urn:btih:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        status=TorrentStatus.seeding.value,
+    )
+    moving = await repo.create(
+        display_name="move",
+        save_path="/p",
+        magnet_uri="magnet:?xt=urn:btih:ffffffffffffffffffffffffffffffffffffffff",
+        status=TorrentStatus.migrating.value,
+    )
+    await db_session.commit()
+
+    rows, total = await repo.list_page(state="migrating")
+    assert total == 1
+    assert [row.id for row in rows] == [moving.id]
+    assert seeding.id not in {row.id for row in rows}
+
+    facets = await repo.facets()
+    assert facets["states"]["migrating"] == 1
+    assert facets["statuses"].get(TorrentStatus.migrating.value) == 1
+
+
+@pytest.mark.asyncio
 async def test_repository_delete(db_session: AsyncSession):
     repo = TorrentRepository(db_session)
     row = await repo.create(

@@ -122,6 +122,8 @@ class TorrentRepository:
             conds.append(TorrentRecord.progress < 1.0)
         elif state == "error":
             conds.append(TorrentRecord.status == TorrentStatus.error.value)
+        elif state == "migrating":
+            conds.append(TorrentRecord.status == TorrentStatus.migrating.value)
 
         count_stmt = select(func.count()).select_from(TorrentRecord)
         page_stmt = select(TorrentRecord)
@@ -183,6 +185,7 @@ class TorrentRepository:
         Состояния считаются по тем же условиям, что и фильтр в list_page (по снимку рантайма)."""
         seeding = TorrentStatus.seeding.value
         error = TorrentStatus.error.value
+        migrating = TorrentStatus.migrating.value
 
         status_rows = (
             await self._session.execute(
@@ -208,7 +211,7 @@ class TorrentRepository:
             )
         ).all()
         # Все состояния одним запросом через агрегаты с FILTER.
-        total, total_size, active, peers, idle, incomplete, err = (
+        total, total_size, active, peers, idle, incomplete, err, moving = (
             await self._session.execute(
                 select(
                     func.count(),
@@ -222,6 +225,7 @@ class TorrentRepository:
                     ),
                     func.count().filter(TorrentRecord.progress < 1.0),
                     func.count().filter(TorrentRecord.status == error),
+                    func.count().filter(TorrentRecord.status == migrating),
                 )
             )
         ).one()
@@ -239,6 +243,7 @@ class TorrentRepository:
                 "idle": int(idle),
                 "incomplete": int(incomplete),
                 "error": int(err),
+                "migrating": int(moving),
             },
         }
 
