@@ -357,6 +357,12 @@ bash scripts/deploy-ct400.sh up -d --build web
 
 Проверка: Ctrl+F5; Настройки → нет панели «Аккаунт»; «Пользователи» только у admin.
 
+## 7у. Кабинет — план 2026-08-25
+
+Спека [`CABINET.md`](CABINET.md) уже в git. Кода ещё нет: страница появится
+следующим коммитом `feat: personal cabinet page` (web 1.38 / api 1.19, CT400
+`api` + `web`). Если лишнее — `git revert` того коммита, движки не трогать.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

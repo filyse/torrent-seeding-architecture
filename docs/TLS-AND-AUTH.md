@@ -44,6 +44,10 @@ curl -H "X-API-Key: sk_..." https://<host>/api/v1/torrents
   ключ: заголовок `X-API-Key: ses_…`. `POST /api/v1/auth/logout` гасит текущую сессию.
 - `PUT /api/v1/auth/me/password` `{current_password, password}` — сменить свой пароль
   (только вход по логину). Текущая сессия остаётся, остальные гасятся.
+- Кабинет `/cabinet` (спека [`CABINET.md`](CABINET.md), ещё не в коде):
+  `GET /auth/me` дополнит `last_login_at` и `expires_at`;
+  `GET/DELETE /auth/me/sessions`, `POST /auth/me/sessions/revoke-others`;
+  `GET /auth/me/audit` — свои строки, не весь журнал.
 - Управление пользователями (только `admin`): Настройки → «Пользователи» или
   `/api/v1/auth/users` (CRUD). Смена роли/пароля и блокировка инвалидируют активные сессии.
 - Защита от блокировки: нельзя удалить/разжаловать последнего администратора — при подсчёте
