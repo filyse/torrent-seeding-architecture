@@ -321,6 +321,18 @@ bash scripts/deploy-ct400.sh up -d --build api web
 
 Проверка: Ctrl+F5; профиль → «Сменить пароль»; в Пользователях роли по-русски.
 
+## 7р. Цвета WAN в карточках — 2026-08-24
+
+web **1.35.0**. Только CT400, `web`:
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Проверка: Ctrl+F5 `/network/uploaded` — полоски WAN2 зелёные; подписи мини-графиков без цвета.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

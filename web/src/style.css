@@ -2388,14 +2388,7 @@ input.file-input::file-selector-button:hover {
   font-size: 0.85rem;
   font-weight: 700;
   margin-bottom: 0.35rem;
-}
-
-.wan-charts__wan--wan1 {
-  color: var(--accent);
-}
-
-.wan-charts__wan--wan2 {
-  color: var(--success);
+  color: var(--text);
 }
 
 .wan-card__mini {
@@ -2508,6 +2501,9 @@ input.file-input::file-selector-button:hover {
 
 .wan-meter__fill--accent {
   background: var(--accent);
+}
+.wan-meter__fill--wan2 {
+  background: var(--success);
 }
 .wan-meter__fill--warn {
   background: #f5a524;

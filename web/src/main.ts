@@ -7469,7 +7469,11 @@ function sumEngines(
   return acc;
 }
 
-function meterRow(pct: number, tone: "accent" | "warn" | "danger"): HTMLElement {
+function channelBarTone(wanId: string): "accent" | "wan2" {
+  return wanId === "wan2" ? "wan2" : "accent";
+}
+
+function meterRow(pct: number, tone: "accent" | "wan2" | "warn" | "danger"): HTMLElement {
   const fill = el("span", { className: `wan-meter__fill wan-meter__fill--${tone}` });
   fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
   return el("span", { className: "wan-meter" }, [fill]);
@@ -7546,7 +7550,7 @@ function renderUploadedCharts(
   for (const link of data.links) {
     const cell = el("div", { className: "wan-charts__cell" });
     cell.append(
-      el("div", { className: `wan-charts__wan wan-charts__wan--${link.id}` }, [link.name]),
+      el("div", { className: "wan-charts__wan" }, [link.name]),
       takeMiniChart(cache, history, link.id, link.engines, verb),
     );
     grid.append(cell);
@@ -7562,6 +7566,7 @@ function wanEngineRow(
   linkRate: number,
   fileBps: number,
   side: NetworkSide,
+  wanId: string,
 ): HTMLElement {
   const r = engineSideRate(st, fileBps, side);
   const offline = (!st || st.error) && r.total <= 0;
@@ -7582,7 +7587,7 @@ function wanEngineRow(
   row.append(
     el("span", { className: "wan-eng__id" }, [id]),
     rateEl,
-    el("span", { className: "wan-eng__bar" }, [meterRow(share, "accent")]),
+    el("span", { className: "wan-eng__bar" }, [meterRow(share, channelBarTone(wanId))]),
     el("span", { className: "wan-eng__share" }, [offline ? "—" : `${share.toFixed(0)}%`]),
     el("span", { className: "wan-eng__peers" }, [offline ? "—" : `${st?.peers ?? 0} пиров`]),
     el("span", { className: "wan-eng__act" }, [offline ? "—" : `${st?.torrents_active ?? 0} акт.`]),
@@ -7599,6 +7604,7 @@ function wanCard(
   totalRate: number,
   fileInbound: Record<string, number>,
   side: NetworkSide,
+  wanId = "",
 ): HTMLElement {
   const t = sumEngines(engines, byEngine, fileInbound, side);
   const volume = side === "uploaded";
@@ -7606,7 +7612,8 @@ function wanCard(
   // Для «всего отдано» ёмкость канала не применима — это счётчик, не скорость.
   const util = !volume && capacityBps > 0 ? ((t.rate * 8) / capacityBps) * 100 : null;
   const share = totalRate > 0 ? (t.rate / totalRate) * 100 : 0;
-  const tone: "accent" | "warn" | "danger" = util == null || util < 70 ? "accent" : util < 90 ? "warn" : "danger";
+  const tone: "accent" | "wan2" | "warn" | "danger" =
+    util == null || util < 70 ? channelBarTone(wanId) : util < 90 ? "warn" : "danger";
   const arrow = side === "down" ? "↓" : "↑";
   const shareLabel =
     side === "up" ? "от общей отдачи" : side === "down" ? "от общего скачивания" : "от всего отдано";
@@ -7636,7 +7643,7 @@ function wanCard(
   if (volume) {
     card.append(
       el("div", { className: "wan-card__util" }, [
-        meterRow(share, "accent"),
+        meterRow(share, channelBarTone(wanId)),
         el("div", { className: "wan-card__util-note" }, [`${share.toFixed(1)}% от всего отдано`]),
       ]),
     );
@@ -7667,7 +7674,7 @@ function wanCard(
     return rb - ra;
   });
   for (const id of sorted) {
-    rows.append(wanEngineRow(id, byEngine[id], t.rate, fileInbound[id] ?? 0, side));
+    rows.append(wanEngineRow(id, byEngine[id], t.rate, fileInbound[id] ?? 0, side, wanId));
   }
   card.append(rows);
   return card;
@@ -7699,6 +7706,7 @@ function renderWanCards(
       totalRate,
       fileInbound,
       side,
+      l.id,
     ),
   );
   if (data.unassigned.length) {
