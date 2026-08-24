@@ -285,6 +285,18 @@ bash scripts/deploy-ct400.sh up -d --build web
 
 Проверка: Ctrl+F5; деталь → Пиры: нет слов choke/BEP-10.
 
+## 7н. Смысл флагов пиров — 2026-08-24
+
+web **1.32.0**. Только CT400, `web`:
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Проверка: Ctrl+F5; деталь → Пиры: при ↑ > 0 нет чипа «очередь»; одно слово на чип.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

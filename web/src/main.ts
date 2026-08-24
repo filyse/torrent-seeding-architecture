@@ -2052,101 +2052,107 @@ function buildDetailsSpoiler(summary: string, inner: HTMLElement): HTMLDetailsEl
 
 type PeerFlagTone = "muted" | "accent" | "warn" | "success";
 
+/** Имена как в libtorrent 2.0 peer_info: choked = МЫ его ограничили, remote_choked = ОН нас. */
 const PEER_FLAG_META: Record<string, { label: string; title: string; tone: PeerFlagTone; hide?: boolean }> = {
   interesting: {
-    label: "нужен нам",
-    title: "У него есть части фильма, которых у нас ещё нет",
+    label: "берём",
+    title: "У него есть части, которых у нас нет — хотим качать",
     tone: "accent",
   },
+  // we have choked this peer
   choked: {
-    label: "нам не даёт",
-    title: "Сейчас он нам ничего не отправляет. Так бывает: очередь, лимит или он сам качает",
+    label: "очередь",
+    title: "Он в очереди на отдачу. Новые куски не шлём; то, что уже ушло, ещё может качаться",
     tone: "warn",
   },
   remote_interested: {
-    label: "нужен ему",
-    title: "Ему нужны наши части — он хочет качать у нас",
+    label: "просит",
+    title: "Он хочет наши части",
     tone: "accent",
   },
+  // the peer has choked us
   remote_choked: {
-    label: "не отдаём",
-    title: "Мы ему сейчас ничего не отправляем. Обычно из‑за очереди или лимита отдачи",
+    label: "молчит",
+    title: "Он почти ничего нам не шлёт. Мы ему при этом можем отдавать",
     tone: "warn",
   },
   supports_extensions: {
-    label: "расш.",
-    title: "Обычные дополнительные возможности протокола. На скорость не влияет — просто «умеет как все»",
+    label: "умеет",
+    title: "Обычные возможности протокола, на скорость не влияет",
     tone: "muted",
     hide: true,
   },
   local_connection: {
-    label: "мы сами",
-    title: "Соединение открыли мы, а не он",
+    label: "сами",
+    title: "Соединение открыли мы",
     tone: "muted",
   },
   handshake: {
-    label: "знакомимся",
-    title: "Только договариваемся о соединении, обмен ещё не пошёл",
+    label: "связь",
+    title: "Ещё знакомимся, обмен не начался",
     tone: "muted",
   },
   connecting: {
-    label: "подключаем",
-    title: "Ещё звоним — связи пока нет",
+    label: "звонок",
+    title: "Ещё подключаемся",
     tone: "muted",
   },
   on_parole: {
-    label: "на проверке",
-    title: "Раньше вёл себя плохо. Даём ещё один шанс, смотрим, начнёт ли отдавать",
+    label: "проверка",
+    title: "Раньше вёл себя плохо — даём ещё шанс",
     tone: "warn",
   },
   seed: {
-    label: "всё есть",
-    title: "У него уже вся раздача — качать ему нечего, только отдаёт",
+    label: "полный",
+    title: "У него уже вся раздача",
     tone: "success",
   },
   optimistic_unchoke: {
-    label: "пробуем",
-    title: "Даём ему немного отдачи вне очереди — вдруг качает быстрее остальных",
+    label: "проба",
+    title: "Даём немного вне очереди — вдруг качает быстрее",
     tone: "accent",
   },
   snubbed: {
-    label: "молчит",
-    title: "Давно ничего не присылает, хотя должен. Почти бесполезен",
+    label: "завис",
+    title: "Давно должен был прислать куски и не присылает",
     tone: "warn",
   },
   upload_only: {
-    label: "только отдаёт",
-    title: "Сам уже ничего не качает, только раздаёт другим",
+    label: "раздаёт",
+    title: "Сам уже не качает, только отдаёт",
     tone: "success",
   },
   endgame_mode: {
-    label: "добиваем",
-    title: "Осталось совсем мало — докачиваем последние куски сразу с нескольких",
+    label: "добивка",
+    title: "Осталось мало — докачиваем последние куски сразу с нескольких",
     tone: "muted",
   },
   holepunched: {
-    label: "через роутер",
-    title: "Пробили соединение через роутер, хотя снаружи нас не было видно",
+    label: "роутер",
+    title: "Пробили соединение через роутер",
     tone: "muted",
   },
   utp_socket: {
-    label: "мягкий канал",
-    title: "Соединение, которое меньше мешает обычному интернету в доме",
+    label: "щадящий",
+    title: "Мягкий канал — меньше мешает обычному интернету",
     tone: "muted",
+    hide: true,
   },
   ssl_socket: {
     label: "защита",
     title: "Соединение закрыто от посторонних",
     tone: "muted",
+    hide: true,
   },
   rc4_encrypted: {
     label: "шифр",
-    title: "Трафик шифруется — провайдеру сложнее его резать",
+    title: "Трафик шифруется",
     tone: "muted",
+    hide: true,
   },
   plaintext_encrypted: {
     label: "шифр",
-    title: "Есть защита соединения от помех провайдера. На скорость почти не влияет",
+    title: "Есть защита от помех провайдера",
     tone: "muted",
     hide: true,
   },
@@ -2185,7 +2191,7 @@ function fmtPeerSource(raw: string | null): string {
   return parts.length ? parts.join(" · ") : raw;
 }
 
-function peerFlagChips(raw: string | null): HTMLElement {
+function peerFlagChips(raw: string | null, downBps = 0, upBps = 0): HTMLElement {
   const box = el("div", { className: "peer-flags" });
   if (!raw) {
     box.append("—");
@@ -2193,8 +2199,23 @@ function peerFlagChips(raw: string | null): HTMLElement {
   }
   const names = raw.split(",").map((s) => s.trim()).filter(Boolean);
   const hidden: string[] = [];
+  const liveUp = upBps > 1024;
+  const liveDown = downBps > 1024;
   for (const name of names) {
     const meta = PEER_FLAG_META[name];
+    // Биты «ограничили» часто висят, пока ещё досылаются куски — не спорим со скоростью.
+    if (name === "choked" && liveUp) {
+      hidden.push("Он был в очереди, но отдача уже идёт");
+      continue;
+    }
+    if (name === "remote_choked" && liveDown) {
+      hidden.push("Он нас ограничивал, но сейчас качает нам");
+      continue;
+    }
+    if ((name === "connecting" || name === "handshake") && (liveUp || liveDown)) {
+      hidden.push(meta?.title ?? name);
+      continue;
+    }
     if (meta?.hide) {
       hidden.push(meta.title);
       continue;
@@ -2236,7 +2257,9 @@ function buildPeersSpoiler(peers: TorrentPeerOut[], torrentId: number): HTMLDeta
       el("td", { className: "peer-table__num" }, [pct]),
       el("td", { className: "peer-table__num" }, [fmtRate(p.download_rate)]),
       el("td", { className: "peer-table__num" }, [fmtRate(p.upload_rate)]),
-      el("td", { className: "peer-table__flags" }, [peerFlagChips(p.flags)]),
+      el("td", { className: "peer-table__flags" }, [
+        peerFlagChips(p.flags, p.download_rate ?? 0, p.upload_rate ?? 0),
+      ]),
       el("td", { className: "peer-table__src" }, [fmtPeerSource(p.source)]),
     );
     body.append(row);
