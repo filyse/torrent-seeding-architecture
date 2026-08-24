@@ -2255,9 +2255,10 @@ input.file-input::file-selector-button:hover {
 }
 
 .upload-tip {
-  position: absolute;
-  z-index: 3;
-  min-width: 11rem;
+  position: fixed;
+  z-index: 80;
+  width: max-content;
+  max-width: min(22rem, calc(100vw - 16px));
   padding: 0.5rem 0.65rem;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -2338,6 +2339,7 @@ input.file-input::file-selector-button:hover {
 
 .wan-charts {
   position: relative;
+  overflow: visible;
   padding: 0.9rem 1rem 1rem;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -2378,6 +2380,7 @@ input.file-input::file-selector-button:hover {
 .wan-charts__cell {
   position: relative;
   z-index: 0;
+  overflow: visible;
 }
 
 .wan-charts__cell:has(.upload-tip:not([hidden])) {

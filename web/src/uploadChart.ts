@@ -467,14 +467,8 @@ export function bindFarmHover(
       tip.append(sum);
     }
 
-    const host = tip.offsetParent as HTMLElement | null;
-    const box = (host ?? tip.parentElement)?.getBoundingClientRect();
-    const x = ev.clientX - (box?.left ?? 0) + 12;
-    const y = ev.clientY - (box?.top ?? 0) + 12;
-    const maxX = (box?.width ?? 320) - tip.offsetWidth - 8;
-    tip.style.left = `${Math.max(8, Math.min(x, maxX))}px`;
-    tip.style.top = `${Math.max(8, y)}px`;
     tip.hidden = false;
+    placeTip(tip, ev);
   };
 
   svg.addEventListener("pointermove", move);
@@ -487,14 +481,19 @@ export function bindFarmHover(
 }
 
 function placeTip(tip: HTMLElement, ev: PointerEvent): void {
-  const host = tip.offsetParent as HTMLElement | null;
-  const box = (host ?? tip.parentElement)?.getBoundingClientRect();
-  const x = ev.clientX - (box?.left ?? 0) + 12;
-  const y = ev.clientY - (box?.top ?? 0) + 12;
-  const maxX = (box?.width ?? 320) - tip.offsetWidth - 8;
-  const maxY = (box?.height ?? 160) - tip.offsetHeight - 8;
-  tip.style.left = `${Math.max(8, Math.min(x, Math.max(8, maxX)))}px`;
-  tip.style.top = `${Math.max(8, Math.min(y, Math.max(8, maxY)))}px`;
+  // Фиксируем к окну: иначе ячейка мини-графика (~120px) режет карточку,
+  // а при hidden ширина ещё 0 — первый кадр «неполный», пока не сдвинешь мышь.
+  void tip.offsetWidth;
+  const pad = 8;
+  const gap = 12;
+  const tw = tip.offsetWidth;
+  const th = tip.offsetHeight;
+  let x = ev.clientX + gap;
+  let y = ev.clientY + gap;
+  if (x + tw > window.innerWidth - pad) x = ev.clientX - tw - gap;
+  if (y + th > window.innerHeight - pad) y = ev.clientY - th - gap;
+  tip.style.left = `${Math.max(pad, x)}px`;
+  tip.style.top = `${Math.max(pad, y)}px`;
 }
 
 function tipNode(className: string, text: string): HTMLElement {
