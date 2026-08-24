@@ -233,7 +233,7 @@ API-restore (ниже) остаётся как восстановление по
 | GET | `/labels` | список меток |
 | GET | `/session/stats` | агрегированная статистика по всем движкам (+ разрез `by_engine`) |
 | POST | `/session/limits` | глобальные лимиты сессии |
-| GET | `/network/links` | карта WAN-каналов: движки и ёмкость аплинков; UI `/network` (отдача), `/network/download` (скачивание + файлы), `/network/uploaded` (всего отдано) ([`docs/NETWORK.md`](docs/NETWORK.md)) |
+| GET | `/network/links` | карта WAN-каналов: движки и ёмкость аплинков; UI `/network` (отдача), `/network/download` (скачивание + файлы), `/network/uploaded` (всего отдано), `/network/history` (график периода) ([`docs/NETWORK.md`](docs/NETWORK.md)) |
 | POST | `/network/links/{id}/limits` | штамп постоянных лимитов на все движки канала (не потолок суммы) |
 | POST | `/jobs/*` | постановка фоновых задач (sync, restore, health, bulk-register) |
 | GET/POST/DELETE | `/creator/*` | создание `.torrent` из папки на диске движка; см. [`docs/CREATOR.md`](docs/CREATOR.md) |

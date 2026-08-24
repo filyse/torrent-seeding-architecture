@@ -201,6 +201,22 @@ bash scripts/deploy-ct400.sh up -d --build api queue_worker web
 `GET /api/v1/network/uploaded-history?period=day`; в логе воркера `upload sample written=`.
 Первые столбики — после cron (сразу при старте воркера и далее :00/:15/:30/:45).
 
+## 7ж. Вкладка «История» — 2026-08-24
+
+web **1.26.0**. Большой график «Отдача за период» на `/network/history`;
+на «Всего отдано» остались карточки и мини-графики. API не трогаем, движки не трогать.
+Только CT400, `web`:
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Проверка: Ctrl+F5; вкладки Отдача / Скачивание / Всего отдано / История;
+`/network/history` — стек WAN1+WAN2 и День/Неделя/Месяц; на `/network/uploaded`
+большого графика нет. F5 на `/network/history` не даёт 404.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

@@ -2146,6 +2146,10 @@ input.file-input::file-selector-button:hover {
   height: 200px;
 }
 
+.upload-history--page .upload-history__chart {
+  height: 260px;
+}
+
 .upload-history__chart svg,
 .wan-card__chart svg {
   display: block;
@@ -2299,6 +2303,7 @@ input.file-input::file-selector-button:hover {
 
 .wan-tabs {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 0.15rem;
   padding: 0.15rem;
   border: 1px solid var(--border);

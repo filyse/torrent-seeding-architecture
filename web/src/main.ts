@@ -315,7 +315,7 @@ type TorrentDetailOut = TorrentOut & { runtime: RuntimeOut | null; peer_list?: T
 type TorrentPageOut = { items: TorrentOut[]; total: number; limit: number; offset: number };
 type UpdateMatchItem = { filename: string; candidates: TorrentOut[] };
 type UpdateMatchResult = { items: UpdateMatchItem[] };
-type NetworkSide = "up" | "down" | "uploaded";
+type NetworkSide = "up" | "down" | "uploaded" | "history";
 type Route =
   | { view: "list" }
   | { view: "detail"; id: number }
@@ -1197,6 +1197,9 @@ function parseRoute(): Route {
   if (path === "/network/uploaded" || path === "/network/uploaded/") {
     return { view: "network", side: "uploaded" };
   }
+  if (path === "/network/history" || path === "/network/history/") {
+    return { view: "network", side: "history" };
+  }
   if (path === "/network" || path === "/network/") return { view: "network", side: "up" };
   return { view: "list" };
 }
@@ -1229,6 +1232,10 @@ function setHashNetworkDownload(): void {
 
 function setHashNetworkUploaded(): void {
   pushPath("/network/uploaded");
+}
+
+function setHashNetworkHistory(): void {
+  pushPath("/network/history");
 }
 
 function navLink(label: string, onClick: () => void): HTMLElement {
@@ -7359,7 +7366,9 @@ function mountNetworkShell(root: HTMLElement): void {
       ? "Отдача в разрезе каналов и движков"
       : side === "down"
         ? "Скачивание в разрезе каналов и движков (торрент + заливка файлов)"
-        : "Всего отдано в разрезе каналов и движков";
+        : side === "uploaded"
+          ? "Всего отдано в разрезе каналов и движков"
+          : "Отдача фермы за день, неделю и месяц";
   const tabBar = el("div", { className: "wan-tabs", role: "tablist" });
   const mkTab = (label: string, target: NetworkSide, go: () => void) => {
     const btn = el("button", { type: "button", className: "wan-tab", role: "tab" }, [label]) as HTMLButtonElement;
@@ -7376,6 +7385,7 @@ function mountNetworkShell(root: HTMLElement): void {
     mkTab("Отдача", "up", setHashNetwork),
     mkTab("Скачивание", "down", setHashNetworkDownload),
     mkTab("Всего отдано", "uploaded", setHashNetworkUploaded),
+    mkTab("История", "history", setHashNetworkHistory),
   );
   const header = el("header", { className: "app-header" }, [
     el("div", {}, [el("h1", {}, ["Сеть"]), el("p", { className: "field__hint" }, [hint])]),
@@ -7384,17 +7394,19 @@ function mountNetworkShell(root: HTMLElement): void {
   const host = el("div", { className: "wan-grid" }, [
     el("p", { className: "wan-note" }, ["Загрузка карты каналов…"]),
   ]);
-  const historyHost = el("section", { className: "upload-history" });
+  const historyHost = el("section", { className: "upload-history upload-history--page" });
   historyHost.append(el("p", { className: "wan-note" }, ["Загрузка истории отдачи…"]));
   const note = el("p", { className: "wan-note" }, [
     side === "up"
       ? "Скорости — payload libtorrent, без протокольного оверхеда: фактическая загрузка канала выше на 5–15%."
       : side === "down"
         ? "Торрент — payload libtorrent. «Файлы» — очередь меню «Файл» (браузер → этот движок), тоже входящий трафик на канал. Оверхед протокола не учтён."
-        : "Счётчик — payload libtorrent за текущую инкарнацию на движке (all_time_upload). Совпадает с чипом «Всего отдано» в шапке. В списке раздач колонка «Отдано» — накопитель БД: он переживает перенос, этот экран — нет. График — дельта за корзину из своих сэмплов, не колонка «Отдано».",
+        : side === "uploaded"
+          ? "Счётчик — payload libtorrent за текущую инкарнацию на движке (all_time_upload). Совпадает с чипом «Всего отдано» в шапке. В списке раздач колонка «Отдано» — накопитель БД: он переживает перенос, этот экран — нет. График периода — на вкладке «История»; здесь мини-график канала за неделю."
+          : "Столбик — дельта за корзину из своих сэмплов (раз в 15 минут), не колонка «Отдано» в списке и не живой накопитель на «Всего отдано».",
   ]);
-  if (side === "uploaded") {
-    root.append(back, header, historyHost, host, note);
+  if (side === "history") {
+    root.append(back, header, historyHost, note);
   } else {
     root.append(back, header, host, note);
   }
@@ -7411,7 +7423,7 @@ function mountNetworkShell(root: HTMLElement): void {
   };
 
   const paintHistory = () => {
-    if (side !== "uploaded") return;
+    if (side !== "history") return;
     unbindFarmHover?.();
     unbindFarmHover = null;
     const segs = el("div", { className: "wan-tabs", role: "tablist" });
@@ -7515,22 +7527,29 @@ function mountNetworkShell(root: HTMLElement): void {
   };
 
   const loadHistory = async () => {
-    if (side !== "uploaded") return;
+    if (side !== "history" && side !== "uploaded") return;
     try {
       lastHistory = await fetchJson<UploadedHistory>(
         `/network/uploaded-history?period=${historyPeriod}`,
       );
     } catch (e) {
-      historyHost.replaceChildren(
-        el("p", { className: "wan-note" }, [e instanceof Error ? e.message : String(e)]),
-      );
+      lastHistory = null;
+      if (side === "history") {
+        historyHost.replaceChildren(
+          el("p", { className: "wan-note" }, [e instanceof Error ? e.message : String(e)]),
+        );
+      }
       return;
     }
-    paintHistory();
-    paint(lastSessionStats);
+    if (side === "history") paintHistory();
+    else paint(lastSessionStats);
   };
 
   void (async () => {
+    if (side === "history") {
+      void loadHistory();
+      return;
+    }
     try {
       links = await fetchJson<NetworkLinksOut>("/network/links");
     } catch (e) {

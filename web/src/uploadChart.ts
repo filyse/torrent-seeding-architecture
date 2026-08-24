@@ -1,4 +1,4 @@
-/** SVG-графики отдачи на /network/uploaded. Ось, сетка, наведение, штрих «нет данных». */
+/** SVG-графики отдачи: ферма на /network/history, мини — в карточках /network/uploaded. */
 
 export type HistoryPeriod = "day" | "week" | "month";
 
@@ -120,7 +120,7 @@ function bucketLabel(iso: string, period: HistoryPeriod, index: number, n: numbe
 
 export function renderFarmChart(history: UploadedHistory): SVGSVGElement {
   const W = 680;
-  const H = 200;
+  const H = 260;
   const pad = { l: 46, r: 8, t: 10, b: 24 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
