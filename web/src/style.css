@@ -2244,16 +2244,26 @@ input.file-input::file-selector-button:hover {
   color: var(--muted);
 }
 
-.wan-card__chart {
-  height: 56px;
+.upload-tip__value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  margin-bottom: 0.2rem;
 }
 
-.wan-card__chart-note {
-  font-size: 0.75rem;
-  color: var(--muted);
+.upload-chart--mini .upload-chart__axis,
+.upload-chart--mini .upload-chart__tick {
+  font-size: 9px;
+}
+
+.upload-chart__col--peak .upload-chart__bar {
+  filter: brightness(1.08);
 }
 
 .wan-card {
+  position: relative;
+  z-index: 0;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -2263,6 +2273,25 @@ input.file-input::file-selector-button:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+}
+
+.wan-card:has(.upload-tip:not([hidden])) {
+  z-index: 2;
+}
+
+.wan-card__mini {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.wan-card__chart {
+  height: 120px;
+}
+
+.wan-card__chart-note {
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 .wan-card__title {

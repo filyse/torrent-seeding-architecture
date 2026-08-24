@@ -217,6 +217,21 @@ bash scripts/deploy-ct400.sh up -d --build web
 `/network/history` — стек WAN1+WAN2 и День/Неделя/Месяц; на `/network/uploaded`
 большого графика нет. F5 на `/network/history` не даёт 404.
 
+## 7з. Мини-графики с наведением — 2026-08-24
+
+web **1.27.0**. На «Всего отдано» мини-график канала как большой: ось, подписи,
+тултип (интервал, доля, движки). API не трогаем, движки не трогать.
+Только CT400, `web`:
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Проверка: Ctrl+F5 на `/network/uploaded`; наведение на столбик мини-графика
+показывает интервал и движки; пустые корзины штрихом.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

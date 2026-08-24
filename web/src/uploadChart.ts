@@ -12,6 +12,7 @@ export type HistoryBucket = {
   t: string;
   farm: number;
   wan: Record<string, number>;
+  engines?: Record<string, number>;
   sampled?: boolean;
 };
 
@@ -264,23 +265,28 @@ export function renderFarmChart(history: UploadedHistory): SVGSVGElement {
 }
 
 export function renderMiniChart(
-  values: number[],
+  history: UploadedHistory,
+  wanId: string,
   color: string,
-  sampled?: boolean[],
   patternId = "upload-unsampled-mini",
 ): SVGSVGElement {
-  const W = 240;
-  const H = 56;
-  const pad = 2;
-  const n = Math.max(1, values.length);
-  const gap = 1.2;
-  const barW = Math.max(1.5, (W - pad * 2 - gap * (n - 1)) / n);
-  const live = values.map((v, i) => (sampled && sampled[i] === false ? 0 : v));
-  const max = Math.max(1, ...live);
+  const W = 320;
+  const H = 120;
+  const pad = { l: 38, r: 6, t: 8, b: 20 };
+  const innerW = W - pad.l - pad.r;
+  const innerH = H - pad.t - pad.b;
+  const n = Math.max(1, history.buckets.length);
+  const gap = n > 20 ? 1.2 : 2.4;
+  const barW = Math.max(3, (innerW - gap * (n - 1)) / n);
+  const values = history.buckets.map((b) => (bucketSampled(b) ? (b.wan[wanId] ?? 0) : 0));
+  const max = Math.max(1, ...values);
+  const peak = Math.max(0, ...values);
+
   const root = svgEl("svg", {
     viewBox: `0 0 ${W} ${H}`,
     class: "upload-chart upload-chart--mini",
-    "aria-hidden": "true",
+    role: "img",
+    "aria-label": `Отдача ${wanName(wanId)} за период`,
   }) as SVGSVGElement;
   const defs = svgEl("defs");
   const pat = svgEl("pattern", {
@@ -301,45 +307,102 @@ export function renderMiniChart(
   defs.appendChild(pat);
   root.appendChild(defs);
 
-  values.forEach((v, i) => {
-    const x = pad + i * (barW + gap);
-    if (sampled && sampled[i] === false) {
-      root.appendChild(
+  root.appendChild(
+    svgEl("rect", {
+      x: pad.l,
+      y: pad.t,
+      width: innerW,
+      height: innerH,
+      class: "upload-chart__plot",
+    }),
+  );
+
+  for (const frac of [0, 0.5, 1]) {
+    const y = pad.t + innerH * (1 - frac);
+    root.appendChild(
+      svgEl("line", {
+        x1: pad.l,
+        x2: W - pad.r,
+        y1: y.toFixed(2),
+        y2: y.toFixed(2),
+        class: "upload-chart__grid",
+      }),
+    );
+    const lab = svgEl("text", {
+      x: pad.l - 5,
+      y: (y + 3).toFixed(2),
+      "text-anchor": "end",
+      class: "upload-chart__axis",
+    });
+    lab.textContent = frac === 0 ? "0" : fmtChartBytes(max * frac);
+    root.appendChild(lab);
+  }
+
+  history.buckets.forEach((b, i) => {
+    const x = pad.l + i * (barW + gap);
+    const v = b.wan[wanId] ?? 0;
+    const peakCls = bucketSampled(b) && peak > 0 && v === peak ? " upload-chart__col--peak" : "";
+    const g = svgEl("g", { class: `upload-chart__col${peakCls}`, "data-bucket": String(i) });
+    g.appendChild(
+      svgEl("rect", {
+        x: x.toFixed(2),
+        y: pad.t,
+        width: barW.toFixed(2),
+        height: innerH,
+        class: "upload-chart__hit",
+        "data-bucket": String(i),
+      }),
+    );
+
+    if (!bucketSampled(b)) {
+      g.appendChild(
         svgEl("rect", {
           x: x.toFixed(2),
-          y: pad,
+          y: pad.t,
           width: barW.toFixed(2),
-          height: H - pad * 2,
+          height: innerH,
           fill: `url(#${patternId})`,
           class: "upload-chart__empty",
         }),
       );
-      return;
-    }
-    const h = (Math.max(0, v) / max) * (H - pad * 2);
-    if (h <= 0) {
-      root.appendChild(
+    } else if (v <= 0) {
+      g.appendChild(
         svgEl("rect", {
           x: x.toFixed(2),
-          y: H - pad - 2,
+          y: (pad.t + innerH - 2).toFixed(2),
           width: barW.toFixed(2),
           height: 2,
           fill: color,
-          opacity: 0.35,
+          class: "upload-chart__zero",
         }),
       );
-      return;
+    } else {
+      const h = (v / max) * innerH;
+      g.appendChild(
+        svgEl("rect", {
+          x: x.toFixed(2),
+          y: (pad.t + innerH - h).toFixed(2),
+          width: barW.toFixed(2),
+          height: Math.max(0.5, h).toFixed(2),
+          fill: color,
+          rx: 2,
+          class: "upload-chart__bar",
+        }),
+      );
     }
-    root.appendChild(
-      svgEl("rect", {
-        x: x.toFixed(2),
-        y: (H - pad - h).toFixed(2),
-        width: barW.toFixed(2),
-        height: h.toFixed(2),
-        fill: color,
-        rx: 1,
-      }),
-    );
+
+    const label = bucketLabel(b.t, history.period, i, n);
+    if (label) {
+      const t = svgEl("text", {
+        x: (x + barW / 2).toFixed(2),
+        y: H - 5,
+        "text-anchor": "middle",
+        class: "upload-chart__tick",
+      });
+      t.textContent = label;
+      g.appendChild(t);
+    }
+    root.appendChild(g);
   });
   return root;
 }
@@ -412,6 +475,109 @@ export function bindFarmHover(
     tip.style.left = `${Math.max(8, Math.min(x, maxX))}px`;
     tip.style.top = `${Math.max(8, y)}px`;
     tip.hidden = false;
+  };
+
+  svg.addEventListener("pointermove", move);
+  svg.addEventListener("pointerleave", hide);
+  return () => {
+    svg.removeEventListener("pointermove", move);
+    svg.removeEventListener("pointerleave", hide);
+    hide();
+  };
+}
+
+function placeTip(tip: HTMLElement, ev: PointerEvent): void {
+  const host = tip.offsetParent as HTMLElement | null;
+  const box = (host ?? tip.parentElement)?.getBoundingClientRect();
+  const x = ev.clientX - (box?.left ?? 0) + 12;
+  const y = ev.clientY - (box?.top ?? 0) + 12;
+  const maxX = (box?.width ?? 320) - tip.offsetWidth - 8;
+  const maxY = (box?.height ?? 160) - tip.offsetHeight - 8;
+  tip.style.left = `${Math.max(8, Math.min(x, Math.max(8, maxX)))}px`;
+  tip.style.top = `${Math.max(8, Math.min(y, Math.max(8, maxY)))}px`;
+}
+
+function tipNode(className: string, text: string): HTMLElement {
+  const n = document.createElement("div");
+  n.className = className;
+  n.textContent = text;
+  return n;
+}
+
+export function bindMiniHover(
+  svg: SVGSVGElement,
+  history: UploadedHistory,
+  wanId: string,
+  engines: string[],
+  tip: HTMLElement,
+  fmtBytes: (n: number) => string,
+): () => void {
+  const sampled = history.buckets.filter(bucketSampled);
+  const avg = sampled.length
+    ? sampled.reduce((s, b) => s + (b.wan[wanId] ?? 0), 0) / sampled.length
+    : 0;
+  const periodTotal = history.total.wan[wanId] ?? 0;
+  const peak = sampled.reduce((m, b) => Math.max(m, b.wan[wanId] ?? 0), 0);
+
+  const hide = () => {
+    tip.hidden = true;
+    svg.querySelectorAll(".upload-chart__col.is-hover").forEach((n) => n.classList.remove("is-hover"));
+  };
+
+  const move = (ev: PointerEvent) => {
+    const hit = (ev.target as Element | null)?.closest?.("[data-bucket]");
+    if (!hit) {
+      hide();
+      return;
+    }
+    const i = Number(hit.getAttribute("data-bucket"));
+    const b = history.buckets[i];
+    if (!b) {
+      hide();
+      return;
+    }
+    svg.querySelectorAll(".upload-chart__col.is-hover").forEach((n) => n.classList.remove("is-hover"));
+    hit.closest(".upload-chart__col")?.classList.add("is-hover");
+
+    const title = bucketRangeLabel(b.t, history.period);
+    tip.replaceChildren();
+    tip.append(tipNode("upload-tip__title", title));
+    if (!bucketSampled(b)) {
+      tip.append(tipNode("upload-tip__muted", "данных ещё нет"));
+    } else {
+      const wan = b.wan[wanId] ?? 0;
+      tip.append(tipNode("upload-tip__value", fmtBytes(wan)));
+      const bits: string[] = [];
+      if (b.farm > 0) bits.push(`${((wan / b.farm) * 100).toFixed(0)}% фермы`);
+      if (periodTotal > 0) bits.push(`${((wan / periodTotal) * 100).toFixed(0)}% ${periodPhrase(history.period)}`);
+      if (avg > 0 && wan > 0) bits.push(`×${(wan / avg).toFixed(1)} среднего`);
+      if (peak > 0 && wan === peak) bits.push("пик");
+      if (bits.length) tip.append(tipNode("upload-tip__sum", bits.join(" · ")));
+
+      const rows = engines
+        .map((id) => ({ id, v: b.engines?.[id] ?? 0 }))
+        .filter((r) => r.v > 0)
+        .sort((a, c) => c.v - a.v);
+      const shown = rows.slice(0, 6);
+      for (const r of shown) {
+        const row = document.createElement("div");
+        row.className = "upload-tip__row";
+        const sw = document.createElement("span");
+        sw.className = `upload-tip__swatch upload-tip__swatch--${wanId}`;
+        const lab = document.createElement("span");
+        lab.textContent = r.id;
+        const val = document.createElement("span");
+        val.textContent = wan > 0 ? `${fmtBytes(r.v)} · ${((r.v / wan) * 100).toFixed(0)}%` : fmtBytes(r.v);
+        row.append(sw, lab, val);
+        tip.append(row);
+      }
+      if (rows.length > shown.length) {
+        tip.append(tipNode("upload-tip__muted", `ещё ${rows.length - shown.length} движков`));
+      }
+      if (wan <= 0) tip.append(tipNode("upload-tip__muted", "в этом интервале тишина"));
+    }
+    tip.hidden = false;
+    placeTip(tip, ev);
   };
 
   svg.addEventListener("pointermove", move);

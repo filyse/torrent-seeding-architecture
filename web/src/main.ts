@@ -14,6 +14,7 @@ import {
   HISTORY_PERIODS,
   avgUnit,
   bindFarmHover,
+  bindMiniHover,
   bucketRangeLabel,
   bucketSampled,
   periodPhrase,
@@ -7176,6 +7177,47 @@ function meterRow(pct: number, tone: "accent" | "warn" | "danger"): HTMLElement 
   return el("span", { className: "wan-meter" }, [fill]);
 }
 
+type MiniChartSlot = { wrap: HTMLElement; unbind: () => void; tag: string };
+
+function miniChartTag(history: UploadedHistory, wanId: string): string {
+  return [
+    history.period,
+    history.last_sampled_at ?? "",
+    history.buckets.length,
+    history.total.wan[wanId] ?? 0,
+  ].join("|");
+}
+
+/** Мини-график канала: ось, подписи, тултип. Кэш, чтобы живой WS не сбрасывал наведение. */
+function takeMiniChart(
+  cache: Map<string, MiniChartSlot> | undefined,
+  history: UploadedHistory,
+  wanId: string,
+  engines: string[],
+): HTMLElement {
+  const tag = miniChartTag(history, wanId);
+  const prev = cache?.get(wanId);
+  if (prev && prev.tag === tag) return prev.wrap;
+
+  prev?.unbind();
+  const wrap = el("div", { className: "wan-card__mini" });
+  const chartBox = el("div", { className: "wan-card__chart" });
+  const svg = renderMiniChart(history, wanId, wanColor(wanId), `mini-${wanId}`);
+  const tip = el("div", { className: "upload-tip" }) as HTMLElement;
+  tip.hidden = true;
+  chartBox.append(svg);
+  wrap.append(
+    chartBox,
+    el("div", { className: "wan-card__chart-note" }, [
+      `отдано ${periodPhrase(history.period)}: ${fmtBytes(history.total.wan[wanId] ?? 0)}`,
+    ]),
+    tip,
+  );
+  const unbind = bindMiniHover(svg, history, wanId, engines, tip, fmtBytes);
+  cache?.set(wanId, { wrap, unbind, tag });
+  return wrap;
+}
+
 /** Строка движка внутри карточки канала: скорость или объём, доля внутри канала, пиры, активные. */
 function wanEngineRow(
   id: string,
@@ -7220,7 +7262,8 @@ function wanCard(
   totalRate: number,
   fileInbound: Record<string, number>,
   side: NetworkSide,
-  mini?: { values: number[]; sampled: boolean[]; caption: string; color: string; id: string },
+  mini?: { history: UploadedHistory; wanId: string; engines: string[] },
+  miniCache?: Map<string, MiniChartSlot>,
 ): HTMLElement {
   const t = sumEngines(engines, byEngine, fileInbound, side);
   const volume = side === "uploaded";
@@ -7256,9 +7299,7 @@ function wanCard(
   );
 
   if (volume && mini) {
-    const chartBox = el("div", { className: "wan-card__chart" });
-    chartBox.append(renderMiniChart(mini.values, mini.color, mini.sampled, `mini-${mini.id}`));
-    card.append(chartBox, el("div", { className: "wan-card__chart-note" }, [mini.caption]));
+    card.append(takeMiniChart(miniCache, mini.history, mini.wanId, mini.engines));
   }
 
   if (volume) {
@@ -7306,6 +7347,7 @@ function renderWanCards(
   stats: SessionStats | null,
   side: NetworkSide,
   history: UploadedHistory | null = null,
+  miniCache?: Map<string, MiniChartSlot>,
 ): HTMLElement[] {
   const byEngine = stats?.by_engine ?? {};
   const fileInbound = side === "down" ? fileUploadInboundByEngine() : {};
@@ -7330,14 +7372,9 @@ function renderWanCards(
       fileInbound,
       side,
       volume && history
-        ? {
-            values: history.buckets.map((b) => b.wan[l.id] ?? 0),
-            sampled: history.buckets.map((b) => bucketSampled(b)),
-            caption: `отдано ${periodPhrase(history.period)}: ${fmtBytes(history.total.wan[l.id] ?? 0)}`,
-            color: wanColor(l.id),
-            id: l.id,
-          }
+        ? { history, wanId: l.id, engines: l.engines }
         : undefined,
+      miniCache,
     ),
   );
   if (data.unassigned.length) {
@@ -7402,7 +7439,7 @@ function mountNetworkShell(root: HTMLElement): void {
       : side === "down"
         ? "Торрент — payload libtorrent. «Файлы» — очередь меню «Файл» (браузер → этот движок), тоже входящий трафик на канал. Оверхед протокола не учтён."
         : side === "uploaded"
-          ? "Счётчик — payload libtorrent за текущую инкарнацию на движке (all_time_upload). Совпадает с чипом «Всего отдано» в шапке. В списке раздач колонка «Отдано» — накопитель БД: он переживает перенос, этот экран — нет. График периода — на вкладке «История»; здесь мини-график канала за неделю."
+          ? "Счётчик — payload libtorrent за текущую инкарнацию на движке (all_time_upload). Совпадает с чипом «Всего отдано» в шапке. В списке раздач колонка «Отдано» — накопитель БД: он переживает перенос, этот экран — нет. График периода — на вкладке «История»; здесь мини-график канала за неделю, наведение на столбик показывает интервал, долю и движки."
           : "Столбик — дельта за корзину из своих сэмплов (раз в 15 минут), не колонка «Отдано» в списке и не живой накопитель на «Всего отдано».",
   ]);
   if (side === "history") {
@@ -7415,11 +7452,12 @@ function mountNetworkShell(root: HTMLElement): void {
   let lastHistory: UploadedHistory | null = null;
   let historyPeriod: HistoryPeriod = "week";
   let unbindFarmHover: (() => void) | null = null;
+  const miniCache = new Map<string, MiniChartSlot>();
 
   const paint = (stats: SessionStats | null) => {
     const now = parseRoute();
     if (now.view !== "network" || now.side !== side || links === null) return;
-    host.replaceChildren(...renderWanCards(links, stats, side, lastHistory));
+    host.replaceChildren(...renderWanCards(links, stats, side, lastHistory, miniCache));
   };
 
   const paintHistory = () => {
