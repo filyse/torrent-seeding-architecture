@@ -24,6 +24,12 @@ from seeding_engine.fastresume_io import (
     try_read_resume_params,
 )
 from seeding_engine.store import RuntimeHandle, RuntimeStore
+from seeding_engine.unchoke import (
+    DEFAULT_UNCHOKE,
+    env_unchoke_settings,
+    normalize_unchoke_settings,
+    unchoke_settings_for_lt,
+)
 
 log = logging.getLogger(__name__)
 
@@ -247,6 +253,7 @@ def _apply_libtorrent_session_settings(lt, ses) -> None:
             settings["connections_limit"] = int(cl)
         except ValueError:
             log.warning("LT_CONNECTIONS_LIMIT ignored (not int): %s", cl)
+    settings.update(unchoke_settings_for_lt(env_unchoke_settings()))
 
     try:
         if hasattr(ses, "apply_settings"):
@@ -365,12 +372,39 @@ class TorrentRuntime(ABC):
     ) -> dict[str, object]:
         return {}
 
+    async def unchoke_settings(self) -> dict:
+        return dict(DEFAULT_UNCHOKE)
+
+    async def set_unchoke(
+        self,
+        unchoke_slots_limit: int | None = None,
+        seed_choking_algorithm: str | None = None,
+    ) -> dict:
+        return await self.unchoke_settings()
+
 
 class MockTorrentRuntime(TorrentRuntime):
     backend_name = "mock"
 
     def __init__(self) -> None:
         self._store = RuntimeStore()
+        self._unchoke = dict(env_unchoke_settings())
+
+    async def unchoke_settings(self) -> dict:
+        return dict(self._unchoke)
+
+    async def set_unchoke(
+        self,
+        unchoke_slots_limit: int | None = None,
+        seed_choking_algorithm: str | None = None,
+    ) -> dict:
+        raw = dict(self._unchoke)
+        if unchoke_slots_limit is not None:
+            raw["unchoke_slots_limit"] = unchoke_slots_limit
+        if seed_choking_algorithm is not None:
+            raw["seed_choking_algorithm"] = seed_choking_algorithm
+        self._unchoke = normalize_unchoke_settings(raw)
+        return dict(self._unchoke)
 
     async def start(self) -> None:
         log.info("engine backend=mock (no libtorrent)")
@@ -584,6 +618,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             "pex": _env_bool("LT_ENABLE_PEX", True),
             "lsd": _env_bool("LT_ENABLE_LSD", True),
         }
+        self._unchoke = dict(env_unchoke_settings())
 
     async def start(self) -> None:
         lt = self._lt
@@ -1948,6 +1983,40 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
 
         await asyncio.to_thread(_apply)
         return dict(self._net)
+
+    async def unchoke_settings(self) -> dict:
+        return dict(self._unchoke)
+
+    async def set_unchoke(
+        self,
+        unchoke_slots_limit: int | None = None,
+        seed_choking_algorithm: str | None = None,
+    ) -> dict:
+        raw = dict(self._unchoke)
+        if unchoke_slots_limit is not None:
+            raw["unchoke_slots_limit"] = unchoke_slots_limit
+        if seed_choking_algorithm is not None:
+            raw["seed_choking_algorithm"] = seed_choking_algorithm
+        self._unchoke = normalize_unchoke_settings(raw)
+        packed = unchoke_settings_for_lt(self._unchoke)
+        async with self._lock:
+            ses = self._ses
+
+        def _apply():
+            if ses is None or not hasattr(ses, "apply_settings"):
+                return
+            try:
+                ses.apply_settings(packed)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("apply unchoke session settings failed: %s", exc)
+
+        await asyncio.to_thread(_apply)
+        log.info(
+            "unchoke applied slots=%s algo=%s",
+            self._unchoke["unchoke_slots_limit"],
+            self._unchoke["seed_choking_algorithm"],
+        )
+        return dict(self._unchoke)
 
     async def add_tracker(self, db_id: int, url: str) -> bool:
         async with self._lock:

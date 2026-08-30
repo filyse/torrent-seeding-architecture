@@ -4,7 +4,15 @@ from fastapi import APIRouter, Depends
 from seeding_api.auth import Principal, require_admin
 from seeding_api.deps import DbSession, EnginePoolDep
 from seeding_api.net_policy import load_net_policy, save_net_policy
-from seeding_api.schemas import NetSettingsIn, NetSettingsOut, UploadLimitsIn, UploadLimitsOut
+from seeding_api.schemas import (
+    NetSettingsIn,
+    NetSettingsOut,
+    UnchokeSettingsIn,
+    UnchokeSettingsOut,
+    UploadLimitsIn,
+    UploadLimitsOut,
+)
+from seeding_api.unchoke_policy import load_unchoke_policy, save_unchoke_policy
 from seeding_api.upload_limits import load_upload_limits, save_upload_limits
 
 router = APIRouter()
@@ -43,6 +51,44 @@ async def set_net_settings(body: NetSettingsIn, session: DbSession, pool: Engine
             errors += 1
 
     return NetSettingsOut(**saved, applied=applied, errors=errors)
+
+
+@router.get("/settings/unchoke", response_model=UnchokeSettingsOut)
+async def get_unchoke_settings(session: DbSession):
+    return UnchokeSettingsOut(**(await load_unchoke_policy(session)))
+
+
+@router.post("/settings/unchoke", response_model=UnchokeSettingsOut)
+async def set_unchoke_settings(body: UnchokeSettingsIn, session: DbSession, pool: EnginePoolDep):
+    """Сколько пиров кормить сразу. Откат: 8 слотов и fastest_upload."""
+    current = await load_unchoke_policy(session)
+    merged = {
+        "unchoke_slots_limit": (
+            body.unchoke_slots_limit
+            if body.unchoke_slots_limit is not None
+            else current["unchoke_slots_limit"]
+        ),
+        "seed_choking_algorithm": (
+            body.seed_choking_algorithm
+            if body.seed_choking_algorithm is not None
+            else current["seed_choking_algorithm"]
+        ),
+    }
+    saved = await save_unchoke_policy(session, merged)
+    await session.commit()
+
+    applied = 0
+    errors = 0
+    for spec in pool.specs:
+        try:
+            await pool.client_for(spec.id).set_unchoke_settings(
+                saved["unchoke_slots_limit"], saved["seed_choking_algorithm"]
+            )
+            applied += 1
+        except (KeyError, httpx.HTTPError):
+            errors += 1
+
+    return UnchokeSettingsOut(**saved, applied=applied, errors=errors)
 
 
 @router.get("/settings/upload", response_model=UploadLimitsOut)

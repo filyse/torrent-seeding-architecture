@@ -9,6 +9,7 @@ from seeding_db.repository import EngineRepository
 
 from seeding_api.deps import DbSession, EnginePoolDep
 from seeding_api.net_policy import load_net_policy
+from seeding_api.unchoke_policy import load_unchoke_policy
 from seeding_api.schemas import (
     EngineLimitsIn,
     EngineOut,
@@ -332,6 +333,13 @@ async def register_engine(
         policy = await load_net_policy(session)
         await pool.client_for(row.id).set_net_settings(
             policy["dht"], policy["pex"], policy["lsd"]
+        )
+    except (KeyError, httpx.HTTPError):
+        pass
+    try:
+        unchoke = await load_unchoke_policy(session)
+        await pool.client_for(row.id).set_unchoke_settings(
+            unchoke["unchoke_slots_limit"], unchoke["seed_choking_algorithm"]
         )
     except (KeyError, httpx.HTTPError):
         pass

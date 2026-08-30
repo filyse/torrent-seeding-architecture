@@ -236,11 +236,15 @@ API-restore (ниже) остаётся как восстановление по
 | GET | `/network/links` | карта WAN-каналов: движки и ёмкость аплинков; UI `/network` (отдача), `/network/download` (скачивание + файлы), `/network/uploaded` (всего отдано), `/network/history` (график периода) ([`docs/NETWORK.md`](docs/NETWORK.md)) |
 | POST | `/network/links/{id}/limits` | штамп постоянных лимитов на все движки канала (не потолок суммы) |
 | POST | `/jobs/*` | постановка фоновых задач (sync, restore, health, bulk-register) |
+| GET/POST | `/settings/net` | глобальные DHT/PEX/LSD (persist + рассылка) |
+| GET/POST | `/settings/unchoke` | слоты unchoke и алгоритм сидирования; см. [`docs/UNCHOKE.md`](docs/UNCHOKE.md) |
+| GET/POST | `/settings/upload` | параллель заливки (только admin) |
 | GET/POST/DELETE | `/creator/*` | создание `.torrent` из папки на диске движка; см. [`docs/CREATOR.md`](docs/CREATOR.md) |
 | POST | `/creator/events/deleted` | движок сообщает о TTL (`X-Register-Key`); API публикует Kafka |
 
 Внутренний API движка (`:8081`, не публичный) зеркалит торрент-операции на уровне `db_id`
-плюс `/health`, `/session/stats`, `/session/limits` и `/internal/v1/creator/*`.
+плюс `/health`, `/session/stats`, `/session/limits`, `/session/net-settings`,
+`/session/unchoke-settings` и `/internal/v1/creator/*`.
 
 **MPW:** топик `creator.task.deleted` (`SEEDING_KAFKA_BOOTSTRAP`, дефолт
 `192.168.1.223:9092`). Тело: `task_key` вида `a1:0`, `reason` = `deleted` | `ttl`.
@@ -260,7 +264,8 @@ API-restore (ниже) остаётся как восстановление по
 `ENGINE_STORAGE_SUBDIR=bX`, `SEEDING_LT_STATE_FILE`, `SEEDING_FASTRESUME_DIR`,
 `LT_LISTEN_INTERFACES`, `LT_CONNECTIONS_LIMIT`, `LT_ENABLE_DHT/LSD/UPNP/NATPMP`,
 `LT_DOWNLOAD/UPLOAD_RATE_LIMIT_BPS`, `LT_ACTIVE_SEEDS/ACTIVE_DOWNLOADS/ACTIVE_LIMIT`,
-`LT_DONT_COUNT_SLOW`.
+`LT_DONT_COUNT_SLOW`, `LT_UNCHOKE_SLOTS_LIMIT`, `LT_SEED_CHOKING_ALGORITHM`.
+Глобально: `GET/POST /api/v1/settings/unchoke` (persist + рассылка на движки).
 
 ---
 
@@ -300,4 +305,5 @@ docker-compose*.yml   базовый, multi-engine, media-override
 ```
 
 См. также: [`ROADMAP.md`](ROADMAP.md), [`docs/MULTI_ENGINE.md`](docs/MULTI_ENGINE.md),
-[`docs/INTEGRATION.md`](docs/INTEGRATION.md), [`README.md`](README.md).
+[`docs/INTEGRATION.md`](docs/INTEGRATION.md), [`docs/UNCHOKE.md`](docs/UNCHOKE.md),
+[`README.md`](README.md).

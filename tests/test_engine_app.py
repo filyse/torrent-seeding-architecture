@@ -52,3 +52,22 @@ def test_engine_internal_delete_mock(engine_app_mock):
         assert d.status_code == 204
         g = client.get("/internal/v1/torrents/7")
         assert g.status_code == 404
+
+
+def test_engine_unchoke_settings_mock(engine_app_mock):
+    with TestClient(engine_app_mock) as client:
+        got = client.get("/internal/v1/session/unchoke-settings")
+        assert got.status_code == 200
+        assert got.json()["unchoke_slots_limit"] == 8
+        assert got.json()["seed_choking_algorithm"] == "fastest_upload"
+        posted = client.post(
+            "/internal/v1/session/unchoke-settings",
+            json={"unchoke_slots_limit": 32, "seed_choking_algorithm": "round_robin"},
+        )
+        assert posted.status_code == 200
+        assert posted.json() == {
+            "unchoke_slots_limit": 32,
+            "seed_choking_algorithm": "round_robin",
+        }
+        again = client.get("/internal/v1/session/unchoke-settings")
+        assert again.json()["seed_choking_algorithm"] == "round_robin"

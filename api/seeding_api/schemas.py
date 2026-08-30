@@ -254,6 +254,18 @@ class NetSettingsOut(BaseModel):
     errors: int | None = None
 
 
+class UnchokeSettingsIn(BaseModel):
+    unchoke_slots_limit: int | None = Field(default=None, ge=-1, le=256)
+    seed_choking_algorithm: str | None = None
+
+
+class UnchokeSettingsOut(BaseModel):
+    unchoke_slots_limit: int
+    seed_choking_algorithm: str
+    applied: int | None = None
+    errors: int | None = None
+
+
 class UploadLimitsIn(BaseModel):
     max_parallel_uploads: int | None = Field(default=None, ge=1, le=8)
     chunk_concurrency: int | None = Field(default=None, ge=1, le=8)

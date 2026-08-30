@@ -14,6 +14,7 @@
   |-------|------|------------|
   | GET | `/health` | Health вне префикса (удобно для compose) |
   | GET | `/internal/v1/health` | Дубль health |
+  | GET/POST | `/internal/v1/session/unchoke-settings` | слоты unchoke и алгоритм сидирования |
   | GET | `/internal/v1/torrents` | Список рантайм-хендлов в движке |
   | POST | `/internal/v1/torrents` | Регистрация: тело `{ "db_id", "magnet_uri?", "save_path" }` |
   | GET | `/internal/v1/torrents/{db_id}` | Снимок рантайма |

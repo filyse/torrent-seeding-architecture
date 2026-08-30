@@ -31,6 +31,9 @@ HTTP-сервис с **внутренним API** (`/internal/v1/*`), плuggabl
 - **`LT_ENABLE_DHT`**, **`LT_ENABLE_LSD`**, **`LT_ENABLE_UPNP`**, **`LT_ENABLE_NATPMP`** — `0`/`false`/`no` отключает (по умолчанию включено, кроме явного `0`).
 - **`LT_DOWNLOAD_RATE_LIMIT_BPS`** / **`LT_UPLOAD_RATE_LIMIT_BPS`** — лимиты в байтах/с (пусто = не трогать дефолт libtorrent).
 - **`LT_CONNECTIONS_LIMIT`** — лимит соединений сессии (если задан и парсится как int).
+- **`LT_UNCHOKE_SLOTS_LIMIT`** — сколько пиров кормить сразу (`-1` = авто). Пусто = 8 (дефолт libtorrent).
+- **`LT_SEED_CHOKING_ALGORITHM`** — `round_robin` / `fastest_upload` / `anti_leech`. Пусто = `fastest_upload`.
+  Оркестратор может переопределить через `POST /api/v1/settings/unchoke`. Откат: 8 и `fastest_upload`.
 
 Применение через `session.apply_settings` или `set_settings` + `session_settings` — зависит от версии биндингов; ошибки логируются как предупреждение.
 

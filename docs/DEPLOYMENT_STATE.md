@@ -382,6 +382,25 @@ bash scripts/deploy-ct400.sh up -d --build web
 
 Проверка: Ctrl+F5 `/cabinet` — справа в шапке нет аватара.
 
+## 7х. Раздача сразу многим — 2026-08-30
+
+api **1.20.0** (на CT400 бамп от 1.19.0), engine **1.4.0**, web **1.40.0**
+затем **1.41.0** (стиль панели). Спека: [`UNCHOKE.md`](UNCHOKE.md).
+
+Прод-деревья длиннее `origin/main` — **не** `git reset --hard`.
+Код фичи вшит точечно; политика в БД: 32 / `round_robin`.
+
+```bash
+# только web после правки панели (CT400)
+cd /opt/containerd
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Движки уже 1.4.0. Откат политики — кнопка в UI, без пересборки.
+
+Проверка: Ctrl+F5; Настройки → Лимиты → поля в одну строку с
+«Загрузка файлов»; `GET /api/v1/settings/unchoke`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

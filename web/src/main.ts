@@ -1925,6 +1925,91 @@ function mountNetSettingsPanel(): HTMLElement {
   return panel;
 }
 
+type UnchokeSettingsOut = {
+  unchoke_slots_limit: number;
+  seed_choking_algorithm: string;
+  applied?: number;
+  errors?: number;
+};
+
+function mountUnchokeSettingsPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  panel.append(el("div", { className: "panel__head" }, ["Раздача сразу многим"]));
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, [
+    "Сколько пиров сессия кормит сразу и кого выбирает. Слоты общие на движок, не на одну раздачу. 8 и fastest_upload — как в libtorrent; кнопка рядом возвращает дефолт.",
+  ]);
+  const slots = el("input", { type: "number", min: "-1", max: "256" }) as HTMLInputElement;
+  const algo = el("select", { className: "select" }) as HTMLSelectElement;
+  for (const [value, label] of [
+    ["fastest_upload", "Самый быстрый"],
+    ["round_robin", "По очереди"],
+    ["anti_leech", "Резать личей"],
+  ] as const) {
+    algo.append(el("option", { value }, [label]));
+  }
+  const saveBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Применить"]);
+  const revertBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Откатить к 8 / fastest"]);
+  const result = el("p", { className: "field__hint" }, [""]);
+
+  const setAll = (s: UnchokeSettingsOut) => {
+    slots.value = String(s.unchoke_slots_limit);
+    algo.value = s.seed_choking_algorithm;
+  };
+
+  const apply = async (body: { unchoke_slots_limit: number; seed_choking_algorithm: string }) => {
+    saveBtn.disabled = true;
+    revertBtn.disabled = true;
+    result.textContent = "Применяю…";
+    try {
+      const s = await fetchJson<UnchokeSettingsOut>("/settings/unchoke", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      setAll(s);
+      result.textContent = `Применено на движках: ${s.applied ?? 0}${s.errors ? `, ошибок: ${s.errors}` : ""}.`;
+      showToast("Настройки раздачи применены");
+    } catch (e) {
+      result.textContent = e instanceof Error ? e.message : String(e);
+      showToast(result.textContent, true);
+    } finally {
+      saveBtn.disabled = false;
+      revertBtn.disabled = false;
+    }
+  };
+
+  saveBtn.addEventListener("click", () => {
+    void apply({
+      unchoke_slots_limit: Number(slots.value),
+      seed_choking_algorithm: algo.value,
+    });
+  });
+  revertBtn.addEventListener("click", () => {
+    void apply({ unchoke_slots_limit: 8, seed_choking_algorithm: "fastest_upload" });
+  });
+
+  void (async () => {
+    try {
+      setAll(await fetchJson<UnchokeSettingsOut>("/settings/unchoke"));
+    } catch {
+      /* ignore */
+    }
+  })();
+
+  body.append(
+    hint,
+    el("div", { className: "limits-form" }, [
+      el("label", { className: "limits-form__field" }, ["Слоты (−1 = авто)", slots]),
+      el("label", { className: "limits-form__field" }, ["Алгоритм", algo]),
+      saveBtn,
+      revertBtn,
+    ]),
+    result,
+  );
+  panel.append(body);
+  return panel;
+}
+
 type UploadLimitsOut = { max_parallel_uploads: number; chunk_concurrency: number };
 
 function mountUploadLimitsPanel(): HTMLElement {
@@ -8299,7 +8384,12 @@ function mountSettingsShell(root: HTMLElement): void {
         const out: HTMLElement[] = [];
         if (canWrite()) out.push(mountWanLimitsPanel());
         if (globalLimits) out.push(globalLimits);
-        out.push(mountEngineLimitsPanel(), mountQuotasPanel(), mountNetSettingsPanel());
+        out.push(
+          mountEngineLimitsPanel(),
+          mountQuotasPanel(),
+          mountNetSettingsPanel(),
+          mountUnchokeSettingsPanel(),
+        );
         if (isAdmin()) out.push(mountUploadLimitsPanel());
         out.push(mountPrivateMaintenancePanel());
         return out;

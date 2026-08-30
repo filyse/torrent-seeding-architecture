@@ -143,6 +143,11 @@ class NetSettingsIn(BaseModel):
     lsd: bool | None = None
 
 
+class UnchokeSettingsIn(BaseModel):
+    unchoke_slots_limit: int | None = Field(default=None, ge=-1, le=256)
+    seed_choking_algorithm: str | None = None
+
+
 class ImportDirectIn(BaseModel):
     source_url: str = Field(..., min_length=4)
     save_path: str = Field(..., min_length=1)
@@ -824,6 +829,18 @@ async def get_session_net(request: Request):
 async def set_session_net(request: Request, body: NetSettingsIn):
     rt = get_runtime(request)
     return await rt.set_net(body.dht, body.pex, body.lsd)
+
+
+@router.get("/session/unchoke-settings")
+async def get_session_unchoke(request: Request):
+    rt = get_runtime(request)
+    return await rt.unchoke_settings()
+
+
+@router.post("/session/unchoke-settings")
+async def set_session_unchoke(request: Request, body: UnchokeSettingsIn):
+    rt = get_runtime(request)
+    return await rt.set_unchoke(body.unchoke_slots_limit, body.seed_choking_algorithm)
 
 
 @router.post("/torrents/{db_id}/trackers", response_model=list[TorrentTrackerOut])

@@ -469,6 +469,30 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def get_unchoke_settings(self) -> dict | None:
+        r = await self._client.get("/internal/v1/session/unchoke-settings")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
+    async def set_unchoke_settings(
+        self,
+        unchoke_slots_limit: int | None,
+        seed_choking_algorithm: str | None,
+    ) -> dict | None:
+        r = await self._client.post(
+            "/internal/v1/session/unchoke-settings",
+            json={
+                "unchoke_slots_limit": unchoke_slots_limit,
+                "seed_choking_algorithm": seed_choking_algorithm,
+            },
+        )
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
     async def set_private(self, db_id: int, enabled: bool | None) -> dict | None:
         r = await self._client.post(
             f"/internal/v1/torrents/{db_id}/private",
