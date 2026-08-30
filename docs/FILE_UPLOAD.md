@@ -14,7 +14,7 @@
 | Куда пишем | Том **этого** движка (`/data` / `storage_prefix`) |
 | Публичный вход | NPM `/u/b/` → 171:8090, `/u/a/` → 243:8090 (как было) |
 | Маршрут до движка | `/{engine_id}/upload/v1/…` (флаг `SEEDING_UPLOAD_PER_ENGINE=1`) |
-| Внутренний API | **Не** публикуем. Edge проксирует только `/upload/v1` и `/health` |
+| Внутренний API | **Не** публикуем. Edge: `/upload/v1`, `/download/v1`, `/health` |
 | Auth | Короткий HMAC upload-ticket от API; ticket.eng должен совпасть с id движка |
 | Релей | Без изменений логики: база + `/{engine_id}` уезжает на seedbox2 `/u/{a\|b}/…` |
 | Откат | `SEEDING_UPLOAD_PER_ENGINE=0` + снова sidecar; либо флаг upload off |

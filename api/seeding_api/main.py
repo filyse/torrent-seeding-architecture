@@ -34,6 +34,7 @@ from seeding_api.routers import session as session_router
 from seeding_api.routers import settings as settings_router
 from seeding_api.routers import stream as stream_router
 from seeding_api.routers import torrents as torrents_router
+from seeding_api.routers import download as download_router
 from seeding_api.routers import upload as upload_router
 from seeding_api.routers import ws as ws_router
 from seeding_api.runtime_snapshot import runtime_snapshot_loop
@@ -278,6 +279,11 @@ app.include_router(
 )
 app.include_router(
     upload_router.router,
+    prefix="/api/v1",
+    dependencies=[Depends(require_auth)],
+)
+app.include_router(
+    download_router.router,
     prefix="/api/v1",
     dependencies=[Depends(require_auth)],
 )

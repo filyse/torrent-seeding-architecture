@@ -77,6 +77,103 @@ def verify_ticket(token: str, secret: str, *, now: float | None = None) -> Ticke
     return claims
 
 
+@dataclass(frozen=True)
+class DownloadTicketClaims:
+    engine_id: str
+    torrent_id: int
+    path: str
+    uid: str
+    exp: int
+    jti: str
+
+
+def normalize_download_path(path: str) -> str:
+    """Относительный путь файла раздачи без '..' и абсолютного корня."""
+    raw = (path or "").replace("\\", "/").strip()
+    if not raw or raw.startswith("/") or ":" in raw.split("/")[0]:
+        raise TicketError("invalid download path")
+    parts: list[str] = []
+    for part in raw.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise TicketError("invalid download path")
+        parts.append(part)
+    if not parts:
+        raise TicketError("invalid download path")
+    return "/".join(parts)
+
+
+def verify_download_ticket(token: str, secret: str, *, now: float | None = None) -> DownloadTicketClaims:
+    if not secret:
+        raise TicketError("download ticket secret not configured")
+    parts = token.split(".")
+    if len(parts) != 2:
+        raise TicketError("malformed ticket")
+    payload_b64, sig_b64 = parts
+    payload = _b64url_decode(payload_b64)
+    expected = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).digest()
+    try:
+        got = _b64url_decode(sig_b64)
+    except Exception as exc:  # noqa: BLE001
+        raise TicketError("bad signature encoding") from exc
+    if not hmac.compare_digest(expected, got):
+        raise TicketError("invalid ticket signature")
+    try:
+        data = json.loads(payload.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise TicketError("invalid ticket payload") from exc
+    if str(data.get("k", "")) != "dl":
+        raise TicketError("not a download ticket")
+    try:
+        path = normalize_download_path(str(data["path"]))
+        claims = DownloadTicketClaims(
+            engine_id=str(data["eng"]),
+            torrent_id=int(data["tid"]),
+            path=path,
+            uid=str(data.get("uid", "")),
+            exp=int(data["exp"]),
+            jti=str(data["jti"]),
+        )
+    except (KeyError, TypeError, ValueError, TicketError) as exc:
+        raise TicketError("ticket missing fields") from exc
+    ts = time.time() if now is None else now
+    if claims.exp < ts:
+        raise TicketError("ticket expired")
+    if not claims.engine_id or claims.torrent_id < 1:
+        raise TicketError("ticket empty identity")
+    return claims
+
+
+def issue_download_ticket(
+    *,
+    secret: str,
+    engine_id: str,
+    torrent_id: int,
+    path: str,
+    uid: str,
+    ttl_seconds: int = 300,
+    jti: str | None = None,
+    now: float | None = None,
+) -> str:
+    """Только для тестов / зеркало API (прод выдаёт api)."""
+    import secrets as _secrets
+
+    ts = time.time() if now is None else now
+    payload = {
+        "k": "dl",
+        "eng": engine_id,
+        "tid": int(torrent_id),
+        "path": normalize_download_path(path),
+        "uid": uid,
+        "exp": int(ts + ttl_seconds),
+        "jti": jti or _secrets.token_urlsafe(16),
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    sig = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).digest()
+    return f"{_b64url_encode(raw)}.{_b64url_encode(sig)}"
+
+
 def issue_ticket(
     *,
     secret: str,

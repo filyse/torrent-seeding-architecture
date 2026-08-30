@@ -1,5 +1,11 @@
 import "./style.css";
 import {
+  fileIsComplete,
+  loadDownloadFeatures,
+  startFileDownload,
+  type DownloadFeatures,
+} from "./fileDownload";
+import {
   applyUploadLimits,
   fileUploadInboundByEngine,
   fileUploadInboundTotal,
@@ -2564,7 +2570,12 @@ function buildPeersSpoiler(peers: TorrentPeerOut[], torrentId: number): HTMLDeta
   return d;
 }
 
-function buildFilesSpoiler(files: TorrentFileOut[], torrentId: number, onChange: () => void): HTMLDetailsElement {
+function buildFilesSpoiler(
+  files: TorrentFileOut[],
+  torrentId: number,
+  onChange: () => void,
+  download?: DownloadFeatures,
+): HTMLDetailsElement {
   const inner = el("div", { className: "details-block__content" });
   if (files.length === 0) {
     inner.append(el("p", { className: "details-block__empty" }, ["Список файлов недоступен (нет метаданных)"]));
@@ -2572,9 +2583,12 @@ function buildFilesSpoiler(files: TorrentFileOut[], torrentId: number, onChange:
     applyDetailSpoilerState(empty, torrentId, "files");
     return empty;
   }
+  const showDl = Boolean(canWrite() && download?.enabled);
   const table = el("table", { className: "peer-table file-table" });
   const headRow = el("tr");
-  for (const label of ["Файл", "Размер", "%", "Приоритет"]) headRow.append(el("th", {}, [label]));
+  const labels = ["Файл", "Размер", "%", "Приоритет"];
+  if (showDl) labels.push("Скачать");
+  for (const label of labels) headRow.append(el("th", {}, [label]));
   const body = el("tbody");
   for (const f of files) {
     const row = el("tr");
@@ -2606,6 +2620,59 @@ function buildFilesSpoiler(files: TorrentFileOut[], torrentId: number, onChange:
       el("td", { className: "peer-table__num" }, [pct]),
       el("td", {}, [select]),
     );
+    if (showDl) {
+      const ready = fileIsComplete(f.progress);
+      const dlBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Скачать"]) as HTMLButtonElement;
+      dlBtn.disabled = !ready;
+      if (!ready) dlBtn.title = "файл ещё качается";
+      dlBtn.addEventListener("click", async () => {
+        if (!ready) return;
+        dlBtn.disabled = true;
+        try {
+          await startFileDownload(
+            { fetchJson, showToast },
+            torrentId,
+            f.path,
+            false,
+          );
+        } catch (e) {
+          showToast(e instanceof Error ? e.message : String(e), true);
+        } finally {
+          dlBtn.disabled = !ready;
+        }
+      });
+      const cellKids: (string | Node)[] = [dlBtn];
+      if (download?.relay_enabled) {
+        const ru = el("button", {
+          type: "button",
+          className: "btn btn--sm",
+          title: "Скачать через RU-релей",
+        }, ["Через RU"]) as HTMLButtonElement;
+        ru.disabled = !ready;
+        ru.addEventListener("click", async () => {
+          if (!ready) return;
+          ru.disabled = true;
+          try {
+            await startFileDownload(
+              { fetchJson, showToast },
+              torrentId,
+              f.path,
+              true,
+            );
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : String(e), true);
+          } finally {
+            ru.disabled = !ready;
+          }
+        });
+        cellKids.push(ru);
+      }
+      row.append(
+        el("td", { className: "file-table__dl" }, [
+          el("div", { className: "file-table__dl-btns" }, cellKids),
+        ]),
+      );
+    }
     body.append(row);
   }
   table.append(el("thead", {}, [headRow]), body);
@@ -5061,13 +5128,15 @@ async function loadDetail(
     const data = await fetchJson<TorrentDetailOut>(`/torrents/${id}`, { signal });
     if (signal.aborted) return;
 
-    const [filesRes, trackersRes] = await Promise.allSettled([
+    const [filesRes, trackersRes, downloadRes] = await Promise.allSettled([
       fetchJson<TorrentFileOut[]>(`/torrents/${id}/files`, { signal }),
       fetchJson<TorrentTrackerOut[]>(`/torrents/${id}/trackers`, { signal }),
+      loadDownloadFeatures(fetchJson),
     ]);
     if (signal.aborted) return;
     const files = filesRes.status === "fulfilled" ? filesRes.value : [];
     const trackers = trackersRes.status === "fulfilled" ? trackersRes.value : [];
+    const downloadFeatures = downloadRes.status === "fulfilled" ? downloadRes.value : undefined;
 
     const active = isActivelyDownloading(data);
     metaEl.replaceChildren(
@@ -5363,7 +5432,7 @@ async function loadDetail(
     body.append(head, sub, progressWrap, chips);
     if (canWrite()) body.append(toolbar, manage);
     body.append(
-      buildFilesSpoiler(files, id, () => void backRefresh()),
+      buildFilesSpoiler(files, id, () => void backRefresh(), downloadFeatures),
       buildTrackersSpoiler(trackers, id, () => void backRefresh()),
       buildPeersSpoiler(data.peer_list ?? [], id),
       metaBlock,

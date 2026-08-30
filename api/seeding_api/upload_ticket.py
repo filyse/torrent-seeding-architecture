@@ -120,3 +120,68 @@ def normalize_dest_dir(storage_prefix: str, dest_dir: str) -> str:
     ):
         raise ValueError("dest_dir must not be .upload-tmp")
     return dest.replace("\\", "/")
+
+
+def download_enabled() -> bool:
+    """Скачивание файла с движка. По умолчанию вкл., как только секрет и URL на месте."""
+    return os.getenv("SEEDING_DOWNLOAD_ENABLED", "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def download_ticket_secret() -> str:
+    return os.getenv("SEEDING_DOWNLOAD_TICKET_SECRET", "").strip() or ticket_secret()
+
+
+def download_ticket_ttl() -> int:
+    try:
+        return max(30, int(os.getenv("SEEDING_DOWNLOAD_TICKET_TTL", "300")))
+    except ValueError:
+        return 300
+
+
+def normalize_download_path(path: str) -> str:
+    raw = (path or "").replace("\\", "/").strip()
+    if not raw or raw.startswith("/") or ":" in raw.split("/")[0]:
+        raise ValueError("path must be a relative torrent file path")
+    parts: list[str] = []
+    for part in raw.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise ValueError("path must not contain '..'")
+        parts.append(part)
+    if not parts:
+        raise ValueError("path must be a relative torrent file path")
+    return "/".join(parts)
+
+
+def issue_download_ticket(
+    *,
+    engine_id: str,
+    torrent_id: int,
+    path: str,
+    uid: str,
+    ttl_seconds: int | None = None,
+) -> str:
+    secret = download_ticket_secret()
+    if not secret:
+        raise RuntimeError("SEEDING_UPLOAD_TICKET_SECRET is not set")
+    if ttl_seconds is None:
+        ttl_seconds = download_ticket_ttl()
+    rel = normalize_download_path(path)
+    payload = {
+        "k": "dl",
+        "eng": engine_id,
+        "tid": int(torrent_id),
+        "path": rel,
+        "uid": uid,
+        "exp": int(time.time() + ttl_seconds),
+        "jti": secrets.token_urlsafe(16),
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    sig = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).digest()
+    return f"{_b64url_encode(raw)}.{_b64url_encode(sig)}"

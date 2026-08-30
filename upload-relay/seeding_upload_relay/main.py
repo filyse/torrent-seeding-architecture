@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from seeding_upload_relay import __version__
 
@@ -125,6 +126,11 @@ def _filter_resp_headers(headers: httpx.Headers) -> dict[str, str]:
     return out
 
 
+def uses_stream(method: str) -> bool:
+    """GET/HEAD (скачивание) — стрим без буфера файла. PUT/POST заливки — как раньше."""
+    return method.upper() in {"GET", "HEAD"}
+
+
 @app.get("/health")
 async def health():
     return {
@@ -148,11 +154,62 @@ async def proxy(contour: str, full_path: str, request: Request) -> Response:
     if request.url.query:
         url = f"{url}?{request.url.query}"
 
-    # Чанки до ~8 МБ — держим в RAM и сразу шлём апстриму (без диска).
-    body = await request.body()
     assert _client is not None
     headers = _filter_req_headers(request)
-    last_exc: httpx.RequestError | None = None
+
+    if uses_stream(request.method):
+        last_exc: httpx.RequestError | None = None
+        for attempt in range(1, _UPSTREAM_RETRIES + 1):
+            try:
+                req = _client.build_request(request.method, url, headers=headers)
+                upstream = await _client.send(req, stream=True)
+                break
+            except httpx.RequestError as exc:
+                last_exc = exc
+                detail = format_upstream_error(exc)
+                log.warning(
+                    "upstream %s %s failed attempt=%s/%s: %s",
+                    request.method,
+                    url,
+                    attempt,
+                    _UPSTREAM_RETRIES,
+                    detail,
+                )
+                if attempt < _UPSTREAM_RETRIES:
+                    await asyncio.sleep(0.4 * attempt)
+        else:
+            assert last_exc is not None
+            raise HTTPException(
+                status_code=502,
+                detail=f"upstream error: {format_upstream_error(last_exc)}",
+            ) from last_exc
+
+        resp_headers = _filter_resp_headers(upstream.headers)
+        if request.method == "HEAD":
+            await upstream.aclose()
+            return Response(
+                status_code=upstream.status_code,
+                headers=resp_headers,
+                media_type=upstream.headers.get("content-type"),
+            )
+
+        async def _iter():
+            try:
+                async for chunk in upstream.aiter_bytes(64 * 1024):
+                    yield chunk
+            finally:
+                await upstream.aclose()
+
+        return StreamingResponse(
+            _iter(),
+            status_code=upstream.status_code,
+            headers=resp_headers,
+            media_type=upstream.headers.get("content-type"),
+        )
+
+    # Чанки до ~8 МБ — держим в RAM и сразу шлём апстриму (без диска).
+    body = await request.body()
+    last_exc = None
     for attempt in range(1, _UPSTREAM_RETRIES + 1):
         try:
             upstream = await _client.request(

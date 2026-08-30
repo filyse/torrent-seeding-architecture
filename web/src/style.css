@@ -1977,6 +1977,19 @@ input.file-input::file-selector-button:hover {
   max-width: 28rem;
 }
 
+.file-table__dl {
+  width: 1%;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.file-table__dl-btns {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
 .file-prio {
   padding: 0.25rem 0.4rem;
   border: 1px solid var(--border);

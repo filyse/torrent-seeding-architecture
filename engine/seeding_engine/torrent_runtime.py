@@ -1165,15 +1165,25 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
 
         return await asyncio.to_thread(_scan)
 
+    @staticmethod
+    def rel_under_content_root(base: Path, rel: str) -> str:
+        """file_path из libtorrent часто начинается с имени корня раздачи."""
+        rel_n = rel.replace("\\", "/").lstrip("/")
+        prefix = base.name.replace("\\", "/") + "/"
+        if rel_n.startswith(prefix):
+            return rel_n[len(prefix) :]
+        return rel_n
+
     async def content_file_path(self, db_id: int, rel: str) -> Path | None:
         """Абсолютный путь к файлу контента (для отдачи с поддержкой Range)."""
         loc = await self.content_location(db_id)
         if loc is None:
             return None
         base = Path(loc[0])
+        rel_n = self.rel_under_content_root(base, rel)
         if base.is_file():
-            return base if rel in ("", base.name) else None
-        return self._safe_join(base, rel)
+            return base if rel_n in ("", base.name) else None
+        return self._safe_join(base, rel_n)
 
     @staticmethod
     def import_file_size(save_path: str, root: str, rel: str) -> int:

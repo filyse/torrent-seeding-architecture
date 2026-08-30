@@ -21,12 +21,20 @@ except ImportError:  # нет upload/seeding_upload в PYTHONPATH
     async def upload_gc_loop(_storage):
         return
 
+try:
+    from seeding_engine.download_http import mount_download
+except ImportError:
+
+    def mount_download(_app):
+        return False
+
 setup_logging("engine")
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="Seeding engine", version="0.1.0")
 app.include_router(internal_router)
 _upload_storage = mount_upload(app)
+mount_download(app)
 
 
 def _self_register_payload() -> dict | None:
