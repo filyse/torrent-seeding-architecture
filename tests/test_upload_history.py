@@ -6,6 +6,7 @@ import pytest
 from seeding_db.models import Base
 from seeding_db.repository import UploadSampleRepository
 from seeding_db.upload_history import (
+    PLAUSIBLE_CAP_BPS,
     bucket_is_sampled,
     build_sample_rows,
     counter_delta,
@@ -17,6 +18,7 @@ from seeding_db.upload_history import (
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 GB = 1024**3
+TB = 1024**4
 UTC = timezone.utc
 
 
@@ -32,14 +34,39 @@ def test_delta_growing_counter():
     assert counter_delta(8 * GB, 9 * GB) == 1 * GB
 
 
-def test_delta_reset_uses_new_value():
-    """Счётчик уехал назад (рестарт/перенос) — берём новое значение как дельту."""
-    assert counter_delta(100 * GB, 3 * GB) == 3 * GB
+def test_delta_reset_is_zero():
+    """Счётчик уехал назад — это новый базис, не отдача за интервал."""
+    assert counter_delta(100 * GB, 3 * GB) == 0
+
+
+def test_small_dip_does_not_count_lifetime_as_traffic():
+    """Прод b6 2026-08-25 11:00: −55 GB. Старое правило «сброс = curr» давало 62.8 TB/день."""
+    prev = 69_135_253_042_848
+    curr = 69_080_228_674_664
+    assert prev - curr == 55_024_368_184
+    assert counter_delta(prev, curr) == 0
+    assert counter_delta(prev, curr) < GB
 
 
 def test_offline_engine_reuses_last_sample():
     merged = merge_engine_totals({"b1": 10}, {"b1": 8, "b2": 5}, {"b1", "b2"})
     assert merged == {"b1": 10, "b2": 5}
+
+
+def test_live_zero_does_not_overwrite_last():
+    merged = merge_engine_totals({"b6": 0}, {"b6": 60 * TB}, {"b6"})
+    assert merged == {"b6": 60 * TB}
+
+
+def test_plausible_15min_growth_counts():
+    assert counter_delta(10 * GB, 25 * GB, dt=timedelta(minutes=15)) == 15 * GB
+
+
+def test_implausible_jump_is_not_traffic():
+    """0 → lifetime за 15 мин — не отдача, а подгрузились раздачи."""
+    assert counter_delta(0, 63 * TB, dt=timedelta(minutes=15)) == 0
+    limit = int(PLAUSIBLE_CAP_BPS / 8 * 900)
+    assert 63 * TB > limit
 
 
 def test_removed_engine_is_dropped():
@@ -110,7 +137,28 @@ def test_rollup_reset_in_bucket():
         (origin - timedelta(minutes=5), 50 * GB),
         (origin + timedelta(minutes=10), 2 * GB),
     ]
-    assert rollup_series(points, buckets, timedelta(hours=1)) == [2 * GB]
+    assert rollup_series(points, buckets, timedelta(hours=1)) == [0]
+
+
+def test_week_dip_does_not_make_impossible_day():
+    """Тот же провал b6, что на проде: вторник не должен стать ~63 TB."""
+    now = ts(2026, 8, 25, 22)
+    samples = [
+        (ts(2026, 8, 24, 10, 0), "engine", "b6", 68_094_148_973_020),
+        (ts(2026, 8, 25, 10, 45), "engine", "b6", 69_135_253_042_848),
+        (ts(2026, 8, 25, 11, 0), "engine", "b6", 69_080_228_674_664),
+        (ts(2026, 8, 25, 11, 15), "engine", "b6", 69_095_416_328_148),
+    ]
+    hist = history_from_samples(
+        samples,
+        "week",
+        now,
+        wan_ids=["wan1"],
+        engine_wan={"b6": "wan1"},
+    )
+    tue = next(b for b in hist.buckets if b.t == ts(2026, 8, 25))
+    assert tue.engines["b6"] < 5 * TB
+    assert hist.total.wan["wan1"] < 5 * TB
 
 
 def test_history_from_samples_day_and_previous_window():
@@ -157,9 +205,9 @@ def test_history_single_engine_reset_does_not_inflate_other_wan():
         engine_wan={"b1": "wan1", "a1": "wan2"},
     )
     hour_11 = next(b for b in hist.buckets if b.t == ts(2026, 8, 24, 11))
-    assert hour_11.wan["wan1"] == 2 * GB
+    assert hour_11.wan["wan1"] == 0
     assert hour_11.wan["wan2"] == 1 * GB
-    assert hour_11.farm == 3 * GB
+    assert hour_11.farm == 1 * GB
 
 
 def test_single_sample_marks_only_that_bucket_sampled():

@@ -136,6 +136,57 @@ def storage_disk() -> tuple[int | None, int | None, str]:
     return total, free, path
 
 
+def _read_rotational_sysfs(major: int, minor: int) -> bool | None:
+    """1 = шпиндель, 0 = SSD. Идём от раздела к диску, если у раздела нет queue."""
+    node = os.path.realpath(f"/sys/dev/block/{major}:{minor}")
+    seen: set[str] = set()
+    for _ in range(8):
+        if not node or node in seen or not os.path.isdir(node):
+            return None
+        seen.add(node)
+        rot = os.path.join(node, "queue", "rotational")
+        if os.path.isfile(rot):
+            try:
+                return open(rot, encoding="ascii").read().strip() == "1"
+            except OSError:
+                return None
+        node = os.path.realpath(os.path.join(node, ".."))
+    return None
+
+
+def rotational_for_path(path: str) -> bool | None:
+    """Ротационный ли блок-девайс тома. None — sysfs недоступен (не Linux / нет /sys)."""
+    try:
+        st = os.stat(path)
+        # os.major/os.minor есть только на Unix. На Windows hold пойдёт как unknown.
+        major_fn = getattr(os, "major", None)
+        minor_fn = getattr(os, "minor", None)
+        if major_fn is None or minor_fn is None:
+            return None
+        return _read_rotational_sysfs(major_fn(st.st_dev), minor_fn(st.st_dev))
+    except (OSError, AttributeError, TypeError):
+        return None
+
+
+def classify_storage_path(path: str) -> str:
+    """hdd / ssd / unknown по sysfs тома. Корень контейнера /data сюда не передаём."""
+    rot = rotational_for_path(path)
+    if rot is None:
+        return "unknown"
+    return "hdd" if rot else "ssd"
+
+
+def storage_kind(path: str | None = None) -> str:
+    """Тип диска раздачи. Считаем по storage_path(), не по /data (там часто OS NVMe).
+
+    SEEDING_STORAGE_KIND=hdd|ssd|unknown — ручной override, если детект врёт.
+    """
+    override = os.getenv("SEEDING_STORAGE_KIND", "").strip().lower()
+    if override in ("hdd", "ssd", "unknown"):
+        return override
+    return classify_storage_path(path or storage_path())
+
+
 def engine_version() -> str:
     try:
         from seeding_engine import __version__  # noqa: PLC0415
@@ -195,5 +246,6 @@ def collect(rt=None) -> dict:
         "proc_rss": _proc_rss(),
         "disk_total": disk_total,
         "disk_free": disk_free,
+        "disk_kind": storage_kind(disk_path),
     }
     return out

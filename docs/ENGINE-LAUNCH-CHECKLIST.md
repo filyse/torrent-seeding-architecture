@@ -117,6 +117,15 @@
   # /data — корень CT (мелкий); /data/<ENG> — диск с контентом (терабайты)
   ```
 
+- [ ] Тип диска (`disk_kind`) считается по `/data/<ENG>`, не по `/data`. На 171
+      корень — NVMe, контент — HDD: b* должны быть `hdd`, иначе hold хеша не
+      включится. a* — `ssd`. Спека: `docs/CREATOR_UPLOAD_HOLD.md`.
+
+  ```bash
+  docker exec <ENG>-seeding wget -qO- http://127.0.0.1:8081/health
+  # disk_kind=hdd|ssd
+  ```
+
 - [ ] `sysinfo`/UI («Диск раздачи»/«Путь раздачи») показывают том `/data/<ENG>` и его размер,
       совпадающие с `df` выше (а не размер корня CT):
 

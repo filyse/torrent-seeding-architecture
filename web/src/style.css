@@ -3855,6 +3855,11 @@ input.file-input::file-selector-button:hover {
   color: var(--muted);
 }
 
+.creator-task__hold {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 .creator-task--ok .creator-task__status {
   color: var(--success, #16a34a);
 }

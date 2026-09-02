@@ -157,6 +157,7 @@ class CreatorTaskOut(BaseModel):
     created_at: float
     updated_at: float
     has_torrent: bool
+    upload_hold: bool = False
 
 
 class CreatorSeedIn(BaseModel):

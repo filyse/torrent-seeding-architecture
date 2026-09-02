@@ -20,6 +20,7 @@ def engine_app(monkeypatch, tmp_path):
     (tmp_path / "b1" / "movie.mp4").write_bytes(b"b" * 2048)
     monkeypatch.setenv("SEEDING_ENGINE_BACKEND", "mock")
     monkeypatch.setenv("SEEDING_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SEEDING_STORAGE_KIND", "ssd")
     import seeding_engine.main as main
 
     importlib.reload(main)
@@ -101,6 +102,37 @@ def test_creator_service_ttl_prunes_on_access(tmp_path):
         assert captured[0][0] == "ttl"
         assert captured[0][1][0]["id"] == 0
         assert captured[0][1][0]["source_path"] == "b1/x"
+    finally:
+        svc.shutdown()
+
+
+def test_creator_releases_hold_on_error(monkeypatch, tmp_path):
+    import time
+
+    from seeding_engine.creator import CreatorService
+
+    events: list[bool] = []
+    monkeypatch.setenv("SEEDING_DATA_ROOT", str(tmp_path))
+    (tmp_path / "f.bin").write_bytes(b"x")
+    monkeypatch.setattr("seeding_engine.creator._try_import_libtorrent", lambda: object())
+    svc = CreatorService(on_hash_hold=lambda on: events.append(on) or on)
+    monkeypatch.setattr(
+        svc,
+        "_build_torrent",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("hash fail")),
+    )
+    try:
+        task = svc.create("f.bin", skip_episode_check=True)
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            row = svc.get(task.id)
+            if row and row.status.value == "failed":
+                break
+            time.sleep(0.05)
+        assert events == [True, False]
+        done = svc.get(task.id)
+        assert done is not None
+        assert done.upload_hold is False
     finally:
         svc.shutdown()
 

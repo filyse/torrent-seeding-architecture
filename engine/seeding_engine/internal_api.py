@@ -184,6 +184,7 @@ class CreateTaskOut(BaseModel):
     created_at: float
     updated_at: float
     has_torrent: bool
+    upload_hold: bool = False
 
 
 def get_creator(request: Request) -> creator_mod.CreatorService:
@@ -288,6 +289,12 @@ async def internal_health(request: Request):
         "backend": rt.backend_name,
         "version": _sysinfo.engine_version(),
         "built_at": _sysinfo.build_time(),
+        "disk_kind": getattr(rt, "disk_kind", None),
+        **(
+            rt.creator_hold_stats()
+            if hasattr(rt, "creator_hold_stats")
+            else {}
+        ),
     }
 
 

@@ -34,6 +34,8 @@ HTTP-сервис с **внутренним API** (`/internal/v1/*`), плuggabl
 - **`LT_UNCHOKE_SLOTS_LIMIT`** — сколько пиров кормить сразу (`-1` = авто). Пусто = 8 (дефолт libtorrent).
 - **`LT_SEED_CHOKING_ALGORITHM`** — `round_robin` / `fastest_upload` / `anti_leech`. Пусто = `fastest_upload`.
   Оркестратор может переопределить через `POST /api/v1/settings/unchoke`. Откат: 8 и `fastest_upload`.
+- **`SEEDING_CREATOR_UPLOAD_LIMIT_BPS`** — потолок отдачи на время хеша на HDD (дефолт `1048576`). `0` — не ограничивать.
+- **`SEEDING_STORAGE_KIND`** — `hdd` / `ssd` / `unknown`, если автодетект тома врёт. Пусто = sysfs `rotational` у `storage_path()`.
 
 Применение через `session.apply_settings` или `set_settings` + `session_settings` — зависит от версии биндингов; ошибки логируются как предупреждение.
 

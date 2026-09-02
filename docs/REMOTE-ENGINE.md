@@ -59,6 +59,11 @@ TTL задач creator (по умолчанию 24 ч) чистит RAM на д�
 `X-Register-Key`). Оркестратор публикует Kafka `creator.task.deleted` — вкладка MPW
 снимает строку. Новых переменных в `.env.engine` для этого нет.
 
+На время хеша `.torrent` HDD-движок сам режет отдачу до 1 МБ/с (hold в RAM,
+не в БД). SSD не трогает. Дефолтов достаточно; override —
+`SEEDING_CREATOR_UPLOAD_LIMIT_BPS` / `SEEDING_STORAGE_KIND`. Спека:
+[`CREATOR_UPLOAD_HOLD.md`](CREATOR_UPLOAD_HOLD.md).
+
 ## Жизненный цикл / выбытие
 
 Движок шлёт heartbeat каждые `SEEDING_ENGINE_HEARTBEAT_INTERVAL` секунд. Если оркестратор не

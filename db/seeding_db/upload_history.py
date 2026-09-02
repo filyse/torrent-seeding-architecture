@@ -1,8 +1,10 @@
 """Сэмплы накопителя отдачи и rollup дельт по корзинам (день / неделя / месяц).
 
 График рисует объём ЗА корзину, не бегущую сумму. Дельта:
-`curr >= prev ? curr - prev : curr` — сброс счётчика (рестарт/перенос) берём как
-новое значение, как в carry квот. Первый сэмпл ряда даёт дельту 0.
+`curr >= prev ? curr - prev : 0` — сброс/провал счётчика это новый базис, не
+отдача за интервал. Раньше «сброс = curr» на провале в 55 GB у b6 рисовало 63 TB
+за день (весь накопитель). Первый сэмпл ряда даёт дельту 0. Скачок больше
+ёмкости канала за dt — тоже 0: вернулась раздача, не трафик.
 
 Ферма и WAN при чтении складываются из рядов движков: сброс одного движка не
 раздувает дельту всей фермы.
@@ -19,6 +21,9 @@ SCOPE_ENGINE = "engine"
 
 PERIODS = ("day", "week", "month")
 
+# 2 Gbit/s: оба аплинка по 1G, один движок может забить канал, плюс запас.
+PLAUSIBLE_CAP_BPS = 2_000_000_000
+
 # sampled_at, scope, scope_id, uploaded
 SampleRow = tuple[datetime, str, str, int]
 
@@ -29,13 +34,29 @@ def aware(t: datetime) -> datetime:
     return t.astimezone(timezone.utc)
 
 
-def counter_delta(prev: int | None, curr: int) -> int:
-    """Дельта накопителя. Нет предыдущего — 0; сброс — новое значение целиком."""
+def counter_delta(
+    prev: int | None,
+    curr: int,
+    *,
+    dt: timedelta | None = None,
+    cap_bps: int = PLAUSIBLE_CAP_BPS,
+) -> int:
+    """Дельта накопителя. Нет предыдущего — 0; сброс — 0 (новый базис)."""
     if prev is None:
         return 0
     curr = max(0, int(curr))
     prev = int(prev)
-    return (curr - prev) if curr >= prev else curr
+    if curr < prev:
+        return 0
+    delta = curr - prev
+    if dt is not None:
+        seconds = max(0.0, dt.total_seconds())
+        if seconds <= 0:
+            return 0
+        limit = int(cap_bps / 8.0 * seconds)
+        if delta > limit:
+            return 0
+    return delta
 
 
 def merge_engine_totals(
@@ -43,11 +64,15 @@ def merge_engine_totals(
     last: dict[str, int],
     known_ids: set[str],
 ) -> dict[str, int]:
-    """Офлайн-движок не пишем как 0 — это выглядело бы как сброс счётчика."""
+    """Офлайн и «ещё 0» не пишем как ноль — это сброс накопителя на графике."""
     out = {eid: int(last[eid]) for eid in known_ids if eid in last}
     for eid, val in live.items():
-        if eid in known_ids:
-            out[eid] = int(val)
+        if eid not in known_ids:
+            continue
+        val = max(0, int(val))
+        if val <= 0 and eid in last and int(last[eid]) > 0:
+            continue
+        out[eid] = val
     return out
 
 
@@ -111,11 +136,14 @@ def rollup_series(
     origin = buckets[0]
     step_s = step.total_seconds() or 1
     prev_u: int | None = None
+    prev_t: datetime | None = None
     for raw_t, raw_u in points:
         t = aware(raw_t)
         u = max(0, int(raw_u))
-        delta = counter_delta(prev_u, u)
+        dt = (t - prev_t) if prev_t is not None else None
+        delta = counter_delta(prev_u, u, dt=dt)
         prev_u = u
+        prev_t = t
         if delta <= 0 or t < origin:
             continue
         idx = int((t - origin).total_seconds() // step_s)

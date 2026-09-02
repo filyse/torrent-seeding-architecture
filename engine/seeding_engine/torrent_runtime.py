@@ -24,12 +24,14 @@ from seeding_engine.fastresume_io import (
     try_read_resume_params,
 )
 from seeding_engine.store import RuntimeHandle, RuntimeStore
+from seeding_engine.sysinfo import storage_kind
 from seeding_engine.unchoke import (
     DEFAULT_UNCHOKE,
     env_unchoke_settings,
     normalize_unchoke_settings,
     unchoke_settings_for_lt,
 )
+from seeding_engine.upload_hold import SessionUploadGate
 
 log = logging.getLogger(__name__)
 
@@ -372,6 +374,17 @@ class TorrentRuntime(ABC):
     ) -> dict[str, object]:
         return {}
 
+    def set_creator_hold(self, active: bool) -> bool:
+        """Временный кап отдачи на хеш. True — hold взят (HDD)."""
+        return False
+
+    def creator_hold_stats(self) -> dict[str, object]:
+        return {
+            "disk_kind": getattr(self, "disk_kind", "unknown"),
+            "creator_upload_hold": False,
+            "creator_upload_hold_bps": 0,
+        }
+
     async def unchoke_settings(self) -> dict:
         return dict(DEFAULT_UNCHOKE)
 
@@ -389,6 +402,38 @@ class MockTorrentRuntime(TorrentRuntime):
     def __init__(self) -> None:
         self._store = RuntimeStore()
         self._unchoke = dict(env_unchoke_settings())
+        self.disk_kind = storage_kind()
+        self._applied_upload = 0
+        self._upload_gate = SessionUploadGate(apply=self._apply_session_upload)
+
+    def _apply_session_upload(self, bps: int) -> None:
+        self._applied_upload = max(0, int(bps))
+
+    def set_creator_hold(self, active: bool) -> bool:
+        if active:
+            return self._upload_gate.begin_create(self.disk_kind)
+        self._upload_gate.end_create()
+        return False
+
+    def creator_hold_stats(self) -> dict[str, object]:
+        return {"disk_kind": self.disk_kind, **self._upload_gate.stats()}
+
+    async def session_stats(self) -> dict[str, object]:
+        return {
+            "torrents": 0,
+            "torrents_active": 0,
+            "download_rate": 0,
+            "upload_rate": 0,
+            "upload_limit": self._applied_upload,
+            **self.creator_hold_stats(),
+        }
+
+    async def set_session_limits(
+        self, download_limit: int | None, upload_limit: int | None
+    ) -> dict[str, object]:
+        if upload_limit is not None:
+            self._upload_gate.set_desired(int(upload_limit))
+        return await self.session_stats()
 
     async def unchoke_settings(self) -> dict:
         return dict(self._unchoke)
@@ -619,6 +664,23 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             "lsd": _env_bool("LT_ENABLE_LSD", True),
         }
         self._unchoke = dict(env_unchoke_settings())
+        self.disk_kind = storage_kind()
+        self._upload_gate = SessionUploadGate(apply=self._apply_session_upload)
+
+    def _apply_session_upload(self, bps: int) -> None:
+        ses = self._ses
+        if ses is None or not hasattr(ses, "set_upload_rate_limit"):
+            return
+        ses.set_upload_rate_limit(max(0, int(bps)))
+
+    def set_creator_hold(self, active: bool) -> bool:
+        if active:
+            return self._upload_gate.begin_create(self.disk_kind)
+        self._upload_gate.end_create()
+        return False
+
+    def creator_hold_stats(self) -> dict[str, object]:
+        return {"disk_kind": self.disk_kind, **self._upload_gate.stats()}
 
     async def start(self) -> None:
         lt = self._lt
@@ -642,7 +704,19 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             if self._ses is not None:
                 return
             self._ses = await asyncio.to_thread(_mk)
-        log.info("libtorrent session started listen %s-%s", self._listen_low, self._listen_high)
+        try:
+            ses = self._ses
+            if ses is not None and hasattr(ses, "upload_rate_limit"):
+                self._upload_gate.desired = max(0, int(ses.upload_rate_limit() or 0))
+        except Exception:  # noqa: BLE001
+            pass
+        log.info(
+            "libtorrent session started listen %s-%s storage=%s hold_cap=%s",
+            self._listen_low,
+            self._listen_high,
+            self.disk_kind,
+            self._upload_gate.hold.cap_bps,
+        )
 
         if _env_bool("SEEDING_ENGINE_SELF_RESTORE", True):
             try:
@@ -2129,6 +2203,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 "total_downloaded": total_dl,
                 "download_limit": dl_lim,
                 "upload_limit": up_lim,
+                **self.creator_hold_stats(),
                 "dht_nodes": getattr(ss, "dht_nodes", None),
                 "listening_port": listening_port,
                 "peers": peers,
@@ -2194,8 +2269,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         def _apply():
             if download_limit is not None and hasattr(ses, "set_download_rate_limit"):
                 ses.set_download_rate_limit(max(0, int(download_limit)))
-            if upload_limit is not None and hasattr(ses, "set_upload_rate_limit"):
-                ses.set_upload_rate_limit(max(0, int(upload_limit)))
+            if upload_limit is not None:
+                self._upload_gate.set_desired(int(upload_limit))
 
         await asyncio.to_thread(_apply)
         return await self.session_stats()

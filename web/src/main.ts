@@ -66,6 +66,9 @@ type EngineSessionStats = {
   upload_limit?: number;
   peers?: number;
   seeds?: number;
+  disk_kind?: string;
+  creator_upload_hold?: boolean;
+  creator_upload_hold_bps?: number;
 };
 
 type SessionStats = {
@@ -139,6 +142,7 @@ type CreatorTaskOut = {
   created_at: number;
   updated_at: number;
   has_torrent: boolean;
+  upload_hold?: boolean;
 };
 type CreateMode = "seed" | "download";
 
@@ -6360,10 +6364,18 @@ function openCreatorQueueDialog(onSeeded: () => void): void {
     }
     for (const t of tasks) {
       const row = el("div", { className: `creator-task creator-task--${t.status}` });
-      const info = el("div", { className: "creator-task__info" }, [
+      const infoKids: Array<string | HTMLElement> = [
         el("span", { className: "creator-task__name" }, [`${t.engine_id}: ${t.name || t.source_path}`]),
         el("span", { className: "creator-task__status" }, [statusLabel(t)]),
-      ]);
+      ];
+      if (t.upload_hold && (t.status === "queued" || t.status === "processing")) {
+        infoKids.push(
+          el("span", { className: "creator-task__hold" }, [
+            "отдача ограничена на время хеша (HDD), снимем после создания",
+          ]),
+        );
+      }
+      const info = el("div", { className: "creator-task__info" }, infoKids);
       const actions = el("div", { className: "creator-task__actions" });
       if (t.status === "queued" || t.status === "processing") {
         const c = el("button", { type: "button", className: "btn btn--sm creator-task__btn" }, [icon("x"), "Отмена"]);
@@ -7758,8 +7770,11 @@ function wanEngineRow(
     }
   }
   const row = el("div", { className: `wan-eng${offline ? " wan-eng--off" : ""}` });
+  const idLabel = st?.creator_upload_hold
+    ? `${id} · хеш, отдача ${Math.round((st.creator_upload_hold_bps || 0) / 1024)} КБ/с`
+    : id;
   row.append(
-    el("span", { className: "wan-eng__id" }, [id]),
+    el("span", { className: "wan-eng__id" }, [idLabel]),
     rateEl,
     el("span", { className: "wan-eng__bar" }, [meterRow(share, channelBarTone(wanId))]),
     el("span", { className: "wan-eng__share" }, [offline ? "—" : `${share.toFixed(0)}%`]),

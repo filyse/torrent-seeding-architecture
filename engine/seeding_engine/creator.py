@@ -276,6 +276,7 @@ class CreateTask:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     torrent_bytes: bytes | None = None
+    upload_hold: bool = False
 
     def to_public(self) -> dict[str, object]:
         return {
@@ -291,6 +292,7 @@ class CreateTask:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "has_torrent": self.torrent_bytes is not None,
+            "upload_hold": self.upload_hold,
         }
 
 
@@ -318,12 +320,15 @@ class CreatorService:
         max_workers: int | None = None,
         task_ttl: int | None = None,
         on_deleted=None,
+        on_hash_hold=None,
     ) -> None:
         self._tasks: dict[int, CreateTask] = {}
         self._cancelled: set[int] = set()
         self._counter = 0
         self._lock = threading.Lock()
         self._on_deleted = on_deleted or _default_on_deleted
+        # on_hash_hold(True) → bool: hold взят (HDD). on_hash_hold(False) снимает.
+        self._on_hash_hold = on_hash_hold
         workers = max_workers if max_workers is not None else _default_workers()
         # Потоки-надзиратели: каждый управляет одним дочерним процессом хеширования и
         # лишь перекачивает прогресс (в основном спит на queue.get → GIL свободен).
@@ -465,14 +470,26 @@ class CreatorService:
                 message="Ошибка: libtorrent недоступен",
             )
             return
+        held = False
         try:
             if task_id in self._cancelled:
                 raise TaskCancelled()
+            if self._on_hash_hold is not None:
+                try:
+                    held = bool(self._on_hash_hold(True))
+                except Exception:  # noqa: BLE001
+                    log.warning("creator upload hold on failed", exc_info=True)
+                    held = False
             self._update(
                 task_id,
                 status=CreateStatus.PROCESSING,
-                message="Создание торрента",
+                message=(
+                    "Создание торрента · отдача ограничена"
+                    if held
+                    else "Создание торрента"
+                ),
                 progress=0,
+                upload_hold=held,
             )
             data = self._build_torrent(task_id, abs_src)
             if task_id in self._cancelled:
@@ -499,6 +516,12 @@ class CreatorService:
                 message=f"Ошибка: {exc}",
             )
         finally:
+            if held and self._on_hash_hold is not None:
+                try:
+                    self._on_hash_hold(False)
+                except Exception:  # noqa: BLE001
+                    log.warning("creator upload hold off failed", exc_info=True)
+            self._update(task_id, upload_hold=False)
             with self._lock:
                 self._cancelled.discard(task_id)
 
@@ -528,10 +551,16 @@ class CreatorService:
                     continue
                 if kind == "progress":
                     pct = min(int(payload), 99)
+                    task = self.get(task_id)
+                    held = bool(task and task.upload_hold)
                     self._update(
                         task_id,
                         progress=pct,
-                        message=f"Хеширование: {pct}%",
+                        message=(
+                            f"Хеширование: {pct}% · отдача ограничена"
+                            if held
+                            else f"Хеширование: {pct}%"
+                        ),
                     )
                 elif kind == "done":
                     result = payload

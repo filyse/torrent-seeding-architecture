@@ -401,6 +401,42 @@ bash scripts/deploy-ct400.sh up -d --build web
 Проверка: Ctrl+F5; Настройки → Лимиты → поля в одну строку с
 «Загрузка файлов»; `GET /api/v1/settings/unchoke`.
 
+## 7ц. Hold отдачи на хеше HDD — 2026-09-02
+
+engine **1.6.0**, api **1.23.0**, web **1.44.0**.
+Спека: [`CREATOR_UPLOAD_HOLD.md`](CREATOR_UPLOAD_HOLD.md).
+
+Один образ engine, тип диска движок читает сам (`storage_path()`, не `/data`).
+Compose и `.env.engine*` не размечать. Прод-деревья длиннее `origin/main` —
+**не** `git reset --hard`. Подтянуть файлы фичи и пересобрать.
+
+Порядок: **171 → 243 → CT400 api+web+queue_worker**. Воркер не `down`, только
+пересборка: вместе с hold уходит фикс дельты графиков (провал ≠ отдача).
+
+```bash
+# b-host rudub@192.168.1.171:24
+cd ~/seeding-engine
+# подтянуть engine 1.6.0 (fetch + точечные файлы, не hard reset)
+docker compose -p seeding-engine --env-file .env.engine \
+  -f docker-compose.engine.yml -f docker-compose.b1-content.yml up -d --build
+for n in 2 3 4 5 6; do
+  docker compose -p seeding-engine-b$n --env-file .env.engine.b$n \
+    -f docker-compose.engine.yml -f docker-compose.b$n-content.yml up -d --build
+done
+
+# a-host rudub2@192.168.2.243 через -J root@192.168.1.10
+cd ~/torrent-seeding-architecture
+docker compose -p seeding-engines-a -f docker-compose.a-host.yml up -d --build
+
+# CT400
+cd /opt/containerd
+bash scripts/deploy-ct400.sh up -d --build api web queue_worker
+```
+
+Проверка: health b* `disk_kind=hdd` version `1.6.0`; a* `disk_kind=ssd`;
+создание на b* — чип в очереди и подпись на «Сети»; a* без капа.
+История: провал счётчика не рисует десятки ТБ за день.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

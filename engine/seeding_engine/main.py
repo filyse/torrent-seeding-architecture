@@ -115,7 +115,9 @@ async def startup() -> None:
     log.info("engine runtime=%s", rt.backend_name)
     from seeding_engine.creator import CreatorService
 
-    app.state.creator = CreatorService()
+    app.state.storage_kind = getattr(rt, "disk_kind", "unknown")
+    app.state.creator = CreatorService(on_hash_hold=rt.set_creator_hold)
+    log.info("storage kind=%s creator_hold wired", app.state.storage_kind)
     app.state.register_task = asyncio.create_task(_self_register_loop())
     if _upload_storage is not None:
         app.state.upload_gc_task = asyncio.create_task(upload_gc_loop(_upload_storage))
@@ -149,6 +151,7 @@ async def health(request: Request):
         "service": "engine",
         "backend": rt.backend_name,
         "data_root": os.getenv("SEEDING_DATA_ROOT", ""),
+        "disk_kind": getattr(request.app.state, "storage_kind", None),
         "version": _sysinfo.engine_version(),
         "built_at": _sysinfo.build_time(),
     }

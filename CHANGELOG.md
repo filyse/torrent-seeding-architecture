@@ -9,6 +9,19 @@
 
 ---
 
+## engine 1.6.0 · api 1.23.0 · web 1.44.0 — 2026-09-02
+
+- **Hold отдачи на время хеша HDD.** При старте движок смотрит том
+  `storage_path()` (`/data/<id>`, не корень `/data`) через sysfs `rotational`.
+  HDD/unknown: на время `set_piece_hashes` сессия режется до 1 МБ/с
+  (`SEEDING_CREATOR_UPLOAD_LIMIT_BPS`), постоянный лимит из БД не трогаем.
+  SSD — без капа. Heartbeat `set_session_limits` во время hold не снимает кап.
+  Override: `SEEDING_STORAGE_KIND=hdd|ssd`. `0` в cap — выключить hold.
+- Панель: чип в очереди создания и подпись на «Сети», что лимит временный.
+  Спека: [`docs/CREATOR_UPLOAD_HOLD.md`](docs/CREATOR_UPLOAD_HOLD.md).
+- **Графики без ложных ТБ.** Провал `all_time_upload` и скачок выше 2 Gbit/s за dt
+  больше не считаются отдачей (`сброс = 0`). Спека: [`docs/NETWORK.md`](docs/NETWORK.md).
+
 ## web 1.43.3 — 2026-08-30
 
 - **Линии таблицы файлов.** Кнопки скачивания во внутреннем flex, `td` снова ячейка.
