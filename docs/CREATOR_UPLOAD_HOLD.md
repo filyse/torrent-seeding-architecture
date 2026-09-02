@@ -59,7 +59,7 @@ CreatorService._run
 
 - Задача creator: `upload_hold` в `CreateTaskOut` / `CreatorTaskOut`.
 - Очередь создания: чип «отдача ограничена на время хеша (HDD)…».
-- Сеть: строка движка `bN · хеш, отдача 1024 КБ/с`.
+- Сеть: шкала как в 1.43.3, «хеш» поверх бара. Чип в очереди создания.
 - `GET /health` и internal health: `disk_kind`.
 - `GET /internal/v1/session/stats` (и агрегат `by_engine`): `disk_kind`,
   `creator_upload_hold`, `creator_upload_hold_bps`, `upload_limit_desired`.

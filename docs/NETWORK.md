@@ -75,10 +75,7 @@ return {**total, "engines_ok": …, "engines_total": …, "by_engine": by_engine
 Поля `by_engine.<id>`: для отдачи — `upload_rate`; для скачивания — `download_rate`;
 для «всего отдано» — `total_uploaded`; общие — `peers`, `torrents_active`, `error`,
 плюс `total_downloaded` в метаданных карточки скачивания.
-Пока на HDD идёт хеш `.torrent`, движок ставит временный кап отдачи (1 МБ/с):
-в `by_engine` приходят `creator_upload_hold` / `creator_upload_hold_bps` /
-`disk_kind`, строка на «Сети» пишет «хеш, отдача … КБ/с». Постоянный лимит
-из БД не меняется. Спека: [`CREATOR_UPLOAD_HOLD.md`](CREATOR_UPLOAD_HOLD.md).
+Hold хеша на HDD: шкала и колонки как в web 1.43.3, слово «хеш» поверх бара.
 
 Заливка файлов **не** приходит с API: фронт суммирует живые `speedBps` очереди
 (`fileUploadInboundByEngine`) по `engine_id` и добавляет к приёму канала. Чип

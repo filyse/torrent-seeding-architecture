@@ -2556,7 +2556,21 @@ input.file-input::file-selector-button:hover {
 }
 
 .wan-eng__bar {
+  position: relative;
   min-width: 0;
+}
+
+.wan-eng__hold {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--warn);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .wan-eng__id {

@@ -7770,13 +7770,22 @@ function wanEngineRow(
     }
   }
   const row = el("div", { className: `wan-eng${offline ? " wan-eng--off" : ""}` });
-  const idLabel = st?.creator_upload_hold
-    ? `${id} · хеш, отдача ${Math.round((st.creator_upload_hold_bps || 0) / 1024)} КБ/с`
-    : id;
+  const barEl = el("span", { className: "wan-eng__bar" }, [
+    meterRow(share, channelBarTone(wanId)),
+  ]);
+  if (st?.creator_upload_hold) {
+    const capKb = Math.round((st.creator_upload_hold_bps || 0) / 1024);
+    barEl.append(
+      el("span", {
+        className: "wan-eng__hold",
+        title: `отдача ограничена ${capKb} КБ/с на время хеша`,
+      }, ["хеш"]),
+    );
+  }
   row.append(
-    el("span", { className: "wan-eng__id" }, [idLabel]),
+    el("span", { className: "wan-eng__id" }, [id]),
     rateEl,
-    el("span", { className: "wan-eng__bar" }, [meterRow(share, channelBarTone(wanId))]),
+    barEl,
     el("span", { className: "wan-eng__share" }, [offline ? "—" : `${share.toFixed(0)}%`]),
     el("span", { className: "wan-eng__peers" }, [offline ? "—" : `${st?.peers ?? 0} пиров`]),
     el("span", { className: "wan-eng__act" }, [offline ? "—" : `${st?.torrents_active ?? 0} акт.`]),
