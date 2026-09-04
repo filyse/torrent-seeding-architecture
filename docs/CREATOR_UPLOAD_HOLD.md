@@ -1,14 +1,15 @@
-# Hold отдачи на время хеша HDD
+# Hold отдачи на время хеша и проверки HDD
 
-Пока движок считает SHA-1 сезона (`libtorrent set_piece_hashes`), случайные
+Пока движок считает SHA-1 сезона (`libtorrent set_piece_hashes`) или
+перепроверяет файлы (`checking` / `force_recheck` после переноса), случайные
 чтения отдачи с того же шпинделя душат последовательный проход. На полной
-отдаче создание почти стоит; при ручном минимуме — быстро. Автоhold делает
-то же самое сам: только на том движке, где идёт хеш, и только если том —
-HDD (или тип неизвестен).
+отдаче создание и recheck почти стоят; при ручном минимуме — быстро. Автоhold
+делает то же самое сам: только на том движке, где идёт хеш или проверка, и
+только если том — HDD (или тип неизвестен).
 
 SSD (a1–a3) не режем: там хеш и отдача не дерутся за головку.
 
-Версии: engine **1.6.0**, api **1.23.0**, web **1.44.0**.
+Версии: engine **1.6.1** (recheck). Создание hold — с 1.6.0. UI «хеш» на «Сети» уже с 1.44.4.
 Спека очереди создания: [`CREATOR.md`](CREATOR.md).
 
 ## Правила
@@ -46,6 +47,13 @@ CreatorService._run
       SSD: no-op, задача без upload_hold
   → set_piece_hashes (отдельный процесс)
   → finally set_creator_hold(False) → вернуть desired
+
+recheck / migrate
+  → force_recheck (сразу возвращается)
+  → CheckHoldTracker.note_recheck (кап на grace, пока lt не войдёт в checking)
+  → snapshot / session_stats: observe/sync по checking|checking_files|
+    queued_for_checking. checking_resume_data не держит кап.
+  → выход из checking → end_create → вернуть desired
 ```
 
 `SessionUploadGate` живёт в `engine/seeding_engine/upload_hold.py`.
@@ -59,7 +67,7 @@ CreatorService._run
 
 - Задача creator: `upload_hold` в `CreateTaskOut` / `CreatorTaskOut`.
 - Очередь создания: чип «отдача ограничена на время хеша (HDD)…».
-- Сеть: шкала как в 1.43.3, «хеш» поверх бара. Чип в очереди создания.
+- Сеть: шкала как в 1.43.3, «хеш» поверх бара — и на создании, и на recheck.
 - `GET /health` и internal health: `disk_kind`.
 - `GET /internal/v1/session/stats` (и агрегат `by_engine`): `disk_kind`,
   `creator_upload_hold`, `creator_upload_hold_bps`, `upload_limit_desired`.

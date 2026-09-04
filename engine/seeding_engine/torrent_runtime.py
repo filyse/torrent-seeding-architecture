@@ -31,7 +31,7 @@ from seeding_engine.unchoke import (
     normalize_unchoke_settings,
     unchoke_settings_for_lt,
 )
-from seeding_engine.upload_hold import SessionUploadGate
+from seeding_engine.upload_hold import CheckHoldTracker, SessionUploadGate, is_full_hash_check_state
 
 log = logging.getLogger(__name__)
 
@@ -666,6 +666,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self._unchoke = dict(env_unchoke_settings())
         self.disk_kind = storage_kind()
         self._upload_gate = SessionUploadGate(apply=self._apply_session_upload)
+        self._check_holds = CheckHoldTracker()
 
     def _apply_session_upload(self, bps: int) -> None:
         ses = self._ses
@@ -1674,6 +1675,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         done = _total_bytes_from_status(st, "total_wanted_done", "total_done")
         dl_rate = int(getattr(st, "download_payload_rate", 0) or 0)
         lt_state = _state_label(lt, st)
+        self._check_holds.observe(self._upload_gate, self.disk_kind, db_id, lt_state)
 
         ratio: float | None = None
         if uploaded is not None and downloaded:
@@ -1951,6 +1953,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if h is None or not hasattr(h, "force_recheck"):
             return False
         await asyncio.to_thread(h.force_recheck)
+        self._check_holds.note_recheck(self._upload_gate, self.disk_kind, db_id)
         return True
 
     async def reannounce(self, db_id: int) -> bool:
@@ -2168,7 +2171,9 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             peers = 0
             seeds = 0
             errors = 0
-            for h in handles_inner.values():
+            checking: set[int] = set()
+            lt = self._lt
+            for db_id, h in handles_inner.items():
                 try:
                     st = h.status() if callable(getattr(h, "status", None)) else h.status
                     total_up += int(getattr(st, "all_time_upload", 0) or getattr(st, "total_upload", 0) or 0)
@@ -2182,8 +2187,11 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                         errors += 1
                     elif str(getattr(st, "error", "") or ""):
                         errors += 1
+                    if is_full_hash_check_state(_state_label(lt, st)):
+                        checking.add(int(db_id))
                 except Exception:  # noqa: BLE001
                     continue
+            self._check_holds.sync(self._upload_gate, self.disk_kind, checking)
             dl_lim = int(ses_inner.download_rate_limit()) if hasattr(ses_inner, "download_rate_limit") else 0
             up_lim = int(ses_inner.upload_rate_limit()) if hasattr(ses_inner, "upload_rate_limit") else 0
             # Порт слушателя отдаёт сам объект сессии (listen_port()), а не его status.
@@ -2298,6 +2306,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             ses = self._ses
             h = self._handles.pop(db_id, None) if ses is not None else None
             self._meta.pop(db_id, None)
+        self._check_holds.observe(self._upload_gate, self.disk_kind, db_id, "seeding")
         if ses is None:
             paths = self._guess_content_paths(save_path, display_name) if delete_files else []
             if delete_files and paths:

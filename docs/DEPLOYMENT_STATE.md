@@ -1,7 +1,9 @@
 # Состояние деплоя и реконсилиация git ↔ прод
 
-> Дата сверки: 2026-07-18. Источник истины кода — ветка `main` на GitHub
-> (`git@github.com:filyse/torrent-seeding-architecture.git`, тип `ef97d9c` на момент сверки).
+> **Исторический снимок 2026-07-18.** Не читать как текущий прод.
+> С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
+> Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-09-02: web 1.45 / api 1.24 / engine 1.6).
+> Источник истины кода на момент сверки — `main` @ `ef97d9c`.
 
 Документ фиксирует **фактическую топологию продакшена**, расхождение рабочих
 деревьев на живых хостах относительно `origin/main` и порядок приведения git к
@@ -436,6 +438,50 @@ bash scripts/deploy-ct400.sh up -d --build api web queue_worker
 Проверка: health b* `disk_kind=hdd` version `1.6.0`; a* `disk_kind=ssd`;
 создание на b* — чип в очереди; на «Сети» шкала как раньше; a* без капа.
 История: провал счётчика не рисует десятки ТБ за день.
+
+## 7ш. Hold отдачи на recheck HDD — 2026-09-05
+
+engine **1.6.1**. Спека: [`CREATOR_UPLOAD_HOLD.md`](CREATOR_UPLOAD_HOLD.md).
+
+Тот же кап, что на создании: b* режутся на время `checking` / `force_recheck`
+после переноса. Compose и `.env` не трогаем. Прод-деревья длиннее `origin/main` —
+**не** `git reset --hard`.
+
+Порядок: **171 → 243**. api/web/queue на CT400 не трогаем. Воркер не `down`.
+
+```bash
+# b-host rudub@192.168.1.171:24
+cd ~/seeding-engine
+# подтянуть engine 1.6.1 (fetch + точечные файлы, не hard reset)
+docker compose -p seeding-engine --env-file .env.engine \
+  -f docker-compose.engine.yml -f docker-compose.b1-content.yml up -d --build
+for n in 2 3 4 5 6; do
+  docker compose -p seeding-engine-b$n --env-file .env.engine.b$n \
+    -f docker-compose.engine.yml -f docker-compose.b$n-content.yml up -d --build
+done
+
+# a-host rudub2@192.168.2.243 через -J root@192.168.1.10
+cd ~/torrent-seeding-architecture
+docker compose -p seeding-engines-a -f docker-compose.a-host.yml up -d --build
+```
+
+Проверка: health b* `disk_kind=hdd` version `1.6.1`; a* `disk_kind=ssd`;
+перенос на b* — на «Сети» «хеш», отдача ~1 МБ/с до конца checking.
+
+## 7ч. Аватары в списке пользователей — 2026-09-02
+
+web **1.45.0**, api **1.24.0**. Только CT400, `api` + `web`.
+Прод-деревья длиннее `origin/main` — **не** `git reset --hard`.
+
+```bash
+cd /opt/containerd
+# подтянуть api/seeding_api/routers/auth.py, api/seeding_api/__init__.py,
+# web/src/{main.ts,style.css,version.ts}
+bash scripts/deploy-ct400.sh up -d --build api web
+```
+
+Проверка: Ctrl+F5; Настройки → Пользователи — кружок слева от имени.
+Ключи без аватара. Смена по-прежнему в кабинете.
 
 ## 7. Откат
 

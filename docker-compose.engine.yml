@@ -34,7 +34,7 @@ services:
       SEEDING_FASTRESUME_DIR: /data/.fastresume
       SEEDING_FASTRESUME_SAVE_INTERVAL: "300"
       LT_CONNECTIONS_LIMIT: "500"
-      # Hold отдачи на хеше HDD: дефолт 1 МБ/с, SSD не режем. 0 = выкл.
+      # Hold отдачи на хеше и recheck HDD: дефолт 1 МБ/с, SSD не режем. 0 = выкл.
       # SEEDING_CREATOR_UPLOAD_LIMIT_BPS: "1048576"
       # SEEDING_STORAGE_KIND: "hdd"
       LT_ENABLE_UPNP: "0"

@@ -33,12 +33,14 @@ web (модал «Создать торрент» / «Очередь созда�
   SSD/NVMe можно поднять.
 - **Hold отдачи на HDD.** При старте движок определяет тип тома раздачи
   (`storage_path()` → sysfs `rotational`, не корень `/data` контейнера). HDD и
-  `unknown` на время хеша ставят сессионный потолок
+  `unknown` на время хеша **и полной проверки** (`checking` / `force_recheck`
+  после переноса) ставят сессионный потолок
   `SEEDING_CREATOR_UPLOAD_LIMIT_BPS` (дефолт 1 МБ/с). Постоянный
   `engines.upload_limit` в БД не меняется: hold в RAM, `set_session_limits`
   во время хеша запоминает новое «куда вернуть» и оставляет кап. SSD — без
   лимита. Override: `SEEDING_STORAGE_KIND=hdd|ssd`; cap `0` — hold выкл.
-  В статусе задачи и `session/stats`: `upload_hold` / `creator_upload_hold`.
+  `checking_resume_data` кап не держит. В статусе задачи и `session/stats`:
+  `upload_hold` / `creator_upload_hold`.
   Полная спека: [`CREATOR_UPLOAD_HOLD.md`](CREATOR_UPLOAD_HOLD.md).
 - **api** (`api/seeding_api/routers/creator.py`): проксирование к движку + два режима:
   - «только создать» — эфемерный `.torrent` стримится в браузер (не хранится);
@@ -111,7 +113,7 @@ web (модал «Создать торрент» / «Очередь созда�
 
 | Переменная | Дефолт | Смысл |
 |------------|--------|--------|
-| `SEEDING_CREATOR_UPLOAD_LIMIT_BPS` | `1048576` | потолок отдачи на хеше HDD. `0` — выкл |
+| `SEEDING_CREATOR_UPLOAD_LIMIT_BPS` | `1048576` | потолок отдачи на хеше и recheck HDD. `0` — выкл |
 | `SEEDING_STORAGE_KIND` | авто по sysfs | `hdd` / `ssd` / `unknown` |
 
 Поля задачи: `upload_hold`. Поля сессии: `disk_kind`, `creator_upload_hold`,

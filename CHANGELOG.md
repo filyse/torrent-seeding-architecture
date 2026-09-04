@@ -9,6 +9,15 @@
 
 ---
 
+## engine 1.6.1 — 2026-09-05
+
+- **Hold отдачи на recheck HDD.** Тот же кап 1 МБ/с (`SEEDING_CREATOR_UPLOAD_LIMIT_BPS`),
+  что на создании `.torrent`: пока libtorrent в `checking` / `checking_files` /
+  `queued_for_checking` (перенос, кнопка «Перепроверить»). `force_recheck`
+  возвращается сразу — `CheckHoldTracker` держит кап, пока проверка не кончится.
+  `checking_resume_data` не режет отдачу. SSD без капа. На «Сети» то же слово «хеш».
+  Спека: [`docs/CREATOR_UPLOAD_HOLD.md`](docs/CREATOR_UPLOAD_HOLD.md).
+
 ## web 1.44.4 — 2026-09-02
 
 - **«Сеть»: «хеш» поверх шкалы.** Сетка и бар как в 1.43.3, колонки не едут.
