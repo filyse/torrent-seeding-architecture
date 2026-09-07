@@ -98,7 +98,11 @@ HDD-движок сам режет отдачу до 1 МБ/с (hold в RAM, н�
    на движки не копируй).
 
 2. На машину движка положи `ca.crt`, `engine.crt`, `engine.key` в `certs/`, в `.env.engine` задай
-   `SEEDING_ENGINE_TLS=1` и `SEEDING_ENGINE_ADVERTISE_URL=https://<host>:8081`.
+   `SEEDING_ENGINE_TLS=1`, `SEEDING_ENGINE_TLS_CA=/certs/ca.crt` и
+   `SEEDING_ENGINE_ADVERTISE_URL=https://<host>:8081`.
+   Общий CA нужен и движку: `transport=auto` выбирает прямой перенос только если
+   приёмник может проверить cert источника. Листовой `engine.crt` как CA годится
+   лишь пока все хосты делят один и тот же cert.
 
 3. На оркестраторе задай `SEEDING_ENGINE_TLS_CA=/certs/ca.crt` (смонтируй `ca.crt`) — для статических
    движков укажи `https://` в `engines.json`; для динамических хватает их https advertise-URL.

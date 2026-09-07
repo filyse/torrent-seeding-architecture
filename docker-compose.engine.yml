@@ -1,8 +1,8 @@
 # Автономный движок для отдельной машины (Фаза 4.5 — быстрый онбординг).
 #
 # Поднимает ОДИН libtorrent-движок, который сам регистрируется в оркестраторе по API-ключу
-# и шлёт heartbeat. Контент между машинами переносится по сети (HTTP через оркестратор),
-# поэтому общий /media НЕ нужен и media_path не задаётся.
+# и шлёт heartbeat. Контент между машинами: прямой pull (direct), если приёмник
+# видит источник по TLS+CA; иначе HTTP через оркестратор. Общий /media не нужен.
 #
 # Быстрый старт на чистой машине (нужны docker + docker compose):
 #   git clone https://github.com/filyse/torrent-seeding-architecture.git
@@ -58,9 +58,9 @@ services:
       SEEDING_ENGINE_TLS_CERT: /certs/engine.crt
       SEEDING_ENGINE_TLS_KEY: /certs/engine.key
       # CA для проверки cert другого движка при ПРЯМОМ переносе движок→движок
-      # (peer-check/import-direct). Без него auto-выбор всегда падает на http через
-      # оркестратор. Движки делят один self-signed cert, поэтому CA = сам cert.
-      SEEDING_ENGINE_TLS_CA: ${SEEDING_ENGINE_TLS_CA:-/certs/engine.crt}
+      # (peer-check/import-direct). Нужен общий CA, не листовой cert хоста:
+      # иначе auto падает на http, как только certs на машинах разъехались.
+      SEEDING_ENGINE_TLS_CA: ${SEEDING_ENGINE_TLS_CA:-/certs/ca.crt}
       # Вшитая загрузка файлов (/upload/v1). Пусто = выкл.
       SEEDING_UPLOAD_TICKET_SECRET: ${SEEDING_UPLOAD_TICKET_SECRET:-}
       UPLOAD_CHUNK_SIZE: ${UPLOAD_CHUNK_SIZE:-8388608}
