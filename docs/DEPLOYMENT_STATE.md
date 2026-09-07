@@ -2,8 +2,8 @@
 
 > **Исторический снимок 2026-07-18.** Не читать как текущий прод.
 > С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
-> Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (цель 2026-09-08: web 1.46 / api 1.25 / engine 1.6.2).
-> Источник истины кода на момент сверки — `main` @ `ef97d9c`.
+> Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-09-08: web 1.46 / api 1.25 / engine 1.6.2).
+> Источник истины кода — `main` @ `ce91e5c`.
 
 Документ фиксирует **фактическую топологию продакшена**, расхождение рабочих
 деревьев на живых хостах относительно `origin/main` и порядок приведения git к
@@ -486,26 +486,22 @@ bash scripts/deploy-ct400.sh up -d --build api web
 ## 7щ. Скачать `.torrent` раздачи — 2026-09-08
 
 web **1.46.0**, api **1.25.0**, engine **1.6.2**. Спека: [`TORRENT_FILE.md`](TORRENT_FILE.md).
+Коммит `ce91e5c`.
 
 Кнопка в карточке рядом с «Переанонс». Байты идут через CT400 `api`
 (`GET /api/v1/torrents/{id}/torrent-file`), не через `/u/b/`.
 
-Прод-деревья длиннее `origin/main` — **не** `git reset --hard`.
-Подтянуть файлы, затем:
-
-```bash
-# CT400 — обязательно
-cd /opt/containerd
-bash scripts/deploy-ct400.sh up -d --build api web
-
-# движки — для magnet без файла на диске (сборка из handle)
-# 171: ~/seeding-engine, 243: ~/torrent-seeding-architecture
-# те же compose, что в §5 / 7ш
-```
-
-Проверка: Ctrl+F5; карточка → «Скачать торрент» → `.torrent` с именем раздачи.
-`curl -fI http://127.0.0.1:8000/api/v1/torrents/<id>/torrent-file` → 200
-(нужен тот же auth, что у UI).
+**Сделано 2026-09-08:**
+- CT400: точечный checkout `origin/main` (дерево грязное, не `reset --hard`) +
+  `deploy-ct400.sh up -d --build api web`. api 1.25.0, web 1.46.0, health 9/9.
+- 171 и 243 были на `007c5c1`, dirty, 24 коммита позади. Бэкап
+  `~/predeploy-engines-*` (diff/status/hostcfg). Конфликтные untracked
+  `download_http.py` / `unchoke.py` убраны в бэкап, затем
+  `git reset --hard origin/main` → `ce91e5c`. Секреты и оверреи живы
+  (`.env.engine*`, `docker-compose.bN-content.yml`, `docker-compose.a-host.yml`).
+- 171: b1–b6 по одному, engine **1.6.2** `BUILD_TIME=2026-09-07T21:20:28Z`, healthy.
+- 243: a1–a3 одним compose, **1.6.2** `2026-09-07T21:20:31Z`, healthy.
+- Повторный health CT400: все 9 движков `true`.
 
 ## 7. Откат
 
