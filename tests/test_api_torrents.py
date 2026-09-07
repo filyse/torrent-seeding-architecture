@@ -1,3 +1,4 @@
+import base64
 import importlib
 import json
 import re
@@ -403,6 +404,63 @@ def test_resume_returns_502_when_engine_unreachable(api_module):
 
             r = client.post(f"/api/v1/torrents/{tid}/resume")
             assert r.status_code == 502, r.text
+
+
+def test_download_torrent_file_happy_path(api_module):
+    payload = b"d8:announce13:http://x/y4:infod4:name4:testee"
+    with respx.mock(assert_all_called=False) as mock:
+        _wire_engine_mocks(mock)
+        mock.get(url__regex=re.escape(ENGINE) + r"/internal/v1/torrents/\d+/torrent-file$").mock(
+            return_value=httpx.Response(
+                200,
+                json={"db_id": 1, "torrent_b64": base64.b64encode(payload).decode("ascii")},
+            ),
+        )
+        with TestClient(api_module.app) as client:
+            c = client.post(
+                "/api/v1/torrents",
+                json={
+                    "display_name": "Sample Show",
+                    "save_path": "/data",
+                    "magnet_uri": "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                },
+            )
+            assert c.status_code == 201
+            tid = c.json()["id"]
+            r = client.get(f"/api/v1/torrents/{tid}/torrent-file")
+            assert r.status_code == 200, r.text
+            assert r.content == payload
+            assert r.headers["content-type"].startswith("application/x-bittorrent")
+            assert "Sample Show.torrent" in r.headers["content-disposition"]
+
+
+def test_download_torrent_file_missing_on_engine(api_module):
+    with respx.mock(assert_all_called=False) as mock:
+        _wire_engine_mocks(mock)
+        mock.get(url__regex=re.escape(ENGINE) + r"/internal/v1/torrents/\d+/torrent-file$").mock(
+            return_value=httpx.Response(404, json={"detail": "no .torrent file on disk for this db_id"}),
+        )
+        with TestClient(api_module.app) as client:
+            c = client.post(
+                "/api/v1/torrents",
+                json={
+                    "display_name": "Magnet Only",
+                    "save_path": "/data",
+                    "magnet_uri": "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                },
+            )
+            assert c.status_code == 201
+            tid = c.json()["id"]
+            r = client.get(f"/api/v1/torrents/{tid}/torrent-file")
+            assert r.status_code == 409, r.text
+
+
+def test_download_torrent_file_not_found(api_module):
+    with respx.mock(assert_all_called=False) as mock:
+        _wire_engine_mocks(mock)
+        with TestClient(api_module.app) as client:
+            r = client.get("/api/v1/torrents/99999/torrent-file")
+            assert r.status_code == 404
 
 
 def test_api_key_required_for_torrents(monkeypatch, tmp_path):

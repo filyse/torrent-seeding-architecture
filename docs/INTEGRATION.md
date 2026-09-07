@@ -4,7 +4,7 @@
 
 ## Публичная граница
 
-- **Браузер / десктоп** ↔ только **`api`** (HTTPS или HTTP в dev), пути вида `/api/v1/...`. Торренты: CRUD-образно список/создать/детали/пауза/возобновить/**удалить** (`DELETE /api/v1/torrents/{id}` — БД + снятие с движка). Опционально **`X-API-Key`**, если задано `SEEDING_API_KEYS` на API.
+- **Браузер / десктоп** ↔ только **`api`** (HTTPS или HTTP в dev), пути вида `/api/v1/...`. Торренты: CRUD-образно список/создать/детали/пауза/возобновить/**удалить** (`DELETE /api/v1/torrents/{id}` — БД + снятие с движка), **скачать `.torrent`** (`GET /api/v1/torrents/{id}/torrent-file`, спека [`TORRENT_FILE.md`](TORRENT_FILE.md)). Опционально **`X-API-Key`**, если задано `SEEDING_API_KEYS` на API.
 - **`api` → Kafka → MPW**: при удалении задачи creator (кнопка или TTL) оркестратор
   публикует `creator.task.deleted` (`SEEDING_KAFKA_BOOTSTRAP`). Вкладка Torrent
   снимает строку `a1:0`. Это не список раздач (`/api/v1/torrents`).
@@ -18,6 +18,7 @@
   | GET | `/internal/v1/torrents` | Список рантайм-хендлов в движке |
   | POST | `/internal/v1/torrents` | Регистрация: тело `{ "db_id", "magnet_uri?", "save_path" }` |
   | GET | `/internal/v1/torrents/{db_id}` | Снимок рантайма |
+  | GET | `/internal/v1/torrents/{db_id}/torrent-file` | `.torrent` с диска или сборка из handle (`torrent_b64`) |
   | POST | `/internal/v1/torrents/{db_id}/pause` | Пауза в движке |
   | POST | `/internal/v1/torrents/{db_id}/resume` | Возобновление |
   | DELETE | `/internal/v1/torrents/{db_id}` | Убрать торрент из рантайма движка (не удаляет строку в БД) |

@@ -73,8 +73,11 @@ web (модал «Создать торрент» / «Очередь созда�
 | GET | `/tasks/{engine_id}/{id}` | статус |
 | POST | `/tasks/{engine_id}/{id}/cancel` | отмена |
 | DELETE | `/tasks/{engine_id}/{id}` | удалить задачу из очереди/памяти; в Kafka уходит `creator.task.deleted` |
-| GET | `/tasks/{engine_id}/{id}/download` | скачать `.torrent` |
+| GET | `/tasks/{engine_id}/{id}/download` | скачать только что созданный `.torrent` |
 | POST | `/tasks/{engine_id}/{id}/seed` | поставить на раздачу |
+
+Уже стоящая на раздаче: `GET /api/v1/torrents/{id}/torrent-file` и кнопка
+в карточке — [`TORRENT_FILE.md`](TORRENT_FILE.md).
 
 Движок → оркестратор (`X-Register-Key`, без `require_auth`):
 

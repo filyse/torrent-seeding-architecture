@@ -27,6 +27,8 @@
 - Сквозная проверка end-to-end: перенос 20 раздач с сидбокса, хэш-чек, анонс, отдача пирами.
 - per-torrent fastresume (быстрый рестарт без рехэша), сохранение `.torrent` и session.state.
 - Список файлов + приоритеты, список трекеров + reannounce, force recheck, per-torrent лимиты.
+- Скачать `.torrent` раздачи из карточки (`GET /torrents/{id}/torrent-file`, web 1.46 /
+  api 1.25 / engine 1.6.2). Спека: [`docs/TORRENT_FILE.md`](docs/TORRENT_FILE.md).
 - Обогащённый runtime: size / downloaded / ratio / seeds / ETA / added / лимиты.
 
 ### Фаза 2 — Паритет с важными функциями ruTorrent ✅
@@ -103,6 +105,7 @@
 - Таблица (id/имя/метка/статус/%/размер/↓/↑/сиды-пиры/ratio/ETA/движок), мультивыбор и
   **массовые действия** (пауза/старт/метка/удаление с опцией удаления файлов).
 - Детали по двойному клику: файлы и трекеры, recheck/reannounce.
+  Веб-карточка: кнопка «Скачать торрент» рядом с «Переанонс».
 
 ### Фаза 3.5 — Надёжность ✅
 - Graceful shutdown + устойчивость к падению: `stop()` сохраняет fastresume/session.state

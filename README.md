@@ -11,14 +11,20 @@
 | [`db/`](db/) | Схемы, миграции, общие модели данных (SQLAlchemy) |
 | [`queue/`](queue/) | Фоновые задачи (ARQ + Redis), опционально |
 | [`web/`](web/) | Веб-клиент (Vite + TypeScript, в Docker прокси `/api` → `api`) |
-| [`desktop/`](desktop/) | Десктоп: CLI `seeding-desktop` + `config.json` (GUI позже) |
+| [`desktop/`](desktop/) | CLI `seeding-desktop` + GUI PySide6 (`python -m seeding_desktop.gui`) |
+| [`upload/`](upload/) | Модуль загрузки в том движка (HMAC-ticket) |
+| [`upload-edge/`](upload-edge/) | nginx-edge `:8090`, путь `/{engine_id}/upload/v1/` |
+| [`upload-relay/`](upload-relay/) | RU-релей скачивания/заливки |
+| [`config/`](config/) | Реестр движков (`engines.ct400.json` и оверлеи) |
+| [`observability/`](observability/) | Prometheus / Grafana |
 | [`docs/`](docs/) | Планы, контракты, отчёты агентов |
 
 ## Документы
 
 - [**`ARCHITECTURE.md`**](ARCHITECTURE.md) — **как всё работает**: компоненты, multi-engine, хранение, restore, API-контур, конфиг, деплой
-- [**`ROADMAP.md`**](ROADMAP.md) — что сделано (фазы 0–2) и куда движемся дальше
-- [`docs/BOARD.md`](docs/BOARD.md) — рабочая доска с чекбоксами по агентам
+- [**`ROADMAP.md`**](ROADMAP.md) — что сделано (фазы 0–9+) и куда движемся дальше
+- [`CHANGELOG.md`](CHANGELOG.md) — версии `web` / `api` / `engine` (свежие сверху)
+- [`docs/BOARD.md`](docs/BOARD.md) — историческая доска агентов фазы 0 (живой статус — ROADMAP + CHANGELOG)
 - [`AGENTS.md`](AGENTS.md) — роли агентов и сдача работ координатору
 - [`docs/PLAN_BY_AGENT.md`](docs/PLAN_BY_AGENT.md) — пошаговые планы кода по ролям
 - [`docs/INTEGRATION.md`](docs/INTEGRATION.md) — границы модулей и контракты
@@ -26,6 +32,8 @@
 - [`docs/NETWORK.md`](docs/NETWORK.md) — экран «Сеть»: отдача и скачивание по WAN-каналам
 - [`docs/BACKUP.md`](docs/BACKUP.md) — суточные бэкапы БД и состояния движков, восстановление
 - [`docs/FILE_UPLOAD.md`](docs/FILE_UPLOAD.md) — загрузка файлов в том движка (ticket + edge)
+- [`docs/FILE_DOWNLOAD.md`](docs/FILE_DOWNLOAD.md) — скачать файл контента с тома (ticket + RU)
+- [`docs/TORRENT_FILE.md`](docs/TORRENT_FILE.md) — скачать `.torrent` раздачи из карточки
 - [`docs/UPDATE-UPLOAD-EMBED.md`](docs/UPDATE-UPLOAD-EMBED.md) — выкат вшитой загрузки на 171/243/CT400
 - [`docs/QA_MANUAL_CHECKLIST.md`](docs/QA_MANUAL_CHECKLIST.md) — ручные сценарии веб + CLI
 - [`docs/reports/`](docs/reports/) — отчёты QA (шаблон в [`AGENTS.md`](AGENTS.md))
@@ -91,7 +99,7 @@ pytest
 
 Линтер (ставится с `db[dev]`): из корня репозитория выполните `ruff check api db engine queue tests`.
 
-Ожидаемо: **22 passed**, **3 skipped** (интеграция compose без `SEEDING_RUN_COMPOSE_TESTS=1`). Сборка фронта: `cd web && npm install && npm run build` (нужен Node/npm).
+Ожидаемо (сверка 2026-09-02): **185 passed**, **4 skipped** (интеграция compose без `SEEDING_RUN_COMPOSE_TESTS=1`). Сборка фронта: `cd web && npm install && npm run build` (нужен Node/npm).
 
 При `DELETE /api/v1/torrents/{id}` при сетевой ошибке к движку по умолчанию строка **всё равно удаляется** из БД (**204**); в лог пишется предупреждение (рантайм движка может ещё держать торрент до рестарта). Строгий режим: **`SEEDING_REQUIRE_ENGINE_FOR_DELETE=1`** — тогда **502**, запись не удаляется. См. `docker-compose.yml`.
 

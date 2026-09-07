@@ -9,6 +9,14 @@
 
 ---
 
+## web 1.46.0 · api 1.25.0 · engine 1.6.2 — 2026-09-08
+
+- **Скачать .torrent раздачи.** В карточке рядом с «Переанонс» кнопка
+  «Скачать торрент»: браузер получает `GET /api/v1/torrents/{id}/torrent-file`.
+  Движок отдаёт файл из `/data/.torrents/{id}.torrent`; если его нет (magnet) —
+  собирает из живого handle и сохраняет. Нет метаданных — 409.
+  Спека: [`docs/TORRENT_FILE.md`](docs/TORRENT_FILE.md).
+
 ## engine 1.6.1 — 2026-09-05
 
 - **Hold отдачи на recheck HDD.** Тот же кап 1 МБ/с (`SEEDING_CREATOR_UPLOAD_LIMIT_BPS`),
@@ -17,6 +25,12 @@
   возвращается сразу — `CheckHoldTracker` держит кап, пока проверка не кончится.
   `checking_resume_data` не режет отдачу. SSD без капа. На «Сети» то же слово «хеш».
   Спека: [`docs/CREATOR_UPLOAD_HOLD.md`](docs/CREATOR_UPLOAD_HOLD.md).
+
+## web 1.45.0 · api 1.24.0 — 2026-09-02
+
+- **Настройки → Пользователи: аватар слева от имени.** Тот же `users.avatar`,
+  что в кабинете (пресет, своя картинка или инициалы). Менять отсюда нельзя.
+  У API-ключей аватара нет. `GET/POST/PATCH /auth/users` отдаёт поле `avatar`.
 
 ## web 1.44.4 — 2026-09-02
 

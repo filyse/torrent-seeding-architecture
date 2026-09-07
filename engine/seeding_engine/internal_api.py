@@ -347,7 +347,7 @@ async def register_torrent(request: Request, body: TorrentRegisterIn):
 
 @router.get("/torrents/{db_id}/torrent-file", response_model=TorrentFileBytesOut)
 async def get_torrent_file(request: Request, db_id: int):
-    """Отдать сохранённый .torrent (для переноса раздачи на другой движок)."""
+    """Отдать .torrent раздачи (файл на диске или сборка из живого handle)."""
     rt = get_runtime(request)
     read_fn = getattr(rt, "read_torrent_file", None)
     if read_fn is None:

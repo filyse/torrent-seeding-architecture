@@ -168,7 +168,7 @@ class EngineClient:
         return r.json()
 
     async def get_torrent_file(self, db_id: int) -> bytes | None:
-        """Скачать сохранённый .torrent с движка (для переноса на другой движок)."""
+        """Скачать .torrent с движка (перенос или выдача в UI)."""
         r = await self._client.get(f"/internal/v1/torrents/{db_id}/torrent-file")
         if r.status_code == 404:
             return None

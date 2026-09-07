@@ -5,13 +5,13 @@
 > (не путать со списком раздач `/api/v1/torrents`). Вкладка MPW ходит в creator;
 > при удалении задачи (кнопка или TTL) оркестратор шлёт в Kafka `creator.task.deleted`.
 
-Актуально на: август 2026 (фазы 0–9, creator, выкат на CT 400 + движки 171/243).
+Актуально на: сентябрь 2026 (фазы 0–9+, creator, upload-edge/relay, download «через RU»; версии — [`CHANGELOG.md`](CHANGELOG.md)).
 
 ---
 
 ## 1. Что это и как работает простыми словами
 
-1. Пользователь в **вебе** (или десктоп-CLI) отправляет команду: добавить торрент
+1. Пользователь в **вебе** (или десктоп CLI / GUI) отправляет команду: добавить торрент
    (magnet / `.torrent`-файл / URL на `.torrent`), пауза, старт, удаление, лимиты, трекеры.
 2. **API** (FastAPI) валидирует запрос, пишет в **БД** то, что должно пережить перезапуск
    (какой торрент, где хранить, метка, желаемый статус), и передаёт команду нужному **движку**.
@@ -31,7 +31,7 @@
 | Компонент | Технологии | Роль |
 |-----------|-----------|------|
 | `web/` | Vite + TypeScript, nginx | Браузерный клиент; nginx проксирует `/api` → `api` |
-| `desktop/` | Python CLI `seeding-desktop` | Клиент для Windows (GUI — позже) |
+| `desktop/` | Python CLI + GUI PySide6 | Клиент для Windows: `seeding-desktop` и `python -m seeding_desktop.gui` |
 | `api/` | FastAPI, SQLAlchemy async | Публичный HTTP, оркестрация, восстановление, агрегация |
 | `engine/` | Python + libtorrent | Сессия раздачи, внутренний HTTP API (:8081) |
 | `db/` | SQLAlchemy + Alembic | Модели, миграции, репозитории — единственный владелец схемы |
@@ -226,6 +226,7 @@ API-restore (ниже) остаётся как восстановление по
 | DELETE | `/torrents/{id}` | удалить (опц. с файлами) |
 | POST | `/torrents/{id}/pause` · `/resume` | пауза / старт |
 | POST | `/torrents/{id}/recheck` · `/reannounce` | рехэш / переанонс |
+| GET | `/torrents/{id}/torrent-file` | скачать `.torrent` этой раздачи |
 | POST | `/torrents/{id}/limits` | per-torrent лимиты ↓/↑ |
 | GET/POST/DELETE | `/torrents/{id}/trackers` | список / добавить / удалить трекер |
 | GET/POST | `/torrents/{id}/files` · `/files/priorities` | файлы и приоритеты |
@@ -244,7 +245,8 @@ API-restore (ниже) остаётся как восстановление по
 
 Внутренний API движка (`:8081`, не публичный) зеркалит торрент-операции на уровне `db_id`
 плюс `/health`, `/session/stats`, `/session/limits`, `/session/net-settings`,
-`/session/unchoke-settings` и `/internal/v1/creator/*`.
+`/session/unchoke-settings`, `/internal/v1/creator/*` и
+`GET /internal/v1/torrents/{db_id}/torrent-file` (см. [`docs/TORRENT_FILE.md`](docs/TORRENT_FILE.md)).
 
 **MPW:** топик `creator.task.deleted` (`SEEDING_KAFKA_BOOTSTRAP`, дефолт
 `192.168.1.223:9092`). Тело: `task_key` вида `a1:0`, `reason` = `deleted` | `ttl`.
@@ -292,16 +294,20 @@ API-restore (ниже) остаётся как восстановление по
 ## 10. Карта репозитория
 
 ```
-api/        FastAPI: routers (torrents, session, jobs), engine_pool, restore, schemas
-engine/     libtorrent runtime, внутренний HTTP, fastresume_io, store
-db/         модели (TorrentRecord, TorrentStatus), alembic, репозитории, status_from_runtime
-queue/      ARQ-задачи (sync_runtime_to_db, restore, bulk-register)
-web/        TS-клиент (список/детали, фильтры/сортировка/bulk, файлы/трекеры/лимиты)
-desktop/    CLI seeding-desktop
-config/     engines.*.json (реестр движков)
-docs/       ROADMAP, MULTI_ENGINE, INTEGRATION, QA, отчёты
-scripts/    dev.ps1 / dev.sh (up/down/status/sync/test)
-docker-compose*.yml   базовый, multi-engine, media-override
+api/            FastAPI: routers (torrents, session, jobs), engine_pool, restore, schemas
+engine/         libtorrent runtime, внутренний HTTP, fastresume_io, store
+db/             модели (TorrentRecord, TorrentStatus), alembic, репозитории, status_from_runtime
+queue/          ARQ-задачи (sync_runtime_to_db, restore, bulk-register)
+web/            TS-клиент (список/детали, фильтры/сортировка/bulk, файлы/трекеры/лимиты)
+desktop/        CLI seeding-desktop + GUI PySide6
+upload/         HMAC-ticket загрузка в том движка
+upload-edge/    nginx :8090 → /{engine_id}/upload/v1/
+upload-relay/   RU-релей скачивания/заливки
+observability/  Prometheus / Grafana
+config/         engines.*.json (реестр движков)
+docs/           ROADMAP, MULTI_ENGINE, INTEGRATION, QA, отчёты
+scripts/        dev.ps1 / dev.sh (up/down/status/sync/test)
+docker-compose*.yml   базовый, multi-engine, media, tls, upload*, observability
 ```
 
 См. также: [`ROADMAP.md`](ROADMAP.md), [`docs/MULTI_ENGINE.md`](docs/MULTI_ENGINE.md),

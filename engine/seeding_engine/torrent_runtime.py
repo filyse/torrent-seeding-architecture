@@ -942,11 +942,46 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         return root / ".torrents"
 
     async def read_torrent_file(self, db_id: int) -> bytes | None:
-        """Сохранённый .torrent движка (для переноса раздачи на другой движок)."""
+        """Сохранённый .torrent движка; если файла нет — собрать из живого handle."""
         path = self._torrent_files_dir() / f"{db_id}.torrent"
-        if not path.is_file():
+        if path.is_file():
+            return await asyncio.to_thread(path.read_bytes)
+        data = await self._export_torrent_from_handle(db_id)
+        if data:
+            await asyncio.to_thread(self._persist_torrent_file, db_id, data)
+        return data
+
+    async def _export_torrent_from_handle(self, db_id: int) -> bytes | None:
+        """Собрать .torrent из torrent_info + трекеров, когда файла на диске нет (magnet)."""
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None:
             return None
-        return await asyncio.to_thread(path.read_bytes)
+        lt = self._lt
+
+        def _export() -> bytes | None:
+            ti = h.torrent_file() if callable(getattr(h, "torrent_file", None)) else None
+            if ti is None:
+                return None
+            try:
+                ct = lt.create_torrent(ti)
+            except Exception as exc:  # noqa: BLE001
+                log.debug("create_torrent from handle db_id=%s: %s", db_id, exc)
+                return None
+            try:
+                for tracker in h.trackers():
+                    url = getattr(tracker, "url", None)
+                    if url:
+                        ct.add_tracker(str(url))
+            except Exception as exc:  # noqa: BLE001
+                log.debug("export trackers db_id=%s: %s", db_id, exc)
+            try:
+                return lt.bencode(ct.generate())
+            except Exception as exc:  # noqa: BLE001
+                log.debug("bencode exported torrent db_id=%s: %s", db_id, exc)
+                return None
+
+        return await asyncio.to_thread(_export)
 
     @staticmethod
     def _torrent_name_from_data(lt, torrent_data: bytes) -> str:

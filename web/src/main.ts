@@ -5285,7 +5285,7 @@ async function loadDetail(
     if (dl > 0) chips.append(statChip(fmtBytes(dl), "Скачано всего"));
     if (data.runtime?.private === true) chips.append(statChip("Приватная", "DHT/PEX/LSD выключены"));
 
-    // Тулбар: основное действие (пауза/старт) + проверка/переанонс, удаление справа.
+    // Тулбар: основное действие (пауза/старт) + проверка/переанонс/скачать .torrent, удаление справа.
     const toolbar = el("div", { className: "detail-toolbar" });
     const toggleBtn = el("button", {
       type: "button",
@@ -5293,6 +5293,11 @@ async function loadDetail(
     }, [st === "paused" ? "▶ Старт" : "⏸ Пауза"]);
     const recheckBtn = el("button", { type: "button", className: "btn" }, ["Проверить"]);
     const reannounceBtn = el("button", { type: "button", className: "btn" }, ["Переанонс"]);
+    const downloadTorrentBtn = el("button", {
+      type: "button",
+      className: "btn",
+      title: "Скачать .torrent этой раздачи",
+    }, ["Скачать торрент"]);
     const delBtn = el("button", { type: "button", className: "btn btn--danger" }, ["Удалить"]);
 
     toggleBtn.addEventListener("click", async () => {
@@ -5327,6 +5332,16 @@ async function loadDetail(
         reannounceBtn.disabled = false;
       }
     });
+    downloadTorrentBtn.addEventListener("click", async () => {
+      downloadTorrentBtn.disabled = true;
+      try {
+        await downloadSwarmTorrent(id, data.display_name);
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : String(e), true);
+      } finally {
+        downloadTorrentBtn.disabled = false;
+      }
+    });
     delBtn.addEventListener("click", () => {
       void deleteTorrentWithDialog({ id: data.id, display_name: data.display_name }, () => {
         setHashList();
@@ -5340,6 +5355,7 @@ async function loadDetail(
       toggleBtn,
       recheckBtn,
       reannounceBtn,
+      downloadTorrentBtn,
       el("span", { className: "detail-toolbar__spacer" }),
       delBtn,
     );
@@ -5966,18 +5982,35 @@ async function loginWithPassword(username: string, password: string): Promise<vo
 const CREATE_POLL_MS = 1500;
 const TERMINAL_CREATE_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
+async function downloadBlobAsFile(res: Response, filename: string): Promise<void> {
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: filename });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function downloadSwarmTorrent(torrentId: number, displayName: string): Promise<void> {
+  const res = await fetch(`${API}/torrents/${torrentId}/torrent-file`, {
+    headers: apiHeaders(false),
+  });
+  if (res.status === 409) {
+    throw new Error("Нет .torrent-файла у этой раздачи — возможно, она добавлена по magnet и метаданные ещё не получены");
+  }
+  await throwIfNotOk(res);
+  let name = (displayName || `torrent-${torrentId}`).trim();
+  if (name.toLowerCase().endsWith(".torrent")) name = name.slice(0, -".torrent".length);
+  await downloadBlobAsFile(res, `${name || `torrent-${torrentId}`}.torrent`);
+}
+
 async function downloadCreatedTorrent(task: CreatorTaskOut): Promise<void> {
   const res = await fetch(`${API}/creator/tasks/${task.engine_id}/${task.id}/download`, {
     headers: apiHeaders(false),
   });
   await throwIfNotOk(res);
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = el("a", { href: url, download: `${task.name || "torrent"}.torrent` });
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  await downloadBlobAsFile(res, `${task.name || "torrent"}.torrent`);
 }
 
 function openCreateTorrentDialog(
@@ -6666,6 +6699,7 @@ type UserItem = {
   protected?: boolean;
   created_at: string | null;
   last_login_at: string | null;
+  avatar?: string;
 };
 
 function mountUsersPanel(): HTMLElement {
@@ -6748,7 +6782,10 @@ function mountUsersPanel(): HTMLElement {
           }
         });
         const actions = u.protected ? [roleControl, pwBtn] : [roleControl, pwBtn, toggle, del];
-        row.append(meta, el("div", { className: "btn-row" }, actions));
+        const av = avatarNode(u.avatar ?? "", u.username, 32);
+        av.setAttribute("aria-hidden", "true");
+        const who = el("div", { className: "key-row__who" }, [av, meta]);
+        row.append(who, el("div", { className: "btn-row" }, actions));
         list.append(row);
       }
     } catch (e) {

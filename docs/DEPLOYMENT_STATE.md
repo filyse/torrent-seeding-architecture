@@ -2,7 +2,7 @@
 
 > **Исторический снимок 2026-07-18.** Не читать как текущий прод.
 > С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
-> Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-09-02: web 1.45 / api 1.24 / engine 1.6).
+> Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (цель 2026-09-08: web 1.46 / api 1.25 / engine 1.6.2).
 > Источник истины кода на момент сверки — `main` @ `ef97d9c`.
 
 Документ фиксирует **фактическую топологию продакшена**, расхождение рабочих
@@ -482,6 +482,30 @@ bash scripts/deploy-ct400.sh up -d --build api web
 
 Проверка: Ctrl+F5; Настройки → Пользователи — кружок слева от имени.
 Ключи без аватара. Смена по-прежнему в кабинете.
+
+## 7щ. Скачать `.torrent` раздачи — 2026-09-08
+
+web **1.46.0**, api **1.25.0**, engine **1.6.2**. Спека: [`TORRENT_FILE.md`](TORRENT_FILE.md).
+
+Кнопка в карточке рядом с «Переанонс». Байты идут через CT400 `api`
+(`GET /api/v1/torrents/{id}/torrent-file`), не через `/u/b/`.
+
+Прод-деревья длиннее `origin/main` — **не** `git reset --hard`.
+Подтянуть файлы, затем:
+
+```bash
+# CT400 — обязательно
+cd /opt/containerd
+bash scripts/deploy-ct400.sh up -d --build api web
+
+# движки — для magnet без файла на диске (сборка из handle)
+# 171: ~/seeding-engine, 243: ~/torrent-seeding-architecture
+# те же compose, что в §5 / 7ш
+```
+
+Проверка: Ctrl+F5; карточка → «Скачать торрент» → `.torrent` с именем раздачи.
+`curl -fI http://127.0.0.1:8000/api/v1/torrents/<id>/torrent-file` → 200
+(нужен тот же auth, что у UI).
 
 ## 7. Откат
 

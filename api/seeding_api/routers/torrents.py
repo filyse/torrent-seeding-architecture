@@ -1,9 +1,11 @@
 import asyncio
 import logging
 import os
+import re
+from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 from seeding_db.engine_registry import normalize_save_path
 from seeding_db.models import TorrentStatus
 from seeding_db.repository import MigrationRepository, TorrentRepository
@@ -37,6 +39,27 @@ from seeding_api.schemas import (
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+_UNSAFE_FILENAME = re.compile(r'[/\\:"\x00-\x1f]+')
+
+
+def _torrent_download_name(display_name: str | None, torrent_id: int) -> str:
+    raw = (display_name or "").strip() or f"torrent-{torrent_id}"
+    if raw.lower().endswith(".torrent"):
+        raw = raw[: -len(".torrent")]
+    raw = _UNSAFE_FILENAME.sub("_", raw).strip(" ._") or f"torrent-{torrent_id}"
+    return raw
+
+
+def _torrent_attachment(filename: str) -> str:
+    if not filename.lower().endswith(".torrent"):
+        filename = f"{filename}.torrent"
+    try:
+        filename.encode("ascii")
+        return f'attachment; filename="{filename}"'
+    except UnicodeEncodeError:
+        return f"attachment; filename=\"download.torrent\"; filename*=UTF-8''{quote(filename)}"
 
 
 def _require_engine_for_delete() -> bool:
@@ -937,6 +960,31 @@ async def reannounce_torrent(torrent_id: int, session: DbSession, pool: EnginePo
     if not ok:
         raise HTTPException(status_code=409, detail="torrent not in runtime")
     return {"ok": True}
+
+
+@router.get("/{torrent_id}/torrent-file")
+async def download_torrent_file(torrent_id: int, session: DbSession, pool: EnginePoolDep):
+    """Скачать .torrent этой раздачи (тот же файл, что движок хранит для переноса)."""
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    try:
+        payload = await pool.client_for_row(row).get_torrent_file(torrent_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 501:
+            raise HTTPException(status_code=409, detail="no .torrent file for this swarm") from exc
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    if not payload:
+        raise HTTPException(status_code=409, detail="no .torrent file for this swarm")
+    name = _torrent_download_name(getattr(row, "display_name", None), torrent_id)
+    return Response(
+        content=payload,
+        media_type="application/x-bittorrent",
+        headers={"Content-Disposition": _torrent_attachment(name)},
+    )
 
 
 @router.post("/{torrent_id}/limits", response_model=TorrentDetailOut)
