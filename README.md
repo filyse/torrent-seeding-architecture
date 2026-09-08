@@ -30,6 +30,7 @@
 - [`docs/INTEGRATION.md`](docs/INTEGRATION.md) — границы модулей и контракты
 - [`docs/CREATOR.md`](docs/CREATOR.md) — создание `.torrent` из контента; Kafka `creator.task.deleted` → MPW
 - [`docs/NETWORK.md`](docs/NETWORK.md) — экран «Сеть»: отдача и скачивание по WAN-каналам
+- [`docs/HEADER_STATS.md`](docs/HEADER_STATS.md) — свёртка мини-меню статистики в шапке
 - [`docs/BACKUP.md`](docs/BACKUP.md) — суточные бэкапы БД и состояния движков, восстановление
 - [`docs/FILE_UPLOAD.md`](docs/FILE_UPLOAD.md) — загрузка файлов в том движка (ticket + edge)
 - [`docs/FILE_DOWNLOAD.md`](docs/FILE_DOWNLOAD.md) — скачать файл контента с тома (ticket + RU)

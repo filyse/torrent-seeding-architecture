@@ -760,6 +760,10 @@ const ICON_PATHS: Record<string, string> = {
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
   home: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
   key: '<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
+  server:
+    '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>',
+  "more-horizontal":
+    '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
 };
 
 /** Инлайновая SVG-иконка (Feather-стиль), наследует цвет текста кнопки. */
@@ -1100,6 +1104,7 @@ function paintProfile(host: HTMLElement): void {
   };
   toggle.addEventListener("click", (ev) => {
     ev.stopPropagation();
+    closeOpenTrays();
     if (host.classList.toggle("is-open")) {
       document.addEventListener("click", onOutside, true);
       document.addEventListener("keydown", onEsc, true);
@@ -1116,6 +1121,336 @@ function profileControl(): HTMLElement {
   profileHosts.add(host);
   paintProfile(host);
   return host;
+}
+
+type TrayKind = "engines" | "torrents" | "size" | "dl" | "ul" | "uploaded";
+
+const TRAY_SPEC: Record<
+  TrayKind,
+  {
+    title: string;
+    ic: keyof typeof ICON_PATHS;
+    moreTitle?: string;
+    go?: () => void;
+  }
+> = {
+  engines: { title: "Движки", ic: "server", moreTitle: "Настройки", go: setHashSettings },
+  torrents: { title: "Раздачи", ic: "list" },
+  size: { title: "Объём", ic: "grid" },
+  dl: { title: "Скачивание", ic: "download", moreTitle: "Сеть", go: setHashNetworkDownload },
+  ul: { title: "Отдача", ic: "upload", moreTitle: "Сеть", go: setHashNetwork },
+  uploaded: { title: "Всего отдано", ic: "arrow-up", moreTitle: "Сеть", go: setHashNetworkUploaded },
+};
+
+const trayHosts = new Set<HTMLElement>();
+let lastEngines: EngineOut[] | null = null;
+let lastEngineSizes: Record<string, number> | null = null;
+let trayEnginesInflight: Promise<void> | null = null;
+
+function diskUsedPct(e: EngineOut): number | null {
+  const total = e.disk_total;
+  const free = e.disk_free;
+  if (total == null || total <= 0 || free == null) return null;
+  return Math.max(0, Math.min(100, Math.round(((total - free) / total) * 100)));
+}
+
+function closeOpenProfiles(): void {
+  for (const h of profileHosts) h.classList.remove("is-open");
+}
+
+function closeOpenTrays(except?: HTMLElement): void {
+  for (const h of trayHosts) {
+    if (h === except) continue;
+    h.classList.remove("is-open");
+    const t = h.querySelector(".tray-toggle");
+    if (t) t.setAttribute("aria-expanded", "false");
+  }
+}
+
+function refreshTrayEngines(): Promise<void> {
+  if (trayEnginesInflight) return trayEnginesInflight;
+  trayEnginesInflight = fetchJson<EngineOut[]>("/engines")
+    .then((rows) => {
+      rows.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      lastEngines = rows;
+      fillAllTrays();
+    })
+    .catch(() => {
+      if (!lastEngines) lastEngines = [];
+      fillAllTrays();
+    })
+    .finally(() => {
+      trayEnginesInflight = null;
+    });
+  return trayEnginesInflight;
+}
+
+function trayKindOf(host: HTMLElement): TrayKind {
+  const k = host.dataset.kind;
+  if (k === "torrents" || k === "size" || k === "dl" || k === "ul" || k === "uploaded") return k;
+  return "engines";
+}
+
+function trayEngineIds(): string[] {
+  if (lastEngines?.length) return lastEngines.map((e) => e.id);
+  const ids = new Set<string>([
+    ...Object.keys(lastSessionStats?.by_engine ?? {}),
+    ...Object.keys(lastEngineSizes ?? {}),
+  ]);
+  return [...ids].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+function trayEngineOnline(id: string): boolean {
+  const rec = lastEngines?.find((e) => e.id === id);
+  if (rec) return rec.online !== false;
+  const ses = lastSessionStats?.by_engine?.[id];
+  if (ses) return !ses.error;
+  return true;
+}
+
+function traySummaryLabel(kind: TrayKind): string {
+  const stats = lastSessionStats;
+  if (kind === "engines") {
+    if (stats?.engines_ok != null && stats.engines_total != null) {
+      return `${stats.engines_ok}/${stats.engines_total}`;
+    }
+    if (lastEngines?.length) {
+      const ok = lastEngines.filter((e) => e.online !== false).length;
+      return `${ok}/${lastEngines.length}`;
+    }
+    return "…";
+  }
+  if (kind === "torrents") return stats ? String(stats.torrents) : "…";
+  if (kind === "size") return fmtBytes(stats?.total_size ?? lastTotalContentSize);
+  if (kind === "dl") {
+    const n = (stats?.download_rate ?? 0) + fileUploadInboundTotal();
+    return fmtRate(n);
+  }
+  if (kind === "ul") return fmtRate(stats?.upload_rate);
+  return fmtBytes(stats?.total_uploaded);
+}
+
+function trayRowBits(
+  kind: TrayKind,
+  id: string,
+): { value: string; sub: string; title: string } {
+  const rec = lastEngines?.find((e) => e.id === id);
+  const online = trayEngineOnline(id);
+  const ses = lastSessionStats?.by_engine?.[id];
+  const files = fileUploadInboundByEngine()[id] ?? 0;
+  if (kind === "engines") {
+    const pct = rec ? diskUsedPct(rec) : null;
+    const torrents = ses && !ses.error ? ses.torrents : undefined;
+    return {
+      value: pct != null ? `${pct}%` : torrents != null ? String(torrents) : "—",
+      sub: !online ? "нет связи" : pct != null ? "диск занят" : torrents != null ? "раздач" : "онлайн",
+      title: rec?.disk_free != null ? `${id} · свободно ${fmtBytes(rec.disk_free)}` : id,
+    };
+  }
+  if (kind === "torrents") {
+    const n = ses && !ses.error ? ses.torrents : undefined;
+    const active = ses && !ses.error ? ses.torrents_active : undefined;
+    return {
+      value: n != null ? String(n) : "—",
+      sub: !online ? "нет связи" : active != null ? `${active} актив.` : "раздач",
+      title: id,
+    };
+  }
+  if (kind === "size") {
+    const bytes = lastEngineSizes?.[id];
+    const n = ses && !ses.error ? ses.torrents : undefined;
+    return {
+      value: bytes != null ? fmtBytes(bytes) : "—",
+      sub: !online ? "нет связи" : n != null ? `${n} раздач` : "объём",
+      title: id,
+    };
+  }
+  if (kind === "dl") {
+    const n = (ses && !ses.error ? ses.download_rate ?? 0 : 0) + files;
+    return {
+      value: fmtRate(n),
+      sub: !online ? "нет связи" : files > 0 ? `файлы ${fmtRate(files)}` : "скачивание",
+      title: id,
+    };
+  }
+  if (kind === "ul") {
+    const n = ses && !ses.error ? ses.upload_rate : undefined;
+    return {
+      value: fmtRate(n),
+      sub: !online ? "нет связи" : "отдача",
+      title: id,
+    };
+  }
+  const n = ses && !ses.error ? ses.total_uploaded : undefined;
+  return {
+    value: fmtBytes(n),
+    sub: !online ? "нет связи" : "отдано",
+    title: id,
+  };
+}
+
+function fillTray(host: HTMLElement): void {
+  const kind = trayKindOf(host);
+  const val = host.querySelector(".tray-toggle__val");
+  if (val) val.textContent = traySummaryLabel(kind);
+  const list = host.querySelector(".tray-menu__list");
+  if (!list) return;
+  list.replaceChildren();
+  const ids = trayEngineIds();
+  if (!lastEngines && ids.length === 0) {
+    list.append(el("div", { className: "tray-empty" }, ["Загрузка…"]));
+    return;
+  }
+  if (ids.length === 0) {
+    list.append(el("div", { className: "tray-empty" }, ["Движки недоступны"]));
+    return;
+  }
+  for (const id of ids) {
+    const online = trayEngineOnline(id);
+    const bits = trayRowBits(kind, id);
+    const row = el("button", {
+      type: "button",
+      className: `tray-row${online ? "" : " tray-row--down"}`,
+      role: "menuitem",
+      title: bits.title,
+    });
+    row.append(
+      el("span", { className: "tray-row__icon" }, [icon("server")]),
+      el("span", { className: "tray-row__name" }, [id]),
+      el("span", { className: "tray-row__right" }, [
+        el("span", { className: "tray-row__value" }, [bits.value]),
+        el("span", { className: "tray-row__sub" }, [bits.sub]),
+      ]),
+    );
+    row.addEventListener("click", () => {
+      host.classList.remove("is-open");
+      host.querySelector(".tray-toggle")?.setAttribute("aria-expanded", "false");
+      openTrayRow(kind, id);
+    });
+    list.append(row);
+  }
+}
+
+function openTrayRow(kind: TrayKind, id: string): void {
+  if (kind === "engines") {
+    showEngineDetailModal(id, id);
+    return;
+  }
+  if (kind === "torrents" || kind === "size") {
+    listEngineFilter = id;
+    lsSet("ui.engine", id);
+    if (kind === "size") {
+      listSort = "size";
+      lsSet("ui.sort", listSort);
+    }
+    setHashList();
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    return;
+  }
+  const side: Exclude<NetworkSide, "history"> =
+    kind === "dl" ? "down" : kind === "uploaded" ? "uploaded" : "up";
+  goNetwork(side, id);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+}
+
+function fillAllTrays(): void {
+  for (const h of [...trayHosts]) {
+    if (h.isConnected) fillTray(h);
+    else trayHosts.delete(h);
+  }
+}
+
+function paintTray(host: HTMLElement): void {
+  const kind = trayKindOf(host);
+  const spec = TRAY_SPEC[kind];
+  host.replaceChildren();
+  host.className = "tray";
+  host.dataset.kind = kind;
+  const toggle = el("button", {
+    type: "button",
+    className: "tray-toggle",
+    "aria-haspopup": "true",
+    "aria-expanded": "false",
+    title: spec.title,
+  });
+  toggle.append(icon(spec.ic), el("span", { className: "tray-toggle__val" }, [traySummaryLabel(kind)]));
+
+  const menu = el("div", { className: "tray-menu", role: "menu" });
+  const head = el("div", { className: "tray-menu__head" }, [
+    el("div", { className: "tray-menu__title" }, [icon(spec.ic), el("span", {}, [spec.title])]),
+  ]);
+  if (spec.go && spec.moreTitle) {
+    const more = el("button", {
+      type: "button",
+      className: "tray-menu__more",
+      title: spec.moreTitle,
+      "aria-label": spec.moreTitle,
+    });
+    more.append(icon("more-horizontal"));
+    more.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      host.classList.remove("is-open");
+      toggle.setAttribute("aria-expanded", "false");
+      spec.go?.();
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    head.append(more);
+  }
+  menu.append(head, el("div", { className: "tray-menu__list" }));
+
+  const close = (): void => {
+    host.classList.remove("is-open");
+    toggle.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", onOutside, true);
+    document.removeEventListener("keydown", onEsc, true);
+  };
+  const onOutside = (ev: Event): void => {
+    if (!host.contains(ev.target as Node)) close();
+  };
+  const onEsc = (ev: KeyboardEvent): void => {
+    if (ev.key === "Escape") close();
+  };
+  toggle.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    closeOpenProfiles();
+    closeOpenTrays(host);
+    if (host.classList.toggle("is-open")) {
+      toggle.setAttribute("aria-expanded", "true");
+      document.addEventListener("click", onOutside, true);
+      document.addEventListener("keydown", onEsc, true);
+      void refreshTrayEngines();
+    } else {
+      close();
+    }
+  });
+
+  host.append(toggle, menu);
+  fillTray(host);
+}
+
+function miniTrayControl(kind: TrayKind): HTMLElement {
+  const host = el("span", { className: "tray", "data-kind": kind });
+  trayHosts.add(host);
+  paintTray(host);
+  if (kind === "engines") void refreshTrayEngines();
+  return host;
+}
+
+function statusTrayControl(): HTMLElement {
+  return miniTrayControl("engines");
+}
+
+function statsDock(metaEl: HTMLElement): HTMLElement {
+  const traysInner = el("div", { className: "stats-dock__trays-inner" }, [
+    miniTrayControl("torrents"),
+    miniTrayControl("size"),
+    miniTrayControl("dl"),
+    miniTrayControl("ul"),
+    miniTrayControl("uploaded"),
+    miniTrayControl("engines"),
+  ]);
+  const trays = el("div", { className: "stats-dock__trays" }, [traysInner]);
+  return el("div", { className: "stats-dock" }, [trays, metaEl]);
 }
 
 function downscaleImage(dataUrl: string, max = 128): Promise<string> {
@@ -1415,10 +1750,31 @@ function parseRoute(): Route {
   return { view: "list" };
 }
 
+function currentPath(): string {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+function routeEngineId(): string {
+  return new URLSearchParams(window.location.search).get("engine")?.trim() ?? "";
+}
+
 function pushPath(path: string): void {
-  if (window.location.pathname !== path) {
+  if (currentPath() !== path) {
     window.history.pushState(null, "", path);
   }
+}
+
+function networkPath(side: NetworkSide, engineId?: string): string {
+  const base =
+    side === "down"
+      ? "/network/download"
+      : side === "uploaded"
+        ? "/network/uploaded"
+        : side === "history"
+          ? "/network/history"
+          : "/network";
+  if (!engineId) return base;
+  return `${base}?engine=${encodeURIComponent(engineId)}`;
 }
 
 function setHashList(): void {
@@ -1438,19 +1794,23 @@ function setHashCabinet(): void {
 }
 
 function setHashNetwork(): void {
-  pushPath("/network");
+  pushPath(networkPath("up"));
 }
 
 function setHashNetworkDownload(): void {
-  pushPath("/network/download");
+  pushPath(networkPath("down"));
 }
 
 function setHashNetworkUploaded(): void {
-  pushPath("/network/uploaded");
+  pushPath(networkPath("uploaded"));
 }
 
 function setHashNetworkHistory(): void {
-  pushPath("/network/history");
+  pushPath(networkPath("history"));
+}
+
+function goNetwork(side: Exclude<NetworkSide, "history">, engineId?: string): void {
+  pushPath(networkPath(side, engineId));
 }
 
 function navLink(label: string, onClick: () => void): HTMLElement {
@@ -1569,10 +1929,6 @@ function mountSessionBar(stats: SessionStats | null, changed?: Set<string>): HTM
     return bar;
   }
   const f = (k: string) => Boolean(changed?.has(k));
-  const enginesNote =
-    stats.engines_total != null
-      ? `${stats.engines_ok ?? 0}/${stats.engines_total} движков`
-      : "";
   bar.append(
     statChip(`${stats.torrents}`, `Раздач · ${stats.torrents_active} актив.`, undefined, f("torrents")),
   );
@@ -1602,7 +1958,6 @@ function mountSessionBar(stats: SessionStats | null, changed?: Set<string>): HTM
       },
     }),
   );
-  if (enginesNote) bar.append(statChip(enginesNote, "Онлайн", undefined, f("engines")));
   return bar;
 }
 
@@ -3584,7 +3939,6 @@ function scheduleListPoll(
 // чтобы дорисовывать «Объём раздач» в живую панель, которая обновляется из потока.
 let lastTotalContentSize: number | null = null;
 let lastSessionStats: SessionStats | null = null;
-let lastFileInboundTotal = 0;
 
 function applySessionStats(sessionBarHost: HTMLElement, stats?: SessionStats | null): void {
   if (parseRoute().view !== "list") return;
@@ -3592,21 +3946,9 @@ function applySessionStats(sessionBarHost: HTMLElement, stats?: SessionStats | n
   if (stats.total_size == null && lastTotalContentSize != null) {
     stats.total_size = lastTotalContentSize;
   }
-  const prev = lastSessionStats;
-  // Если пришёл тот же объект (дорисовка total_size) — сравнивать не с чем, без подсветки.
-  const changed = prev && prev !== stats ? new Set<string>() : undefined;
-  if (changed && prev) {
-    if (prev.torrents !== stats.torrents || prev.torrents_active !== stats.torrents_active) changed.add("torrents");
-    if (prev.total_size !== stats.total_size) changed.add("size");
-    if (prev.download_rate !== stats.download_rate) changed.add("dl");
-    if (fileUploadInboundTotal() !== lastFileInboundTotal) changed.add("dl");
-    if (prev.upload_rate !== stats.upload_rate) changed.add("ul");
-    if (prev.total_uploaded !== stats.total_uploaded) changed.add("uploaded");
-    if (prev.engines_ok !== stats.engines_ok || prev.engines_total !== stats.engines_total) changed.add("engines");
-  }
   lastSessionStats = stats;
-  lastFileInboundTotal = fileUploadInboundTotal();
-  sessionBarHost.replaceChildren(mountSessionBar(stats, changed));
+  sessionBarHost.replaceChildren();
+  fillAllTrays();
 }
 
 function startListSse(sessionBarHost: HTMLElement, onFallback: () => void): void {
@@ -4540,9 +4882,12 @@ function mountListShell(root: HTMLElement): void {
       reloadEngines();
       // Прокидываем общий объём в живую панель сверху (перерисовываем сразу, не ждём поток).
       lastTotalContentSize = facets.total_size;
+      lastEngineSizes = facets.engine_sizes ?? null;
       if (lastSessionStats) {
         lastSessionStats.total_size = facets.total_size;
         applySessionStats(sessionBarHost, lastSessionStats);
+      } else {
+        fillAllTrays();
       }
     } catch {
       /* счётчики необязательны — молча игнорируем */
@@ -4863,8 +5208,7 @@ function mountListShell(root: HTMLElement): void {
   }
   if (canWrite()) actionsRow.append(torrentMenu);
   actionsRow.append(settingsLink, profileControl());
-  // Все контролы в один ровный ряд, а «Обновлено …» — тонкой строкой под всем блоком.
-  const headerActions = el("div", { className: "app-header__side" }, [actionsRow, metaEl]);
+  const headerActions = el("div", { className: "app-header__side" }, [actionsRow, statsDock(metaEl)]);
   const header = el("header", { className: "app-header" }, [
     brandLockup(),
     headerActions,
@@ -5094,7 +5438,7 @@ function mountListShell(root: HTMLElement): void {
   void reloadLabels();
   void loadSessionStats().then((s) => {
     if (s) applySessionStats(sessionBarHost, s);
-    else sessionBarHost.replaceChildren(mountSessionBar(s));
+    else sessionBarHost.replaceChildren();
   });
 
   const startStream = () => startListStream(listRefs, sessionBarHost, () => void refresh());
@@ -5527,7 +5871,7 @@ function mountDetailShell(root: HTMLElement, id: number): void {
     el("header", { className: "app-header" }, [
       el("div", {}, [el("h1", {}, ["Торрент"]), el("p", { className: "field__hint" }, [`#${id}`])]),
       el("div", { className: "app-header__side" }, [
-        el("div", { className: "app-header__actions" }, [profileControl()]),
+        el("div", { className: "app-header__actions" }, [statusTrayControl(), profileControl()]),
         metaEl,
       ]),
     ]),
@@ -7771,7 +8115,7 @@ function renderUploadedCharts(
   );
   const grid = el("div", { className: "wan-charts__grid" });
   for (const link of data.links) {
-    const cell = el("div", { className: "wan-charts__cell" });
+    const cell = el("div", { className: "wan-charts__cell", "data-wan": link.id });
     cell.append(
       el("div", { className: "wan-charts__wan" }, [link.name]),
       takeMiniChart(cache, history, link.id, link.engines, verb),
@@ -7806,7 +8150,10 @@ function wanEngineRow(
       rateEl.append(el("span", { className: "wan-eng__files" }, [`файлы ${fmtRate(r.files)}`]));
     }
   }
-  const row = el("div", { className: `wan-eng${offline ? " wan-eng--off" : ""}` });
+  const row = el("div", {
+    className: `wan-eng${offline ? " wan-eng--off" : ""}`,
+    "data-engine": id,
+  });
   const barEl = el("span", { className: "wan-eng__bar" }, [
     meterRow(share, channelBarTone(wanId)),
   ]);
@@ -7855,7 +8202,7 @@ function wanCard(
   const xferLabel = side === "down" ? "принято" : "отдано";
   const headline = volume ? fmtBytes(t.transferred) : `${arrow} ${fmtRate(t.rate)}`;
 
-  const card = el("section", { className: "wan-card" });
+  const card = el("section", { className: "wan-card", "data-wan": wanId });
   const rateBlock = el("div", { className: "wan-card__rate" }, [
     el("span", { className: "wan-card__rate-val" }, [headline]),
     el("span", { className: "wan-card__rate-share" }, [`${share.toFixed(0)}% ${shareLabel}`]),
@@ -7955,10 +8302,22 @@ function renderWanCards(
         totalRate,
         fileInbound,
         side,
+        "unassigned",
       ),
     );
   }
   return cards;
+}
+
+function cssEscape(value: string): string {
+  return typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(value) : value.replace(/"/g, "");
+}
+
+function scrollToNetworkEngine(cardsHost: HTMLElement): void {
+  const engineId = routeEngineId();
+  if (!engineId) return;
+  const row = cardsHost.querySelector<HTMLElement>(`.wan-eng[data-engine="${cssEscape(engineId)}"]`);
+  (row ?? cardsHost.querySelector<HTMLElement>(`.wan-card`))?.scrollIntoView({ block: "nearest" });
 }
 
 function mountNetworkShell(root: HTMLElement): void {
@@ -7996,7 +8355,7 @@ function mountNetworkShell(root: HTMLElement): void {
       el("h1", {}, ["Сеть"]),
       el("p", { className: "field__hint" }, [hint]),
     ]),
-    el("div", { className: "app-header__actions" }, [tabBar, profileControl()]),
+    el("div", { className: "app-header__actions" }, [tabBar, statusTrayControl(), profileControl()]),
   ]);
   const host = el("div", { className: "wan-grid" }, [
     el("p", { className: "wan-note" }, ["Загрузка карты каналов…"]),
@@ -8027,11 +8386,17 @@ function mountNetworkShell(root: HTMLElement): void {
   let historyPeriod: HistoryPeriod = getHistoryPeriod();
   let unbindFarmHover: (() => void) | null = null;
   const miniCache = new Map<string, MiniChartSlot>();
+  let didFocusScroll = false;
 
   const paint = (stats: SessionStats | null) => {
     const now = parseRoute();
     if (now.view !== "network" || now.side !== side || links === null) return;
+    if (stats) lastSessionStats = stats;
     host.replaceChildren(...renderWanCards(links, stats, side));
+    if (!didFocusScroll) {
+      scrollToNetworkEngine(host);
+      didFocusScroll = true;
+    }
   };
 
   const paintCharts = () => {
@@ -8266,6 +8631,7 @@ function mountCabinetShell(root: HTMLElement): void {
       el("h1", {}, ["Кабинет"]),
       el("p", { className: "field__hint" }, ["Я, привычки этого браузера и этот вход"]),
     ]),
+    el("div", { className: "app-header__actions" }, [statusTrayControl()]),
   ]);
 
   const profile = el("section", { className: "panel" });
