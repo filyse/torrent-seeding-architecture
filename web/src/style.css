@@ -629,12 +629,11 @@ input.file-input::file-selector-button:hover {
   transform: translateY(-1px);
 }
 
-.torrent-card__top {
+.torrent-card__title-row {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.4rem;
+  gap: 0.45rem;
+  margin-bottom: 0.35rem;
 }
 
 .torrent-card__title {
@@ -665,26 +664,50 @@ input.file-input::file-selector-button:hover {
   margin-bottom: 0.45rem;
 }
 
+.torrent-card__stat {
+  min-width: 0;
+}
+
 .torrent-card__stats strong {
   color: var(--text);
   font-weight: 500;
 }
 
+.torrent-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.4rem;
+}
+
+.torrent-card__act {
+  position: relative;
+}
+
+.torrent-card__act--danger {
+  color: var(--muted);
+}
+
+.torrent-card__act--danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+
 /* Пресет «плитки»: список превращается в адаптивную сетку карточек. */
 .torrent-list--compact .torrent-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(16.5rem, 1fr));
   gap: 0.7rem;
 }
 .torrent-list--compact .torrent-card {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.7rem 0.8rem;
+  gap: 0.45rem;
+  padding: 0.7rem 0.75rem 0.65rem;
 }
-.torrent-list--compact .torrent-card__top {
+.torrent-list--compact .torrent-card__title-row,
+.torrent-list--compact .torrent-card__badges {
   margin-bottom: 0;
-  gap: 0.5rem;
 }
 /* Заголовок в 2 строки с многоточием — выравнивает прогресс-бары по строке. */
 .torrent-list--compact .torrent-card__title {
@@ -702,16 +725,227 @@ input.file-input::file-selector-button:hover {
   margin: 0;
 }
 .torrent-list--compact .torrent-card__stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.9fr);
+  gap: 0.2rem 0.45rem;
   flex: 1 1 auto;
   margin-bottom: 0;
+  font-variant-numeric: tabular-nums;
 }
-.torrent-list--compact .torrent-card .btn-row {
+.torrent-list--compact .torrent-card__stat {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.torrent-list--compact .torrent-card__acts {
   margin-top: auto;
-  gap: 0.3rem;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
 }
-.torrent-list--compact .torrent-card .btn-row .btn {
-  flex: 1 1 0;
-  padding: 0.3rem 0.4rem;
+.torrent-list--compact .torrent-card__act {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+}
+.torrent-list--compact .torrent-card__act-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+/* Вид «Карточки»: крупный процент слева, имя справа, действия в ⋯ */
+.torrent-card--pct {
+  position: relative;
+  padding: 0.7rem 0.85rem;
+}
+/* transform на hover поднимает соседнюю карточку над меню ⋯ */
+.torrent-card--pct:hover {
+  transform: none;
+}
+.torrent-card--pct.is-menu-open {
+  z-index: 50;
+}
+.torrent-card--pct .torrent-card__lead {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+.torrent-card--pct .torrent-card__check {
+  margin-top: 0;
+}
+.torrent-card--pct .torrent-card__pct {
+  flex: 0 0 3.5rem;
+  font-size: 1.375rem;
+  font-weight: 600;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+.torrent-card--pct .torrent-card__pct-unit {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 0.05rem;
+}
+.torrent-card--pct .torrent-card__up {
+  flex: 0 0 5.2rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.05rem;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+.torrent-card--pct .torrent-card__up-mark {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.torrent-card--pct .torrent-card__up-val {
+  font-size: 0.78rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.torrent-card--pct .torrent-card__main {
+  flex: 1;
+  min-width: 0;
+}
+.torrent-card--pct .torrent-card__title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 0;
+  font-size: 0.9rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.torrent-card--pct .torrent-card__sub {
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.torrent-card--pct .torrent-card__more,
+.torrent-card--row .torrent-card__more {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: flex-start;
+}
+.torrent-card--pct .torrent-card__more-toggle,
+.torrent-card--row .torrent-card__more-toggle {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  color: var(--muted);
+}
+.torrent-card--pct .torrent-card__more.is-open,
+.torrent-card--row .torrent-card__more.is-open {
+  z-index: 60;
+}
+.torrent-card--pct .torrent-card__more-menu,
+.torrent-card--row .torrent-card__more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 11rem;
+  z-index: 60;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  padding: 6px;
+  display: none;
+}
+.torrent-card--pct .torrent-card__more.is-open .torrent-card__more-menu,
+.torrent-card--row .torrent-card__more.is-open .torrent-card__more-menu {
+  display: block;
+}
+.torrent-card__more-head {
+  display: flex;
+  align-items: center;
+  padding: 0.35rem 0.45rem 0.5rem;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.torrent-card__more-head .badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Вид «Мини таблица»: горизонтальная строка (вариант 6 канвы) */
+.torrent-list--mini .torrent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.32rem;
+}
+.torrent-card--row {
+  position: relative;
+  padding: 0.38rem 0.65rem;
+}
+.torrent-card--row:hover {
+  transform: none;
+}
+.torrent-card--row.is-menu-open {
+  z-index: 50;
+}
+.torrent-card--row .torrent-card__lead {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.torrent-card--row .torrent-card__check {
+  margin-top: 0;
+}
+.torrent-card--row .torrent-card__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.torrent-card--row .torrent-card__pct {
+  flex: 0 0 3.1rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.torrent-card--row .torrent-card__up {
+  flex: 0 0 5.6rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.torrent-card--row .torrent-card__lead > .badge {
+  flex: 0 0 auto;
+  max-width: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.torrent-card--row .torrent-card__more {
+  align-self: center;
 }
 
 /* ── Табличный вид списка (стиль ruTorrent) ───────────────────────────── */
@@ -2940,10 +3174,57 @@ input.file-input::file-selector-button:hover {
   display: none;
 }
 
+.bulk-bar__row,
+.bulk-bar__cluster {
+  display: contents;
+}
+
+/* Плитка / карточки: узкая колонка #app — группы не рвутся посередине. */
+.bulk-bar--stacked {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.45rem 0.6rem;
+}
+
+.bulk-bar--stacked .bulk-bar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.bulk-bar--stacked .bulk-bar__cluster {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.bulk-bar--stacked .bulk-bar__row--play {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.bulk-bar--stacked .bulk-bar__row--danger {
+  grid-column: 2;
+  grid-row: 1;
+  justify-content: flex-end;
+}
+
+.bulk-bar--stacked .bulk-bar__row--meta {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+.bulk-bar--stacked .bulk-bar__sep {
+  display: none;
+}
+
 /* Единый размер и вид всех контролов панели — иначе кнопки/поля/селекты разной высоты. */
-.bulk-bar > .btn,
-.bulk-bar > select,
-.bulk-bar > input {
+.bulk-bar .btn,
+.bulk-bar select,
+.bulk-bar input {
   height: 2rem;
   min-height: 2rem;
   margin: 0;
@@ -2952,12 +3233,12 @@ input.file-input::file-selector-button:hover {
   box-shadow: none;
 }
 
-.bulk-bar > .btn {
+.bulk-bar .btn {
   padding: 0 0.7rem;
   white-space: nowrap;
 }
 
-.bulk-bar > .btn .icon svg {
+.bulk-bar .btn .icon svg {
   width: 14px;
   height: 14px;
 }
@@ -2965,7 +3246,7 @@ input.file-input::file-selector-button:hover {
 /* Поле метки визуально идентично селекту движка: тот же бордер/фон/hover/focus и
    та же серая «шеврон»-иконка. Поле — это <input list=datalist>, поэтому браузер рисует
    свой нативный индикатор датализта — прячем его и подставляем ту же svg-стрелку. */
-.bulk-bar > input {
+.bulk-bar input {
   width: 9rem;
   padding: 0 1.8rem 0 0.6rem;
   border: 1px solid var(--border);
@@ -2981,22 +3262,22 @@ input.file-input::file-selector-button:hover {
 }
 
 /* Нативная стрелка датализта (Chrome/Edge) — убираем, чтобы не дублировала svg-шеврон. */
-.bulk-bar > input::-webkit-calendar-picker-indicator {
+.bulk-bar input::-webkit-calendar-picker-indicator {
   display: none;
   opacity: 0;
 }
 
-.bulk-bar > input:hover {
+.bulk-bar input:hover {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
 
-.bulk-bar > input:focus {
+.bulk-bar input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
-.bulk-bar > select {
+.bulk-bar select {
   max-width: 12rem;
   padding: 0 1.8rem 0 0.6rem;
 }
@@ -3143,13 +3424,6 @@ input.file-input::file-selector-button:hover {
 .torrent-card__check {
   margin-top: 0.25rem;
   flex-shrink: 0;
-}
-
-.torrent-card__badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  justify-content: flex-end;
 }
 
 .badge--label {
@@ -4496,6 +4770,12 @@ input.file-input::file-selector-button:hover {
 }
 .pf-item:hover {
   background: var(--surface-2);
+}
+.pf-item:disabled,
+.pf-item.is-disabled {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
 }
 .pf-item .icon svg {
   width: 16px;

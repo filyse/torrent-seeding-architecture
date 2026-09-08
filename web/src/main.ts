@@ -442,8 +442,9 @@ const SORT_VALUES = [
 type ListSort = (typeof SORT_VALUES)[number];
 const STATE_VALUES = ["", "active", "peers", "idle", "incomplete", "migrating", "error"] as const;
 type ListState = (typeof STATE_VALUES)[number];
-type ListDensity = "comfortable" | "compact";
+type ListDensity = "comfortable" | "compact" | "mini";
 type ListView = "cards" | "table";
+type ViewPreset = "grid" | "list" | "mini" | "table";
 type ThemeMode = "auto" | "light" | "dark";
 
 let listSearch = lsGet("ui.search") ?? "";
@@ -458,7 +459,11 @@ let listSort: ListSort = ((): ListSort => {
   const v = lsGet("ui.sort") ?? "";
   return (SORT_VALUES as readonly string[]).includes(v) ? (v as ListSort) : "name";
 })();
-let listDensity: ListDensity = lsGet("ui.density") === "compact" ? "compact" : "comfortable";
+let listDensity: ListDensity = ((): ListDensity => {
+  const v = lsGet("ui.density") ?? "";
+  if (v === "compact" || v === "mini") return v;
+  return "comfortable";
+})();
 let listView: ListView = lsGet("ui.view") === "table" ? "table" : "cards";
 
 function getThemeMode(): ThemeMode {
@@ -481,15 +486,18 @@ function setHistoryPeriod(period: HistoryPeriod): void {
   lsSet("ui.historyPeriod", period);
 }
 
-function currentViewPreset(): "grid" | "list" | "table" {
-  return listView === "table" ? "table" : listDensity === "compact" ? "grid" : "list";
+function currentViewPreset(): ViewPreset {
+  if (listView === "table") return "table";
+  if (listDensity === "compact") return "grid";
+  if (listDensity === "mini") return "mini";
+  return "list";
 }
 
-function applyViewPreset(preset: "grid" | "list" | "table"): void {
+function applyViewPreset(preset: ViewPreset): void {
   if (preset === "table") listView = "table";
   else {
     listView = "cards";
-    listDensity = preset === "grid" ? "compact" : "comfortable";
+    listDensity = preset === "grid" ? "compact" : preset === "mini" ? "mini" : "comfortable";
     lsSet("ui.density", listDensity);
   }
   lsSet("ui.view", listView);
@@ -1105,6 +1113,7 @@ function paintProfile(host: HTMLElement): void {
   toggle.addEventListener("click", (ev) => {
     ev.stopPropagation();
     closeOpenTrays();
+    closeOpenCardMenus();
     if (host.classList.toggle("is-open")) {
       document.addEventListener("click", onOutside, true);
       document.addEventListener("keydown", onEsc, true);
@@ -1165,6 +1174,90 @@ function closeOpenTrays(except?: HTMLElement): void {
     const t = h.querySelector(".tray-toggle");
     if (t) t.setAttribute("aria-expanded", "false");
   }
+}
+
+const cardMoreHosts = new Set<HTMLElement>();
+
+function closeOpenCardMenus(except?: HTMLElement): void {
+  for (const h of [...cardMoreHosts]) {
+    if (!h.isConnected) {
+      cardMoreHosts.delete(h);
+      continue;
+    }
+    if (h === except) continue;
+    h.classList.remove("is-open");
+    h.closest(".torrent-card")?.classList.remove("is-menu-open");
+    const t = h.querySelector(".torrent-card__more-toggle");
+    if (t) t.setAttribute("aria-expanded", "false");
+  }
+}
+
+function attachCardMore(
+  card: HTMLElement,
+  pauseBtn: HTMLButtonElement,
+  resumeBtn: HTMLButtonElement,
+  delBtn: HTMLButtonElement,
+  label?: string | null,
+): HTMLElement {
+  const more = el("div", { className: "torrent-card__more" });
+  cardMoreHosts.add(more);
+  const moreToggle = el("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm torrent-card__more-toggle",
+    title: "Действия",
+    "aria-label": "Действия",
+    "aria-haspopup": "true",
+    "aria-expanded": "false",
+  }, [icon("more-horizontal")]);
+  const moreKids: (string | Node)[] = [];
+  const labelText = label?.trim() ?? "";
+  if (labelText) {
+    moreKids.push(
+      el("div", { className: "torrent-card__more-head" }, [
+        el("span", { className: "badge badge--label" }, [labelText]),
+      ]),
+    );
+  }
+  moreKids.push(pauseBtn, resumeBtn, delBtn);
+  const moreMenu = el("div", { className: "torrent-card__more-menu", role: "menu" }, moreKids);
+  pauseBtn.className = "pf-item";
+  resumeBtn.className = "pf-item";
+  delBtn.className = "pf-item pf-item--danger";
+  pauseBtn.setAttribute("role", "menuitem");
+  resumeBtn.setAttribute("role", "menuitem");
+  delBtn.setAttribute("role", "menuitem");
+  const closeMore = (): void => {
+    more.classList.remove("is-open");
+    card.classList.remove("is-menu-open");
+    moreToggle.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", onOutside, true);
+    document.removeEventListener("keydown", onEsc, true);
+  };
+  const onOutside = (ev: Event): void => {
+    if (!more.contains(ev.target as Node)) closeMore();
+  };
+  const onEsc = (ev: KeyboardEvent): void => {
+    if (ev.key === "Escape") closeMore();
+  };
+  moreToggle.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    closeOpenProfiles();
+    closeOpenTrays();
+    closeOpenCardMenus(more);
+    if (more.classList.toggle("is-open")) {
+      card.classList.add("is-menu-open");
+      moreToggle.setAttribute("aria-expanded", "true");
+      document.addEventListener("click", onOutside, true);
+      document.addEventListener("keydown", onEsc, true);
+    } else {
+      closeMore();
+    }
+  });
+  for (const btn of [pauseBtn, resumeBtn, delBtn]) {
+    btn.addEventListener("click", () => closeMore());
+  }
+  more.append(moreToggle, moreMenu);
+  return more;
 }
 
 function refreshTrayEngines(): Promise<void> {
@@ -1413,6 +1506,7 @@ function paintTray(host: HTMLElement): void {
   toggle.addEventListener("click", (ev) => {
     ev.stopPropagation();
     closeOpenProfiles();
+    closeOpenCardMenus();
     closeOpenTrays(host);
     if (host.classList.toggle("is-open")) {
       toggle.setAttribute("aria-expanded", "true");
@@ -3552,18 +3646,35 @@ function renderTorrentCard(
   const stats = el("div", { className: "torrent-card__stats" });
   const sizeStr = t.runtime?.size ? fmtBytes(t.runtime.size) : null;
   stats.append(
-    document.createTextNode(`${fmtPercent(t.runtime?.progress)}${sizeStr ? ` из ${sizeStr}` : ""} · `),
-    el("strong", {}, [`↓ ${fmtRate(t.runtime?.download_rate)}`]),
-    document.createTextNode(" · "),
-    el("strong", {}, [`↑ ${fmtRate(t.runtime?.upload_rate)}`]),
-    document.createTextNode(
-      ` · R ${fmtRatio(t.runtime?.ratio)} · ${t.runtime?.num_seeds ?? 0}↑/${t.runtime?.peers ?? 0} пир.`,
-    ),
+    el("span", { className: "torrent-card__stat" }, [
+      `${fmtPercent(t.runtime?.progress)}${sizeStr ? ` · ${sizeStr}` : ""}`,
+    ]),
+    el("span", { className: "torrent-card__stat" }, [
+      el("strong", {}, [`↑ ${fmtRate(t.runtime?.upload_rate)}`]),
+    ]),
+    el("span", { className: "torrent-card__stat" }, [
+      `${t.runtime?.num_seeds ?? 0}↑/${t.runtime?.peers ?? 0}`,
+    ]),
   );
-  const actions = el("div", { className: "btn-row" });
-  const pauseBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Пауза"]);
-  const resumeBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Старт"]);
-  const delBtn = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["Удалить"]);
+  const act = (
+    kind: "pause" | "play" | "trash",
+    label: string,
+    extraClass: string,
+  ): HTMLButtonElement =>
+    el(
+      "button",
+      {
+        type: "button",
+        className: `btn btn--sm torrent-card__act${extraClass}`,
+        title: label,
+        "aria-label": label,
+      },
+      [icon(kind), el("span", { className: "torrent-card__act-label" }, [label])],
+    ) as HTMLButtonElement;
+  const actions = el("div", { className: "btn-row torrent-card__acts" });
+  const pauseBtn = act("pause", "Пауза", "");
+  const resumeBtn = act("play", "Старт", " btn--primary");
+  const delBtn = act("trash", "Удалить", " torrent-card__act--danger");
   pauseBtn.addEventListener("click", async () => {
     try {
       await fetchJson(`/torrents/${t.id}/pause`, { method: "POST" });
@@ -3586,10 +3697,53 @@ function renderTorrentCard(
   if (t.status === "paused") pauseBtn.disabled = true;
   else resumeBtn.disabled = true;
   actions.append(pauseBtn, resumeBtn, delBtn);
-  const topRight = el("div", { className: "torrent-card__badges" }, [badge]);
-  if (labelBadge) topRight.append(labelBadge);
-  const topChildren: (string | Node)[] = canWrite() ? [checkbox, title, topRight] : [title, topRight];
-  card.append(el("div", { className: "torrent-card__top" }, topChildren), bar, stats);
+  const badges = el("div", { className: "torrent-card__badges" }, [badge]);
+  if (labelBadge) badges.append(labelBadge);
+
+  if (listDensity === "mini") {
+    card.classList.add("torrent-card--row");
+    const pctEl = el("div", { className: "torrent-card__pct" }, [
+      `${pct % 1 === 0 ? String(pct) : pct.toFixed(1)}%`,
+    ]);
+    const upEl = el("div", { className: "torrent-card__up", title: "Отдача" }, [
+      `↑ ${fmtRate(t.runtime?.upload_rate)}`,
+    ]);
+    const leadKids: (string | Node)[] = [];
+    if (canWrite()) leadKids.push(checkbox);
+    leadKids.push(title, pctEl, upEl, badge);
+    if (canWrite()) leadKids.push(attachCardMore(card, pauseBtn, resumeBtn, delBtn, t.label));
+    card.append(el("div", { className: "torrent-card__lead" }, leadKids));
+    return card;
+  }
+
+  if (listDensity === "comfortable") {
+    card.classList.add("torrent-card--pct");
+    const pctEl = el("div", { className: "torrent-card__pct" }, [
+      pct % 1 === 0 ? String(pct) : pct.toFixed(1),
+      el("span", { className: "torrent-card__pct-unit" }, ["%"]),
+    ]);
+    const subParts = [displayStatusLabel(t)];
+    if (t.label?.trim()) subParts.push(t.label.trim());
+    const sub = el("div", { className: "torrent-card__sub" }, [subParts.join(" · ")]);
+    const upEl = el("div", { className: "torrent-card__up", title: "Отдача" }, [
+      el("span", { className: "torrent-card__up-mark" }, ["↑"]),
+      el("span", { className: "torrent-card__up-val" }, [fmtRate(t.runtime?.upload_rate)]),
+    ]);
+    const main = el("div", { className: "torrent-card__main" }, [title, sub]);
+    const leadKids: (string | Node)[] = [];
+    if (canWrite()) leadKids.push(checkbox);
+    leadKids.push(pctEl, upEl, main);
+    if (canWrite()) leadKids.push(attachCardMore(card, pauseBtn, resumeBtn, delBtn));
+    card.append(el("div", { className: "torrent-card__lead" }, leadKids));
+    return card;
+  }
+
+  const titleRow = el(
+    "div",
+    { className: "torrent-card__title-row" },
+    canWrite() ? [checkbox, title] : [title],
+  );
+  card.append(titleRow, badges, bar, stats);
   if (canWrite()) card.append(actions);
   return card;
 }
@@ -4894,17 +5048,15 @@ function mountListShell(root: HTMLElement): void {
     }
   }
 
-  // Единый сегментированный переключатель вида: Плитка / Карточки / Таблица.
-  // Заменяет прежние две отдельные иконки (вид + плотность) — один клик сразу
-  // выбирает нужный режим, активный сегмент подсвечен.
-  type ViewPreset = "grid" | "list" | "table";
+  // Единый сегментированный переключатель вида:
+  // Плитка / Карточки / Мини таблица / Таблица.
   const presets: { p: ViewPreset; ic: keyof typeof ICON_PATHS; title: string }[] = [
     { p: "grid", ic: "grid", title: "Плитка" },
     { p: "list", ic: "rows", title: "Карточки" },
+    { p: "mini", ic: "list", title: "Мини таблица" },
     { p: "table", ic: "table", title: "Таблица" },
   ];
-  const currentPreset = (): ViewPreset =>
-    listView === "table" ? "table" : listDensity === "compact" ? "grid" : "list";
+  const currentPreset = (): ViewPreset => currentViewPreset();
   const segBtns = presets.map((s) => {
     const b = el("button", {
       type: "button",
@@ -4917,10 +5069,13 @@ function mountListShell(root: HTMLElement): void {
   });
   const viewSwitch = el("div", { className: "view-switch", role: "group", "aria-label": "Вид списка" },
     segBtns.map((x) => x.b));
+  let bulkBarHost: HTMLElement | undefined;
   const applyView = () => {
     const table = listView === "table";
     listHost.classList.toggle("torrent-list--table", table);
     listHost.classList.toggle("torrent-list--compact", !table && listDensity === "compact");
+    listHost.classList.toggle("torrent-list--mini", !table && listDensity === "mini");
+    bulkBarHost?.classList.toggle("bulk-bar--stacked", !table);
     // Табличный вид разворачиваем на всю ширину страницы — иначе колонки режутся.
     document.body.classList.toggle("layout-wide", table);
     const active = currentPreset();
@@ -4932,14 +5087,7 @@ function mountListShell(root: HTMLElement): void {
   };
   function setPreset(p: ViewPreset): void {
     if (p === currentPreset()) return;
-    if (p === "table") {
-      listView = "table";
-    } else {
-      listView = "cards";
-      listDensity = p === "grid" ? "compact" : "comfortable";
-      lsSet("ui.density", listDensity);
-    }
-    lsSet("ui.view", listView);
+    applyViewPreset(p);
     applyView();
     repaint();
   }
@@ -5399,17 +5547,23 @@ function mountListShell(root: HTMLElement): void {
     syncBulkBar();
   });
   const bulkBar = el("div", { className: "bulk-bar", hidden: "" }, [
-    bulkCount,
-    clearSelBtn,
-    bulkResume,
-    bulkPause,
-    bulkLabelCombo.control,
-    bulkLabelBtn,
-    bulkMigrateSelect,
-    bulkMigrateBtn,
-    el("span", { className: "bulk-bar__sep" }),
-    bulkDel,
+    el("div", { className: "bulk-bar__row bulk-bar__row--play" }, [
+      bulkCount,
+      clearSelBtn,
+      bulkResume,
+      bulkPause,
+    ]),
+    el("div", { className: "bulk-bar__row bulk-bar__row--meta" }, [
+      el("div", { className: "bulk-bar__cluster" }, [bulkLabelCombo.control, bulkLabelBtn]),
+      el("div", { className: "bulk-bar__cluster" }, [bulkMigrateSelect, bulkMigrateBtn]),
+    ]),
+    el("div", { className: "bulk-bar__row bulk-bar__row--danger" }, [
+      el("span", { className: "bulk-bar__sep" }),
+      bulkDel,
+    ]),
   ]);
+  bulkBarHost = bulkBar;
+  applyView();
   function syncBulkBar(): void {
     const n = selectedIds.size;
     bulkBar.hidden = n === 0;
@@ -8631,7 +8785,6 @@ function mountCabinetShell(root: HTMLElement): void {
       el("h1", {}, ["Кабинет"]),
       el("p", { className: "field__hint" }, ["Я, привычки этого браузера и этот вход"]),
     ]),
-    el("div", { className: "app-header__actions" }, [statusTrayControl()]),
   ]);
 
   const profile = el("section", { className: "panel" });
@@ -8680,6 +8833,7 @@ function mountCabinetShell(root: HTMLElement): void {
         [
           { id: "grid", label: "Плитка" },
           { id: "list", label: "Карточки" },
+          { id: "mini", label: "Мини таблица" },
           { id: "table", label: "Таблица" },
         ],
         currentViewPreset(),
