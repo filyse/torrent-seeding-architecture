@@ -229,9 +229,13 @@ export function presentModal(overlay: HTMLElement): () => Promise<void> {
 export function playFold(slot: HTMLElement, open: boolean, prev?: MotionCtrl | null): MotionCtrl {
   prev?.stop();
   const inner = slot.firstElementChild instanceof HTMLElement ? slot.firstElementChild : null;
+  // Мерить старт надо до снятия hidden. У скрытого слота высоты нет, но на первом
+  // открытии инлайновой высоты ещё нет тоже — сняв hidden, мы получили бы уже
+  // натуральную высоту, from совпал бы с to, и слот раскрылся бы рывком вместе со
+  // всем списком под ним. Со второго раза высота остаётся от закрытия («0px»).
+  const from = slot.hidden ? 0 : slot.getBoundingClientRect().height;
   slot.hidden = false;
   slot.style.overflow = "hidden";
-  const from = slot.getBoundingClientRect().height;
   slot.style.height = "auto";
   const mb = inner ? Number.parseFloat(getComputedStyle(inner).marginBottom) || 0 : 0;
   const natural = inner ? inner.getBoundingClientRect().height + mb : 0;
