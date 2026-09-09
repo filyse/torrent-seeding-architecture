@@ -225,6 +225,18 @@ export function presentModal(overlay: HTMLElement): () => Promise<void> {
   return close;
 }
 
+/**
+ * Высота слота должна попадать в целые пиксели устройства. Строки таблицы имеют
+ * дробную высоту (33.406), поэтому их границы стоят на разных долях пикселя.
+ * На дробной высоте слота часть строк уже округляется на пиксель вниз, часть ещё
+ * нет — промежутки между ними дышат, и список дёргается вместо того, чтобы ехать
+ * целиком. На целой высоте сдвиг у всех строк одинаковый.
+ */
+function snapToPixel(v: number): number {
+  const dpr = window.devicePixelRatio || 1;
+  return Math.round(v * dpr) / dpr;
+}
+
 /** Слот в потоке: высота 0↔auto + прозрачность. Для тулбара выделения. */
 export function playFold(slot: HTMLElement, open: boolean, prev?: MotionCtrl | null): MotionCtrl {
   prev?.stop();
@@ -252,7 +264,7 @@ export function playFold(slot: HTMLElement, open: boolean, prev?: MotionCtrl | n
     ...POP_SPRING,
     onUpdate: (v) => {
       const t = Number(v);
-      slot.style.height = `${from + (to - from) * t}px`;
+      slot.style.height = `${snapToPixel(from + (to - from) * t)}px`;
       slot.style.opacity = String(open ? t : 1 - t);
     },
   }) as MotionCtrl;
