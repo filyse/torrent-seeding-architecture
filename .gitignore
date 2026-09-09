@@ -22,3 +22,10 @@ certs/
 *.srl
 # Локальные пароли панели (не коммитить)
 seedbox-users.md
+# Черновики отладки: одноразовые скрипты выката и патчей, снимки экрана,
+# артефакты playwright. Живут только на машине автора.
+_tmp_*
+scripts/_*
+.playwright-cli/
+qa-search-clear.yml
+web/*.png
