@@ -32,6 +32,7 @@
 - [`docs/NETWORK.md`](docs/NETWORK.md) — экран «Сеть»: отдача и скачивание по WAN-каналам
 - [`docs/HEADER_STATS.md`](docs/HEADER_STATS.md) — свёртка мини-меню статистики в шапке
 - [`docs/LIST_TILES.md`](docs/LIST_TILES.md) — плитки, карточки и мини таблица списка
+- [`docs/LOGIN_SCREEN.md`](docs/LOGIN_SCREEN.md) — фон входа, знак и иконка вкладки
 - [`docs/BACKUP.md`](docs/BACKUP.md) — суточные бэкапы БД и состояния движков, восстановление
 - [`docs/FILE_UPLOAD.md`](docs/FILE_UPLOAD.md) — загрузка файлов в том движка (ticket + edge)
 - [`docs/FILE_DOWNLOAD.md`](docs/FILE_DOWNLOAD.md) — скачать файл контента с тома (ticket + RU)

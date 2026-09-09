@@ -22,8 +22,8 @@ export function startSmoothScroll(): void {
     anchors: true,
     allowNestedScroll: true,
     stopInertiaOnNavigate: true,
-    lerp: 0.08,
-    wheelMultiplier: 0.92,
+    lerp: 0.12,
+    wheelMultiplier: 1.38,
     prevent: overlayNode,
   });
 }
@@ -34,7 +34,7 @@ export function refreshSmoothScroll(): void {
 
 export function scrollToTop(): void {
   if (lenis) {
-    lenis.scrollTo(0, { lerp: 0.08 });
+    lenis.scrollTo(0, { lerp: 0.12 });
     return;
   }
   window.scrollTo({ top: 0, behavior: "smooth" });

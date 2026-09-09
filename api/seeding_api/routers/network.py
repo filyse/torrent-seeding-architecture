@@ -12,11 +12,14 @@
 канала (не потолок суммы).
 """
 
+import time
+from asyncio import Lock
 from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from seeding_db.repository import UploadSampleRepository
+from seeding_db.upload_history import UploadHistory
 
 from seeding_api import wan_links
 from seeding_api.deps import DbSession, EnginePoolDep
@@ -31,29 +34,17 @@ from seeding_api.schemas import (
 
 router = APIRouter(tags=["network"])
 
+# Сэмплы пишутся раз в 15 минут — короткий кэш снимает повторный rollup при вкладках.
+_HISTORY_TTL_S = 45.0
+_history_cache: dict[tuple[str, str], tuple[float, UploadHistory]] = {}
+_history_lock = Lock()
+
 
 def _engine_pairs(pool) -> list[tuple[str, str]]:
     return [(spec.id, spec.url) for spec in sorted(pool.specs, key=lambda s: s.id)]
 
 
-@router.get("/network/uploaded-history", response_model=UploadedHistoryOut)
-async def uploaded_history(
-    session: DbSession,
-    pool: EnginePoolDep,
-    period: Literal["day", "week", "month"] = Query("week"),
-    metric: Literal["uploaded", "downloaded"] = Query("uploaded"),
-):
-    """Объём отдачи или приёма за корзину: день (24 часа), неделя (7 дней), месяц (30 дней)."""
-    all_links = wan_links.links()
-    wan_ids = [link.id for link in all_links]
-    engine_wan = wan_links.engine_wan_map((spec.id, spec.url) for spec in pool.specs)
-    hist = await UploadSampleRepository(session).history(
-        period=period,
-        now=datetime.now(timezone.utc),
-        wan_ids=wan_ids,
-        engine_wan=engine_wan,
-        metric=metric,
-    )
+def _history_out(period: Literal["day", "week", "month"], hist: UploadHistory) -> UploadedHistoryOut:
     return UploadedHistoryOut(
         period=period,
         buckets=[
@@ -69,6 +60,37 @@ async def uploaded_history(
         first_sampled_at=hist.first_sampled_at,
         last_sampled_at=hist.last_sampled_at,
     )
+
+
+@router.get("/network/uploaded-history", response_model=UploadedHistoryOut)
+async def uploaded_history(
+    session: DbSession,
+    pool: EnginePoolDep,
+    period: Literal["day", "week", "month"] = Query("week"),
+    metric: Literal["uploaded", "downloaded"] = Query("uploaded"),
+):
+    """Объём отдачи или приёма за корзину: день (24 часа), неделя (7 дней), месяц (30 дней)."""
+    key = (period, metric)
+    hit = _history_cache.get(key)
+    if hit and time.monotonic() - hit[0] < _HISTORY_TTL_S:
+        return _history_out(period, hit[1])
+
+    async with _history_lock:
+        hit = _history_cache.get(key)
+        if hit and time.monotonic() - hit[0] < _HISTORY_TTL_S:
+            return _history_out(period, hit[1])
+        all_links = wan_links.links()
+        wan_ids = [link.id for link in all_links]
+        engine_wan = wan_links.engine_wan_map((spec.id, spec.url) for spec in pool.specs)
+        hist = await UploadSampleRepository(session).history(
+            period=period,
+            now=datetime.now(timezone.utc),
+            wan_ids=wan_ids,
+            engine_wan=engine_wan,
+            metric=metric,
+        )
+        _history_cache[key] = (time.monotonic(), hist)
+        return _history_out(period, hist)
 
 
 @router.get("/network/links")

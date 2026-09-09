@@ -1,11 +1,35 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="8" fill="#2563eb" />
-  <g stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
-    <path d="M16 11.2 9.6 19.4M16 11.2l6.4 8.2M11.4 22h9.2" />
+  <defs>
+    <!-- Градиент в координатах рисунка. Тон взят глубже фирменного #2563eb:
+         на шестнадцати пикселях вкладки светлый конец съедал контраст. -->
+    <linearGradient id="tile" gradientUnits="userSpaceOnUse" x1="2" y1="0" x2="26" y2="32">
+      <stop offset="0" stop-color="#3670ed" />
+      <stop offset="1" stop-color="#1e4fbc" />
+    </linearGradient>
+    <radialGradient id="sheen" cx=".24" cy=".18" r=".8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".1" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+    </radialGradient>
+    <!-- Связи обрываются перед узлами: зазор делает из графа отдельные бусины,
+         а не одну слитную фигуру. -->
+    <mask id="cut">
+      <rect width="32" height="32" fill="#ffffff" />
+      <circle cx="16" cy="9.6" r="4" fill="#000000" />
+      <circle cx="9.3" cy="22.3" r="3.5" fill="#000000" />
+      <circle cx="22.7" cy="22.3" r="3.5" fill="#000000" />
+    </mask>
+  </defs>
+  <rect width="32" height="32" rx="8.6" fill="url(#tile)" />
+  <rect width="32" height="32" rx="8.6" fill="url(#sheen)" />
+  <rect x=".85" y=".85" width="30.3" height="30.3" rx="7.75" fill="none" stroke="#ffffff" stroke-opacity=".16" stroke-width="1.1" />
+  <g mask="url(#cut)" stroke="#ffffff" stroke-width="2" stroke-linecap="round" fill="none">
+    <path d="M16 9.6 9.3 22.3" />
+    <path d="M16 9.6 22.7 22.3" />
+    <path d="M9.3 22.3h13.4" />
   </g>
   <g fill="#ffffff">
-    <circle cx="16" cy="9" r="2.6" />
-    <circle cx="9" cy="22" r="2.6" />
-    <circle cx="23" cy="22" r="2.6" />
+    <circle cx="16" cy="9.6" r="3" />
+    <circle cx="9.3" cy="22.3" r="2.5" />
+    <circle cx="22.7" cy="22.3" r="2.5" />
   </g>
 </svg>

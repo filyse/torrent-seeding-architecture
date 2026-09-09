@@ -917,13 +917,18 @@ class UploadSampleRepository:
                 out[row.scope_id] = int(row.uploaded or 0)
         return out
 
-    async def _engine_samples_since(self, since: datetime) -> list[UploadSample]:
+    async def _engine_samples_since(self, since: datetime, metric: str) -> list[SampleRow]:
+        cols = (
+            UploadSample.sampled_at,
+            UploadSample.scope_id,
+            UploadSample.uploaded,
+            UploadSample.downloaded,
+        )
         recent = await self._session.execute(
-            select(UploadSample)
+            select(*cols)
             .where(UploadSample.scope == "engine", UploadSample.sampled_at >= since)
             .order_by(UploadSample.sampled_at)
         )
-        rows = list(recent.scalars())
         baseline_sub = (
             select(UploadSample.scope_id, func.max(UploadSample.sampled_at).label("mx"))
             .where(UploadSample.scope == "engine", UploadSample.sampled_at < since)
@@ -931,14 +936,27 @@ class UploadSampleRepository:
             .subquery()
         )
         baselines = await self._session.execute(
-            select(UploadSample).join(
+            select(*cols).join(
                 baseline_sub,
                 (UploadSample.scope == "engine")
                 & (UploadSample.scope_id == baseline_sub.c.scope_id)
                 & (UploadSample.sampled_at == baseline_sub.c.mx),
             )
         )
-        return list(baselines.scalars()) + rows
+
+        def pack(rows: list) -> list[SampleRow]:
+            out: list[SampleRow] = []
+            for sampled_at, scope_id, uploaded, downloaded in rows:
+                if metric == "downloaded":
+                    if downloaded is None:
+                        continue
+                    val = int(downloaded)
+                else:
+                    val = int(uploaded or 0)
+                out.append((sampled_at, "engine", scope_id or "", val))
+            return out
+
+        return pack(list(baselines.all())) + pack(list(recent.all()))
 
     async def history(
         self,
@@ -952,16 +970,7 @@ class UploadSampleRepository:
         _, _buckets, prev_buckets = period_windows(period, now)
         step = prev_buckets[1] - prev_buckets[0] if len(prev_buckets) > 1 else timedelta(hours=1)
         since = prev_buckets[0] - step
-        rows = await self._engine_samples_since(since)
-        samples: list[SampleRow] = []
-        for r in rows:
-            if metric == "downloaded":
-                if r.downloaded is None:
-                    continue
-                val = int(r.downloaded)
-            else:
-                val = int(r.uploaded or 0)
-            samples.append((r.sampled_at, r.scope, r.scope_id, val))
+        samples = await self._engine_samples_since(since, metric)
         return history_from_samples(samples, period, now, wan_ids, engine_wan)
 
 

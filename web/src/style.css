@@ -127,6 +127,42 @@ body.layout-wide #app {
   gap: 0.75rem;
 }
 
+.wan-tabs--overview {
+  position: relative;
+  flex: 0 0 auto;
+  gap: 0.04rem;
+  padding: 0.1rem;
+}
+
+.wan-tabs--overview .wan-tab {
+  position: relative;
+  z-index: 1;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  padding: 0.16rem 0.46rem;
+  background: transparent;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.wan-tabs--overview .wan-tab.is-active,
+.wan-tabs--overview .wan-tab:hover,
+.wan-tabs--overview .wan-tab:focus-visible {
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.wan-tabs__thumb {
+  position: absolute;
+  z-index: 0;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  opacity: 0;
+}
+
 /* —— бренд/логотип в шапке —— */
 .brand {
   display: flex;
@@ -139,9 +175,11 @@ body.layout-wide #app {
   flex: 0 0 auto;
 }
 
+/* Скругление под скос самой плитки (rx 8.6 из 32 единиц на 34 px): рамка
+   тени должна лечь ровно по краю рисунка. */
 .brand__mark svg {
   display: block;
-  border-radius: 8px;
+  border-radius: 9px;
   box-shadow: var(--shadow);
 }
 
@@ -2661,7 +2699,7 @@ input.file-input::file-selector-button:hover {
   letter-spacing: 0.04em;
 }
 
-/* Кликабельная карточка статистики («Отдача» / «Скачивание» → экран «Сеть»). */
+/* Кликабельная карточка статистики (ферма / сеть). */
 .stat-chip--link {
   font: inherit;
   text-align: left;
@@ -2671,13 +2709,15 @@ input.file-input::file-selector-button:hover {
 }
 
 .stat-chip--link:hover {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-color: color-mix(in srgb, var(--text) 16%, var(--border));
+  background: var(--surface-2);
   transform: translateY(-1px);
 }
 
 .stat-chip--link:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  border-color: color-mix(in srgb, var(--text) 22%, var(--border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
 }
 
 /* —— экран «Сеть»: отдача по WAN-каналам —— */
@@ -3202,11 +3242,129 @@ input.file-input::file-selector-button:hover {
 .wan-eng--off {
   opacity: 0.55;
 }
+.wan-eng--link {
+  width: 100%;
+  margin: 0;
+  padding: 0.2rem 0.15rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wan-eng--link:hover,
+.wan-eng--link:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
 
 .wan-note {
   margin: 0 0 1rem;
   font-size: 0.78rem;
   color: var(--muted);
+}
+
+.sk {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--muted) 14%, var(--surface-2));
+}
+
+.sk::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--surface) 72%, transparent),
+    transparent
+  );
+  animation: sk-shimmer 1.15s ease-in-out infinite;
+}
+
+@keyframes sk-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk::after {
+    animation: none;
+  }
+}
+
+.sk--title {
+  width: 5.2rem;
+  height: 0.9rem;
+}
+
+.sk--sub {
+  width: 8.5rem;
+  height: 0.65rem;
+  margin-top: 0.35rem;
+}
+
+.sk--hero {
+  width: 6.5rem;
+  height: 1.55rem;
+}
+
+.sk--bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+}
+
+.sk--chip {
+  width: 4.4rem;
+  height: 0.65rem;
+}
+
+.sk--row {
+  height: 1.3rem;
+  margin: 0.12rem 0;
+}
+
+.sk--chart {
+  width: 100%;
+  height: 260px;
+  border-radius: 10px;
+}
+
+.sk--mini {
+  width: 100%;
+  height: 120px;
+  border-radius: 8px;
+}
+
+.sk--facts {
+  width: 68%;
+  height: 0.7rem;
+}
+
+.sk--tabs {
+  width: 9.5rem;
+  height: 1.55rem;
+  border-radius: 999px;
+}
+
+.wan-card--sk .wan-card__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.wan-card--sk .wan-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
 }
 
 @media (max-width: 560px) {
@@ -4240,43 +4398,89 @@ input.file-input::file-selector-button:hover {
 
 .health-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
-  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fill, minmax(188px, 1fr));
+  gap: 0.65rem;
 }
 
 .health-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  padding: 0.6rem 0.7rem;
-  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
-}
-.health-card:hover {
-  transform: translateY(-1px);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 10px;
+  padding: 1px;
+  background: var(--border);
   box-shadow: var(--shadow);
 }
-.health-card--ok {
-  border-left: 3px solid var(--success);
+.health-card::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: -55%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--accent) 14deg,
+    #7c3aed 24deg,
+    var(--accent) 32deg,
+    transparent 48deg,
+    transparent 180deg,
+    var(--accent) 194deg,
+    #7c3aed 204deg,
+    var(--accent) 212deg,
+    transparent 228deg,
+    transparent 360deg
+  );
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  animation: health-conic 2.2s linear infinite;
+  animation-play-state: paused;
 }
-.health-card--warn {
-  border-left: 3px solid var(--warn);
+.health-card:hover::before,
+.health-card:focus-visible::before {
+  opacity: 1;
+  animation-play-state: running;
 }
-.health-card--down {
-  border-left: 3px solid var(--danger);
+@keyframes health-conic {
+  to {
+    transform: rotate(1turn);
+  }
 }
-.health-card__top {
+.health-card__shell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+}
+.health-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  padding: 0.7rem 0.8rem 0.6rem;
+}
+.health-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.health-card__label {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  min-width: 0;
 }
 .health-card__name {
-  flex: 1;
   min-width: 0;
-  font-weight: 600;
-  font-size: 0.9rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--muted);
 }
 .health-card__tag {
   flex-shrink: 0;
@@ -4288,23 +4492,21 @@ input.file-input::file-selector-button:hover {
   border-radius: 4px;
   padding: 0.05rem 0.25rem;
 }
-.health-card__status-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  margin-top: 0.3rem;
-}
 .health-card__latency {
-  margin-left: auto;
   flex-shrink: 0;
   white-space: nowrap;
   font-size: 0.72rem;
+  font-weight: 600;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 .health-card__status {
-  font-size: 0.78rem;
-  color: var(--muted);
+  margin-top: 0.05rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--text);
 }
 .health-card--ok .health-card__status {
   color: var(--success);
@@ -4316,17 +4518,22 @@ input.file-input::file-selector-button:hover {
   color: var(--danger);
 }
 .health-card__detail {
-  font-size: 0.74rem;
+  font-size: 0.7rem;
   color: var(--muted);
-  margin-top: 0.25rem;
   word-break: break-word;
 }
 .health-card__ver {
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   color: var(--muted);
-  margin-top: 0.3rem;
   font-variant-numeric: tabular-nums;
   opacity: 0.85;
+}
+.health-card__foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+  padding: 0.4rem 0.8rem;
+  border-top: 1px solid var(--border);
 }
 .health-meta {
   display: flex;
@@ -4542,31 +4749,56 @@ body:has(.login-overlay) {
   isolation: isolate;
   contain: paint;
   color: var(--text);
-  opacity: 0.5;
+  opacity: 0.42;
   transform: translateZ(0);
+  animation: login-paths-in 1.6s ease-out both;
 }
+@keyframes login-paths-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.42;
+  }
+}
+/* `will-change` обязателен: без него сдвиг слоя заново растрирует все дуги
+   каждый кадр — это и дорого, и пересчитывает сглаживание. Со своим слоем
+   композитор возит уже готовую картинку. Смещение только параллельное:
+   от масштаба или поворота растр пришлось бы пересобирать. */
 .login-paths__svg {
   position: absolute;
   top: -12%;
   left: -16%;
   width: 136%;
   height: 128%;
+  will-change: transform;
+  animation: login-drift-a 34s ease-in-out infinite alternate;
+}
+.login-paths__svg--b {
+  animation-name: login-drift-b;
+  animation-duration: 44s;
+}
+/* Слои едут навстречу: рисунок пересечений медленно меняется. Скорость
+   заодно задаёт заметность дрожания — оно ей прямо пропорционально. */
+@keyframes login-drift-a {
+  from {
+    transform: translate3d(-2.6%, 1.9%, 0);
+  }
+  to {
+    transform: translate3d(2.6%, -1.9%, 0);
+  }
+}
+@keyframes login-drift-b {
+  from {
+    transform: translate3d(2.4%, -2.1%, 0);
+  }
+  to {
+    transform: translate3d(-2.4%, 2.1%, 0);
+  }
 }
 .login-paths path {
   fill: none;
-  stroke-dasharray: 720 200;
-  stroke-opacity: 0.3;
   shape-rendering: geometricPrecision;
-  animation: login-path 26s linear infinite alternate;
-  animation-delay: calc(var(--i) * -1s);
-}
-@keyframes login-path {
-  0% {
-    stroke-dashoffset: 0;
-  }
-  100% {
-    stroke-dashoffset: -920;
-  }
 }
 .login-panel {
   position: relative;
@@ -4598,13 +4830,14 @@ body:has(.login-overlay) {
   overflow: hidden;
   pointer-events: none;
 }
+/* Пятна неподвижны. Их покачивание за 16 с глазом не читалось, но каждый его
+   кадр перерисовывал область поверх ленты и стоил трети кадрового бюджета. */
 .login-glow::before,
 .login-glow::after {
   content: "";
   position: absolute;
   border-radius: 50%;
   filter: blur(48px);
-  animation: login-glow 16s ease-in-out infinite;
 }
 .login-glow::before {
   top: -18%;
@@ -4619,16 +4852,6 @@ body:has(.login-overlay) {
   width: 14rem;
   height: 14rem;
   background: color-mix(in srgb, var(--text) 7%, transparent);
-  animation-delay: -8s;
-}
-@keyframes login-glow {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(-4%, 6%, 0) scale(1.08);
-  }
 }
 .login-head {
   margin-bottom: 1.05rem;
@@ -4767,9 +4990,8 @@ body:has(.login-overlay) {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .login-paths path,
-  .login-glow::before,
-  .login-glow::after {
+  .login-paths,
+  .login-paths__svg {
     animation: none;
   }
 }
@@ -4924,18 +5146,24 @@ body:has(.login-overlay) {
 }
 .health-card--clickable {
   cursor: pointer;
-  transition: border-color 0.12s, box-shadow 0.12s;
 }
-.health-card--clickable:hover,
 .health-card--clickable:focus-visible {
-  border-color: var(--accent, #2563eb);
-  box-shadow: 0 0 0 1px var(--accent, #2563eb);
   outline: none;
 }
 .health-card__more {
-  margin-top: 0.4rem;
   font-size: 0.72rem;
-  color: var(--accent, #2563eb);
+  font-weight: 600;
+  color: var(--accent);
+}
+.health-card--clickable:hover .health-card__more,
+.health-card--clickable:focus-visible .health-card__more {
+  color: var(--accent-hover);
+}
+@media (prefers-reduced-motion: reduce) {
+  .health-card::before {
+    animation: none;
+    background: var(--accent);
+  }
 }
 .modal-dialog--wide {
   max-width: 760px;

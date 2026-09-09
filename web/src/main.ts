@@ -36,8 +36,6 @@ import { creatorBrowseRow, fillCreatorCrumbs } from "./dirBrowser";
 import { intakeDrop, intakeFoot, intakeHead, intakeSegment, type ElFn, type IconFn } from "./intake";
 import {
   CHIP_TICK_SEL,
-  ROW_TICK_SEL,
-  dropHold,
   holdTicks,
   lockTickMinWidth,
   releaseTicks,
@@ -365,12 +363,14 @@ type TorrentPageOut = { items: TorrentOut[]; total: number; limit: number; offse
 type UpdateMatchItem = { filename: string; candidates: TorrentOut[] };
 type UpdateMatchResult = { items: UpdateMatchItem[] };
 type NetworkSide = "up" | "down" | "uploaded" | "history";
+type FarmSide = "torrents" | "size";
 type Route =
   | { view: "list" }
   | { view: "detail"; id: number }
   | { view: "settings" }
   | { view: "cabinet" }
-  | { view: "network"; side: NetworkSide };
+  | { view: "network"; side: NetworkSide }
+  | { view: "farm"; side: FarmSide };
 type DeleteTorrentChoice = "cancel" | "torrent_only" | "torrent_and_files";
 
 let networkPollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -846,6 +846,121 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const LINKS_TTL_MS = 60_000;
+const HISTORY_TTL_MS = 45_000;
+let linksMemo: { at: number; data: NetworkLinksOut } | null = null;
+let linksInflight: Promise<NetworkLinksOut> | null = null;
+const historyMemo = new Map<string, { at: number; data: UploadedHistory }>();
+const historyInflight = new Map<string, Promise<UploadedHistory>>();
+
+function historyCacheKey(period: HistoryPeriod, metric: "uploaded" | "downloaded"): string {
+  return `${period}|${metric}`;
+}
+
+function peekNetworkLinks(): NetworkLinksOut | null {
+  if (linksMemo && Date.now() - linksMemo.at < LINKS_TTL_MS) return linksMemo.data;
+  return null;
+}
+
+function peekUploadedHistory(
+  period: HistoryPeriod,
+  metric: "uploaded" | "downloaded",
+): UploadedHistory | null {
+  const hit = historyMemo.get(historyCacheKey(period, metric));
+  if (hit && Date.now() - hit.at < HISTORY_TTL_MS) return hit.data;
+  return null;
+}
+
+async function loadNetworkLinks(): Promise<NetworkLinksOut> {
+  const hit = peekNetworkLinks();
+  if (hit) return hit;
+  if (linksInflight) return linksInflight;
+  linksInflight = fetchJson<NetworkLinksOut>("/network/links")
+    .then((data) => {
+      linksMemo = { at: Date.now(), data };
+      return data;
+    })
+    .finally(() => {
+      linksInflight = null;
+    });
+  return linksInflight;
+}
+
+async function loadUploadedHistory(
+  period: HistoryPeriod,
+  metric: "uploaded" | "downloaded",
+): Promise<UploadedHistory> {
+  const hit = peekUploadedHistory(period, metric);
+  if (hit) return hit;
+  const key = historyCacheKey(period, metric);
+  const pending = historyInflight.get(key);
+  if (pending) return pending;
+  const req = fetchJson<UploadedHistory>(`/network/uploaded-history?period=${period}&metric=${metric}`)
+    .then((data) => {
+      historyMemo.set(key, { at: Date.now(), data });
+      return data;
+    })
+    .finally(() => {
+      historyInflight.delete(key);
+    });
+  historyInflight.set(key, req);
+  return req;
+}
+
+function prefetchOverviewData(side?: FarmSide | NetworkSide): void {
+  void loadNetworkLinks().catch(() => undefined);
+  const period = getHistoryPeriod();
+  const metric = side === "down" ? "downloaded" : "uploaded";
+  void loadUploadedHistory(period, metric).catch(() => undefined);
+  if (side === "history" || side === "uploaded" || side === "up" || side === "down") {
+    for (const p of HISTORY_PERIODS) {
+      if (p.id === period) continue;
+      void loadUploadedHistory(p.id, metric).catch(() => undefined);
+    }
+  }
+}
+
+function sk(kind: string): HTMLElement {
+  return el("span", { className: `sk sk--${kind}`, "aria-hidden": "true" });
+}
+
+function wanCardsSkeleton(): HTMLElement[] {
+  return [6, 3].map((rows) => {
+    const card = el("section", { className: "wan-card wan-card--sk", "aria-busy": "true" });
+    card.append(
+      el("div", { className: "wan-card__head" }, [sk("title"), sk("sub")]),
+      sk("hero"),
+      sk("bar"),
+      el("div", { className: "wan-card__meta" }, [sk("chip"), sk("chip"), sk("chip")]),
+    );
+    const list = el("div", { className: "wan-engines" });
+    for (let i = 0; i < rows; i++) list.append(sk("row"));
+    card.append(list);
+    return card;
+  });
+}
+
+function fillHistorySkeleton(host: HTMLElement): void {
+  host.setAttribute("aria-busy", "true");
+  host.replaceChildren(
+    el("div", { className: "upload-history__head" }, [sk("title"), sk("tabs")]),
+    sk("hero"),
+    sk("bar"),
+    sk("chart"),
+    sk("facts"),
+  );
+}
+
+function chartsSkeleton(): HTMLElement {
+  const box = el("div", { className: "wan-charts", "aria-busy": "true" });
+  box.append(sk("title"), el("div", { className: "wan-charts__grid" }, [sk("mini"), sk("mini")]));
+  return box;
+}
+
+function revealKids(host: HTMLElement): void {
+  staggerIn([...host.children].filter((n) => n instanceof HTMLElement && !n.hidden));
+}
+
 async function fetchDelete(path: string, deleteFiles = false): Promise<void> {
   const q = deleteFiles ? "?delete_files=true" : "";
   const res = await fetch(`${API}${path}${q}`, {
@@ -1127,20 +1242,50 @@ function initCustomSelects(): void {
   }).observe(document.body, { childList: true, subtree: true });
 }
 
-/** Знак-логотип в шапке: граф раздачи (центральный узел раздаёт пирам). */
+/** Знак живёт на странице в нескольких местах сразу, а одинаковые id ломают
+ *  ссылки на градиенты: при удалении одного знака остальные теряют заливку. */
+let markSeq = 0;
+
+/**
+ * Знак-логотип в шапке: граф раздачи (источник наверху раздаёт двум пирам).
+ *
+ * Плитка с градиентом, бликом и светлой кромкой — от этого у неё объём.
+ * Связи обрываются перед узлами по маске: зазор делает из графа отдельные
+ * бусины, а не одну слитную фигуру. Кольцо у источника пробовали, но на
+ * шестнадцати пикселях вкладки отверстие схлопывается, поэтому узлы сплошные,
+ * а старшинство задано размером.
+ */
 function brandMark(): HTMLElement {
   const span = el("span", { className: "brand__mark", "aria-hidden": "true" });
+  const n = ++markSeq;
+  // Оба конца отмерены от акцента, поэтому знак идёт за темой. Тон взят
+  // глубже самого акцента: светлый край съедал контраст на мелком размере.
+  const light = "color-mix(in srgb, var(--accent) 92%, #fff)";
+  const deep = "color-mix(in srgb, var(--accent) 80%, #000)";
   span.innerHTML =
     '<svg viewBox="0 0 32 32" width="34" height="34" xmlns="http://www.w3.org/2000/svg">' +
-    '<rect width="32" height="32" rx="8" fill="var(--accent)"/>' +
-    '<g stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">' +
-    '<path d="M16 11.2 9.6 19.4M16 11.2l6.4 8.2M11.4 22h9.2"/>' +
-    '</g>' +
+    "<defs>" +
+    `<linearGradient id="rs-tile-${n}" gradientUnits="userSpaceOnUse" x1="2" y1="0" x2="26" y2="32">` +
+    `<stop offset="0" stop-color="${light}"/><stop offset="1" stop-color="${deep}"/></linearGradient>` +
+    `<radialGradient id="rs-sheen-${n}" cx=".24" cy=".18" r=".8">` +
+    '<stop offset="0" stop-color="#fff" stop-opacity=".1"/>' +
+    '<stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>' +
+    `<mask id="rs-cut-${n}"><rect width="32" height="32" fill="#fff"/>` +
+    '<circle cx="16" cy="9.6" r="4" fill="#000"/>' +
+    '<circle cx="9.3" cy="22.3" r="3.5" fill="#000"/>' +
+    '<circle cx="22.7" cy="22.3" r="3.5" fill="#000"/></mask>' +
+    "</defs>" +
+    `<rect width="32" height="32" rx="8.6" fill="url(#rs-tile-${n})"/>` +
+    `<rect width="32" height="32" rx="8.6" fill="url(#rs-sheen-${n})"/>` +
+    '<rect x=".85" y=".85" width="30.3" height="30.3" rx="7.75" fill="none" ' +
+    'stroke="#fff" stroke-opacity=".16" stroke-width="1.1"/>' +
+    `<g mask="url(#rs-cut-${n})" stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none">` +
+    '<path d="M16 9.6 9.3 22.3"/><path d="M16 9.6 22.7 22.3"/><path d="M9.3 22.3h13.4"/></g>' +
     '<g fill="#fff">' +
-    '<circle cx="16" cy="9" r="2.6"/>' +
-    '<circle cx="9" cy="22" r="2.6"/>' +
-    '<circle cx="23" cy="22" r="2.6"/>' +
-    '</g></svg>';
+    '<circle cx="16" cy="9.6" r="3"/>' +
+    '<circle cx="9.3" cy="22.3" r="2.5"/>' +
+    '<circle cx="22.7" cy="22.3" r="2.5"/>' +
+    "</g></svg>";
   return span;
 }
 
@@ -1178,8 +1323,11 @@ function avaGrad(id: string, c1: string, c2: string): string {
   return `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient>`;
 }
 const AVATARS: Record<string, string> = {
+  // Тот же граф, что и в знаке, вдвое крупнее. Зазоры вокруг узлов вырезаны
+  // кружками с той же заливкой — градиент отмерен в координатах рисунка,
+  // поэтому цвет совпадает точно и маска не нужна.
   brand:
-    '<svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#2563eb"/><g stroke="#fff" stroke-width="4" stroke-linecap="round" fill="none"><path d="M32 22 19 39M32 22l13 17M23 44h18"/></g><g fill="#fff"><circle cx="32" cy="18" r="5"/><circle cx="18" cy="44" r="5"/><circle cx="46" cy="44" r="5"/></g></svg>',
+    '<svg viewBox="0 0 64 64"><defs><linearGradient id="agb" gradientUnits="userSpaceOnUse" x1="4" y1="0" x2="52" y2="64"><stop offset="0" stop-color="#3670ed"/><stop offset="1" stop-color="#1e4fbc"/></linearGradient></defs><rect width="64" height="64" fill="url(#agb)"/><g stroke="#fff" stroke-width="4" stroke-linecap="round" fill="none"><path d="M32 19.2 18.6 44.6M32 19.2 45.4 44.6M18.6 44.6h26.8"/></g><g fill="url(#agb)"><circle cx="32" cy="19.2" r="8"/><circle cx="18.6" cy="44.6" r="7"/><circle cx="45.4" cy="44.6" r="7"/></g><g fill="#fff"><circle cx="32" cy="19.2" r="6"/><circle cx="18.6" cy="44.6" r="5"/><circle cx="45.4" cy="44.6" r="5"/></g></svg>',
   aurora: `<svg viewBox="0 0 64 64"><defs>${avaGrad("ag1", "#6366f1", "#22d3ee")}</defs><rect width="64" height="64" fill="url(#ag1)"/><circle cx="44" cy="22" r="16" fill="#fff" opacity=".18"/><circle cx="22" cy="46" r="20" fill="#000" opacity=".12"/></svg>`,
   sunset: `<svg viewBox="0 0 64 64"><defs>${avaGrad("ag2", "#fb7185", "#f59e0b")}</defs><rect width="64" height="64" fill="url(#ag2)"/><circle cx="32" cy="40" r="12" fill="#fff" opacity=".28"/></svg>`,
   forest: `<svg viewBox="0 0 64 64"><defs>${avaGrad("ag3", "#10b981", "#065f46")}</defs><rect width="64" height="64" fill="url(#ag3)"/><path d="M0 44 L20 30 L36 46 L52 28 L64 40 V64 H0Z" fill="#000" opacity=".18"/></svg>`,
@@ -1369,8 +1517,8 @@ const TRAY_SPEC: Record<
   }
 > = {
   engines: { title: "Движки", ic: "server", moreTitle: "Настройки", go: setHashSettings },
-  torrents: { title: "Раздачи", ic: "list" },
-  size: { title: "Объём", ic: "grid" },
+  torrents: { title: "Раздачи", ic: "list", moreTitle: "Подробнее", go: setHashFarm },
+  size: { title: "Объём", ic: "grid", moreTitle: "Подробнее", go: setHashFarmVolume },
   dl: { title: "Скачивание", ic: "download", moreTitle: "Сеть", go: setHashNetworkDownload },
   ul: { title: "Отдача", ic: "upload", moreTitle: "Сеть", go: setHashNetwork },
   uploaded: { title: "Всего отдано", ic: "arrow-up", moreTitle: "Сеть", go: setHashNetworkUploaded },
@@ -1769,10 +1917,9 @@ function paintTrayRow(row: HTMLElement, kind: TrayKind, id: string): void {
   row.title = bits.title;
   const value = row.querySelector(".tray-row__value");
   const sub = row.querySelector(".tray-row__sub");
-  if (value instanceof HTMLElement) tickNumber(value, bits.n, bits.fmt);
+  if (value instanceof HTMLElement) value.textContent = bits.n == null ? "—" : bits.fmt(bits.n);
   if (sub instanceof HTMLElement) {
-    if (bits.subN != null) tickNumber(sub, bits.subN, bits.subFmt);
-    else sub.textContent = bits.sub;
+    sub.textContent = bits.subN != null ? bits.subFmt(bits.subN) : bits.sub;
   }
 }
 
@@ -1916,7 +2063,6 @@ function paintTray(host: HTMLElement): void {
   menu.append(head, el("div", { className: "tray-menu__list" }));
 
   let menuMotion: MotionCtrl | null = null;
-  let menuTickGen = 0;
   const onPlace = (): void => placeTrayMenu(host, menu);
   const onOutside = (ev: Event): void => {
     if (!host.contains(ev.target as Node) && !menu.contains(ev.target as Node)) {
@@ -1937,22 +2083,10 @@ function paintTray(host: HTMLElement): void {
       window.addEventListener("resize", onPlace);
       window.addEventListener("scroll", onPlace, true);
       placeTrayMenu(host, menu);
-      const my = ++menuTickGen;
-      menu.dataset.tickReveal = "1";
-      lockTickMinWidth(menu, ROW_TICK_SEL);
-      holdTicks(menu, ROW_TICK_SEL);
       // rise 0: без translateY — иначе меню «проваливается» вниз от кнопки.
       menuMotion = openPopPanel(menu, menuMotion, 0);
-      void menuMotion.finished.then(() => {
-        if (my !== menuTickGen || !host.classList.contains("is-open")) return;
-        delete menu.dataset.tickReveal;
-        releaseTicks(menu, ROW_TICK_SEL, 0.028);
-      });
       void refreshTrayEngines();
     } else {
-      menuTickGen += 1;
-      delete menu.dataset.tickReveal;
-      dropHold(menu, ROW_TICK_SEL);
       document.removeEventListener("click", onOutside, true);
       document.removeEventListener("keydown", onEsc, true);
       window.removeEventListener("resize", onPlace);
@@ -2355,6 +2489,8 @@ function parseRoute(): Route {
     return { view: "network", side: "history" };
   }
   if (path === "/network" || path === "/network/") return { view: "network", side: "up" };
+  if (path === "/farm/volume" || path === "/farm/volume/") return { view: "farm", side: "size" };
+  if (path === "/farm" || path === "/farm/") return { view: "farm", side: "torrents" };
   return { view: "list" };
 }
 
@@ -2415,6 +2551,101 @@ function setHashNetworkUploaded(): void {
 
 function setHashNetworkHistory(): void {
   pushPath(networkPath("history"));
+}
+
+function farmPath(side: FarmSide): string {
+  return side === "size" ? "/farm/volume" : "/farm";
+}
+
+function setHashFarm(): void {
+  pushPath(farmPath("torrents"));
+}
+
+function setHashFarmVolume(): void {
+  pushPath(farmPath("size"));
+}
+
+type OverviewTab = FarmSide | NetworkSide;
+
+function overviewTabOf(route: Route): OverviewTab | null {
+  if (route.view === "farm" || route.view === "network") return route.side;
+  return null;
+}
+
+function bindSlidingTabs(bar: HTMLElement): void {
+  const thumb = bar.querySelector<HTMLElement>(".wan-tabs__thumb");
+  if (!thumb) return;
+  let hover: HTMLElement | null = null;
+  const active = () => bar.querySelector<HTMLElement>(".wan-tab.is-active");
+  const place = (btn: HTMLElement | null, instant = false) => {
+    if (!btn || btn.offsetWidth === 0) return;
+    const next = { left: btn.offsetLeft, top: btn.offsetTop, width: btn.offsetWidth, height: btn.offsetHeight };
+    if (instant || reducedMotion()) {
+      Object.assign(thumb.style, {
+        left: `${next.left}px`,
+        top: `${next.top}px`,
+        width: `${next.width}px`,
+        height: `${next.height}px`,
+        opacity: "1",
+      });
+      return;
+    }
+    animate(thumb, { ...next, opacity: 1 }, INDICATOR_SPRING);
+  };
+  const follow = (btn: HTMLElement | null, instant = false) => {
+    hover = btn;
+    place(btn ?? active(), instant);
+  };
+  const ro = new ResizeObserver(() => place(hover ?? active(), true));
+  ro.observe(bar);
+  for (const btn of bar.querySelectorAll<HTMLElement>(".wan-tab")) {
+    btn.addEventListener("pointerenter", () => follow(btn));
+    btn.addEventListener("focus", () => follow(btn));
+  }
+  bar.addEventListener("pointerleave", () => follow(null));
+  bar.addEventListener("focusout", () => {
+    queueMicrotask(() => {
+      if (!bar.contains(document.activeElement)) follow(null);
+    });
+  });
+}
+
+function overviewTabs(): HTMLElement {
+  const current = overviewTabOf(parseRoute());
+  const bar = el("div", { className: "wan-tabs wan-tabs--overview", role: "tablist", "aria-label": "Разрез фермы" });
+  bar.append(el("span", { className: "wan-tabs__thumb", "aria-hidden": "true" }));
+  const items: { id: OverviewTab; label: string; go: () => void }[] = [
+    { id: "torrents", label: "Раздачи", go: setHashFarm },
+    { id: "size", label: "Объём", go: setHashFarmVolume },
+    { id: "down", label: "Скачивание", go: setHashNetworkDownload },
+    { id: "up", label: "Отдача", go: setHashNetwork },
+    { id: "uploaded", label: "Всего отдано", go: setHashNetworkUploaded },
+    { id: "history", label: "История", go: setHashNetworkHistory },
+  ];
+  for (const it of items) {
+    const on = current === it.id;
+    const btn = el("button", { type: "button", className: "wan-tab", role: "tab" }, [it.label]) as HTMLButtonElement;
+    btn.classList.toggle("is-active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+    btn.addEventListener("click", () => {
+      if (on) return;
+      it.go();
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    bar.append(btn);
+  }
+  bindSlidingTabs(bar);
+  return bar;
+}
+
+function overviewHeader(title: string, hint: string): HTMLElement {
+  return el("header", { className: "app-header" }, [
+    el("div", { className: "app-header__lead" }, [
+      el("h1", {}, [title]),
+      el("p", { className: "field__hint" }, [hint]),
+    ]),
+    el("div", { className: "app-header__actions" }, [overviewTabs(), profileControl()]),
+  ]);
 }
 
 function goNetwork(side: Exclude<NetworkSide, "history">, engineId?: string): void {
@@ -2538,10 +2769,24 @@ function mountSessionBar(stats: SessionStats | null, changed?: Set<string>): HTM
   }
   const f = (k: string) => Boolean(changed?.has(k));
   bar.append(
-    statChip(`${stats.torrents}`, `Раздач · ${stats.torrents_active} актив.`, undefined, f("torrents")),
+    statChip(`${stats.torrents}`, `Раздач · ${stats.torrents_active} актив.`, undefined, f("torrents"), {
+      hint: "Показать раздачи по каналам и движкам",
+      run: () => {
+        setHashFarm();
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+      },
+    }),
   );
   if (stats.total_size != null) {
-    bar.append(statChip(fmtBytes(stats.total_size), "Объём раздач", undefined, f("size")));
+    bar.append(
+      statChip(fmtBytes(stats.total_size), "Объём раздач", undefined, f("size"), {
+        hint: "Показать объём по каналам и движкам",
+        run: () => {
+          setHashFarmVolume();
+          window.dispatchEvent(new HashChangeEvent("hashchange"));
+        },
+      }),
+    );
   }
   bar.append(
     statChip(`↓ ${fmtRate((stats.download_rate ?? 0) + fileUploadInboundTotal())}`, "Скачивание", "dl", f("dl"), {
@@ -7257,36 +7502,41 @@ function fmtBuildTime(iso: string | null | undefined): string {
 
 function healthCard(c: HealthComponent): HTMLElement {
   const card = el("div", { className: `health-card health-card--${c.status}` });
-  const top = el("div", { className: "health-card__top" }, [
+  const shell = el("div", { className: "health-card__shell" });
+  const body = el("div", { className: "health-card__body" });
+  const label = el("div", { className: "health-card__label" }, [
     el("span", { className: `health-dot health-dot--${c.status}` }),
     el("span", { className: "health-card__name" }, [c.name]),
   ]);
   if (c.kind === "engine" && c.tls) {
-    top.append(el("span", { className: "health-card__tag", title: "Шифрованное соединение" }, ["TLS"]));
+    label.append(el("span", { className: "health-card__tag", title: "Шифрованное соединение" }, ["TLS"]));
   }
-  card.append(top);
-  const statusRow = el("div", { className: "health-card__status-row" }, [
-    el("span", { className: "health-card__status" }, [HEALTH_STATUS_LABEL[c.status]]),
-  ]);
+  const head = el("div", { className: "health-card__head" }, [label]);
   if (typeof c.latency_ms === "number") {
-    statusRow.append(el("span", { className: "health-card__latency" }, [`${c.latency_ms} мс`]));
+    head.append(el("span", { className: "health-card__latency" }, [`${c.latency_ms} мс`]));
   }
-  card.append(statusRow);
-  if (c.detail) card.append(el("div", { className: "health-card__detail" }, [c.detail]));
+  body.append(head);
+  body.append(el("div", { className: "health-card__status" }, [HEALTH_STATUS_LABEL[c.status]]));
+  if (c.detail) body.append(el("div", { className: "health-card__detail" }, [c.detail]));
   if (c.version) {
-    card.append(
+    body.append(
       el("div", { className: "health-card__ver", title: c.built_at ? `Собрано ${fmtBuildTime(c.built_at)}` : "" }, [
         `v${c.version}${c.built_at ? ` · ${fmtBuildTime(c.built_at)}` : ""}`,
       ]),
     );
   }
+  shell.append(body);
   if (c.kind === "engine") {
     const eid = c.engine_id ?? c.id;
     card.classList.add("health-card--clickable");
     card.setAttribute("role", "button");
     card.setAttribute("tabindex", "0");
     card.title = "Подробнее о движке";
-    card.append(el("span", { className: "health-card__more" }, ["Подробнее →"]));
+    shell.append(
+      el("div", { className: "health-card__foot" }, [
+        el("span", { className: "health-card__more" }, ["Подробнее →"]),
+      ]),
+    );
     const open = () => showEngineDetailModal(eid, c.name);
     card.addEventListener("click", open);
     card.addEventListener("keydown", (ev) => {
@@ -7296,6 +7546,7 @@ function healthCard(c: HealthComponent): HTMLElement {
       }
     });
   }
+  card.append(shell);
   return card;
 }
 
@@ -9670,39 +9921,26 @@ function mountNetworkShell(root: HTMLElement): void {
         : side === "uploaded"
           ? "Всего отдано в разрезе каналов и движков"
           : "Отдача фермы за день, неделю и месяц";
-  const tabBar = el("div", { className: "wan-tabs", role: "tablist" });
-  const mkTab = (label: string, target: NetworkSide, go: () => void) => {
-    const btn = el("button", { type: "button", className: "wan-tab", role: "tab" }, [label]) as HTMLButtonElement;
-    btn.classList.toggle("is-active", side === target);
-    btn.setAttribute("aria-selected", side === target ? "true" : "false");
-    btn.addEventListener("click", () => {
-      if (side === target) return;
-      go();
-      window.dispatchEvent(new HashChangeEvent("hashchange"));
-    });
-    return btn;
-  };
-  tabBar.append(
-    mkTab("Отдача", "up", setHashNetwork),
-    mkTab("Скачивание", "down", setHashNetworkDownload),
-    mkTab("Всего отдано", "uploaded", setHashNetworkUploaded),
-    mkTab("История", "history", setHashNetworkHistory),
-  );
-  const header = el("header", { className: "app-header" }, [
-    el("div", { className: "app-header__lead" }, [
-      el("h1", {}, ["Сеть"]),
-      el("p", { className: "field__hint" }, [hint]),
-    ]),
-    el("div", { className: "app-header__actions" }, [tabBar, profileControl()]),
-  ]);
-  const host = el("div", { className: "wan-grid" }, [
-    el("p", { className: "wan-note" }, ["Загрузка карты каналов…"]),
-  ]);
+  const title =
+    side === "up" ? "Отдача" : side === "down" ? "Скачивание" : side === "uploaded" ? "Всего отдано" : "История";
+  const header = overviewHeader(title, hint);
+  prefetchOverviewData(side);
+  const histMetric = side === "down" ? "downloaded" : "uploaded";
+  const cachedLinks = peekNetworkLinks();
+  const cachedHist = peekUploadedHistory(getHistoryPeriod(), histMetric);
+  const host = el("div", { className: "wan-grid" });
   const historyHost = el("section", { className: "upload-history upload-history--page" });
-  historyHost.append(el("p", { className: "wan-note" }, ["Загрузка истории отдачи…"]));
   const chartsHost = el("div", { className: "wan-charts-host" });
-  if (side === "uploaded" || side === "up" || side === "down") {
-    chartsHost.append(el("p", { className: "wan-note" }, ["Загрузка истории…"]));
+  if (side !== "history" && !cachedLinks) {
+    host.replaceChildren(...wanCardsSkeleton());
+    revealKids(host);
+  }
+  if (side === "history" && !cachedHist) {
+    fillHistorySkeleton(historyHost);
+    revealKids(historyHost);
+  } else if (side !== "history" && !cachedHist) {
+    chartsHost.replaceChildren(chartsSkeleton());
+    revealKids(chartsHost);
   }
   const note = el("p", { className: "wan-note" }, [
     side === "up"
@@ -9719,18 +9957,23 @@ function mountNetworkShell(root: HTMLElement): void {
     root.append(back, header, host, chartsHost, note);
   }
 
-  let links: NetworkLinksOut | null = null;
-  let lastHistory: UploadedHistory | null = null;
+  let links: NetworkLinksOut | null = cachedLinks;
+  let lastHistory: UploadedHistory | null = cachedHist;
   let historyPeriod: HistoryPeriod = getHistoryPeriod();
   let unbindFarmHover: (() => void) | null = null;
   const miniCache = new Map<string, MiniChartSlot>();
   let didFocusScroll = false;
+  let cardsRevealed = Boolean(cachedLinks);
 
   const paint = (stats: SessionStats | null) => {
     const now = parseRoute();
     if (now.view !== "network" || now.side !== side || links === null) return;
     if (stats) lastSessionStats = stats;
     host.replaceChildren(...renderWanCards(links, stats, side));
+    if (!cardsRevealed) {
+      cardsRevealed = true;
+      revealKids(host);
+    }
     if (!didFocusScroll) {
       scrollToNetworkEngine(host);
       didFocusScroll = true;
@@ -9856,16 +10099,34 @@ function mountNetworkShell(root: HTMLElement): void {
       chartBox.append(svg);
       unbindFarmHover = bindFarmHover(svg, lastHistory, tip, fmtBytes);
     }
+    historyHost.removeAttribute("aria-busy");
     historyHost.replaceChildren(head, stats, legend, chartBox, facts, tip);
   };
 
   const loadHistory = async () => {
     if (side !== "history" && side !== "uploaded" && side !== "up" && side !== "down") return;
     const metric = side === "down" ? "downloaded" : "uploaded";
+    const cached = peekUploadedHistory(historyPeriod, metric);
+    if (cached) {
+      lastHistory = cached;
+      if (side === "history") {
+        paintHistory();
+        revealKids(historyHost);
+      } else paintCharts();
+    } else if (side === "history") {
+      if (!historyHost.querySelector(".sk--chart")) {
+        fillHistorySkeleton(historyHost);
+        revealKids(historyHost);
+      }
+    } else if (!chartsHost.querySelector(".sk")) {
+      delete chartsHost.dataset.tag;
+      chartsHost.replaceChildren(chartsSkeleton());
+      revealKids(chartsHost);
+    }
     try {
-      lastHistory = await fetchJson<UploadedHistory>(
-        `/network/uploaded-history?period=${historyPeriod}&metric=${metric}`,
-      );
+      const next = await loadUploadedHistory(historyPeriod, metric);
+      if (next === lastHistory && cached) return;
+      lastHistory = next;
     } catch (e) {
       lastHistory = null;
       const msg = e instanceof Error ? e.message : String(e);
@@ -9876,17 +10137,22 @@ function mountNetworkShell(root: HTMLElement): void {
       }
       return;
     }
-    if (side === "history") paintHistory();
-    else paintCharts();
+    if (side === "history") {
+      paintHistory();
+      if (!cached) revealKids(historyHost);
+    } else {
+      paintCharts();
+      if (!cached) revealKids(chartsHost);
+    }
   };
 
+  if (cachedLinks && side !== "history") paint(lastSessionStats);
+  if (side === "history") void loadHistory();
+
   void (async () => {
-    if (side === "history") {
-      void loadHistory();
-      return;
-    }
+    if (side === "history") return;
     try {
-      links = await fetchJson<NetworkLinksOut>("/network/links");
+      links = await loadNetworkLinks();
     } catch (e) {
       host.replaceChildren(
         el("p", { className: "wan-note" }, [e instanceof Error ? e.message : String(e)]),
@@ -9894,6 +10160,7 @@ function mountNetworkShell(root: HTMLElement): void {
       return;
     }
     if (parseRoute().view !== "network") return;
+    if (!cachedLinks) cardsRevealed = false;
     paint(lastSessionStats);
     void loadHistory();
 
@@ -9915,6 +10182,204 @@ function mountNetworkShell(root: HTMLElement): void {
     if (side === "down") {
       networkFileRatesUnsub = subscribeFileUploadRates(() => paint(lastSessionStats));
     }
+  })();
+}
+
+function farmEngineValue(id: string, side: FarmSide): { n: number; extra: number; extraLabel: string; online: boolean } {
+  const ses = lastSessionStats?.by_engine?.[id];
+  const online = Boolean(ses && !ses.error);
+  if (side === "size") {
+    return {
+      n: lastEngineSizes?.[id] ?? 0,
+      extra: online ? ses?.torrents ?? 0 : 0,
+      extraLabel: "раздач",
+      online,
+    };
+  }
+  return {
+    n: online ? ses?.torrents ?? 0 : 0,
+    extra: lastEngineSizes?.[id] ?? 0,
+    extraLabel: "объём",
+    online,
+  };
+}
+
+function farmEngineRow(id: string, side: FarmSide, total: number, wanId: string): HTMLElement {
+  const bits = farmEngineValue(id, side);
+  const share = total > 0 ? (bits.n / total) * 100 : 0;
+  const row = el("button", {
+    type: "button",
+    className: `wan-eng wan-eng--link${bits.online ? "" : " wan-eng--off"}`,
+    "data-engine": id,
+    title: side === "size" ? "Список по объёму" : "Список раздач",
+  });
+  row.append(
+    el("span", { className: "wan-eng__id" }, [id]),
+    el("span", { className: "wan-eng__rate" }, [side === "size" ? fmtBytes(bits.n) : fmtInt(bits.n)]),
+    el("span", { className: "wan-eng__bar" }, [meterRow(share, channelBarTone(wanId))]),
+    el("span", { className: "wan-eng__share" }, [`${share.toFixed(0)}%`]),
+    el("span", { className: "wan-eng__peers" }, [
+      bits.extraLabel === "объём" ? fmtBytes(bits.extra) : `${fmtInt(bits.extra)} раздач`,
+    ]),
+    el("span", { className: "wan-eng__act" }, [
+      bits.online
+        ? `${fmtInt(lastSessionStats?.by_engine?.[id]?.torrents_active ?? 0)} акт.`
+        : "нет связи",
+    ]),
+  );
+  row.addEventListener("click", () => {
+    listEngineFilter = id;
+    lsSet("ui.engine", id);
+    if (side === "size") {
+      listSort = "size";
+      lsSet("ui.sort", listSort);
+    }
+    setHashList();
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+  return row;
+}
+
+function farmCard(
+  title: string,
+  subtitle: string,
+  engines: string[],
+  side: FarmSide,
+  total: number,
+  wanId: string,
+): HTMLElement {
+  let n = 0;
+  let extra = 0;
+  let active = 0;
+  let online = 0;
+  for (const id of engines) {
+    const bits = farmEngineValue(id, side);
+    n += bits.n;
+    extra += bits.extra;
+    if (bits.online) {
+      online += 1;
+      active += lastSessionStats?.by_engine?.[id]?.torrents_active ?? 0;
+    }
+  }
+  const share = total > 0 ? (n / total) * 100 : 0;
+  const card = el("section", { className: "wan-card", "data-wan": wanId });
+  card.append(
+    el("div", { className: "wan-card__head" }, [
+      el("div", { className: "wan-card__title" }, [title]),
+      el("div", { className: "wan-card__sub" }, [subtitle]),
+    ]),
+    el("div", { className: "wan-card__rate" }, [
+      el("span", { className: "wan-card__rate-val" }, [side === "size" ? fmtBytes(n) : fmtInt(n)]),
+      el("span", { className: "wan-card__rate-share" }, [
+        `${share.toFixed(0)}% ${side === "size" ? "от общего объёма" : "от всех раздач"}`,
+      ]),
+    ]),
+    el("div", { className: "wan-card__util" }, [
+      meterRow(share, channelBarTone(wanId)),
+      el("div", { className: "wan-card__util-note" }, [`${share.toFixed(1)}% ${side === "size" ? "объёма" : "раздач"}`]),
+    ]),
+    el("div", { className: "wan-card__meta" }, [
+      el("span", {}, [`${online}/${engines.length} движков`]),
+      el("span", {}, [`${fmtInt(active)} активных`]),
+      el("span", {}, [side === "size" ? `${fmtInt(extra)} раздач` : fmtBytes(extra)]),
+    ]),
+  );
+  const rows = el("div", { className: "wan-engines" });
+  const sorted = [...engines].sort((a, b) => farmEngineValue(b, side).n - farmEngineValue(a, side).n);
+  for (const id of sorted) rows.append(farmEngineRow(id, side, n, wanId));
+  card.append(rows);
+  return card;
+}
+
+function renderFarmCards(data: NetworkLinksOut, side: FarmSide): HTMLElement[] {
+  const total = side === "size"
+    ? lastTotalContentSize ?? Object.values(lastEngineSizes ?? {}).reduce((a, b) => a + b, 0)
+    : lastSessionStats?.torrents ?? 0;
+  const cards = data.links.map((l) =>
+    farmCard(l.name, [l.router, l.wan_ip].filter(Boolean).join(" · "), l.engines, side, total, l.id),
+  );
+  if (data.unassigned.length) {
+    cards.push(farmCard("Вне карты", "подсеть не сопоставлена каналу", data.unassigned, side, total, "unassigned"));
+  }
+  return cards;
+}
+
+function mountFarmShell(root: HTMLElement): void {
+  const route = parseRoute();
+  const side: FarmSide = route.view === "farm" ? route.side : "torrents";
+  const back = navLink("← Назад к списку", () => setHashList());
+  const hint = side === "size"
+    ? "Объём раздач в разрезе каналов и движков"
+    : "Число раздач в разрезе каналов и движков";
+  const header = overviewHeader(side === "size" ? "Объём" : "Раздачи", hint);
+  prefetchOverviewData(side);
+  const cachedLinks = peekNetworkLinks();
+  const host = el("div", { className: "wan-grid" });
+  if (!cachedLinks) {
+    host.replaceChildren(...wanCardsSkeleton());
+    revealKids(host);
+  }
+  const note = el("p", { className: "wan-note" }, [
+    side === "size"
+      ? "Объём — сумма размеров контента из списка (facets), не живая сессия. Строка движка открывает список, отсортированный по размеру."
+      : "Счётчик раздач — из живой сессии движка. Объём на карточке — из списка. Строка открывает список этого движка.",
+  ]);
+  root.append(back, header, host, note);
+
+  let links: NetworkLinksOut | null = cachedLinks;
+  let cardsRevealed = Boolean(cachedLinks);
+  const paint = () => {
+    const now = parseRoute();
+    if (now.view !== "farm" || now.side !== side || links === null) return;
+    host.replaceChildren(...renderFarmCards(links, side));
+    if (!cardsRevealed) {
+      cardsRevealed = true;
+      revealKids(host);
+    }
+  };
+  if (cachedLinks) paint();
+
+  void (async () => {
+    try {
+      const [data, facets] = await Promise.all([
+        loadNetworkLinks(),
+        fetchJson<{ total_size?: number; engine_sizes?: Record<string, number> }>("/torrents/facets").catch(() => null),
+      ]);
+      links = data;
+      if (facets) {
+        lastEngineSizes = facets.engine_sizes ?? lastEngineSizes;
+        if (facets.total_size != null) {
+          lastTotalContentSize = facets.total_size;
+          if (lastSessionStats) lastSessionStats.total_size = facets.total_size;
+        }
+      }
+    } catch (e) {
+      host.replaceChildren(
+        el("p", { className: "wan-note" }, [e instanceof Error ? e.message : String(e)]),
+      );
+      return;
+    }
+    if (parseRoute().view !== "farm") return;
+    paint();
+
+    const tick = async () => {
+      if (parseRoute().view !== "farm") return;
+      const s = await loadSessionStats();
+      if (s) lastSessionStats = s;
+      paint();
+      if (parseRoute().view === "farm" && !document.hidden) {
+        networkPollTimer = setTimeout(() => void tick(), wsAvailable() ? 20000 : 3000);
+      }
+    };
+    void tick();
+    networkStatsUnsub = wsSubscribe("stats", (msg) => {
+      if (parseRoute().view !== "farm") return;
+      const d = msg.data as { stats?: SessionStats } | undefined;
+      if (d?.stats) {
+        lastSessionStats = d.stats;
+        paint();
+      }
+    });
   })();
 }
 
@@ -10367,6 +10832,7 @@ function render(): void {
   else if (route.view === "settings") mountSettingsShell(root);
   else if (route.view === "cabinet") mountCabinetShell(root);
   else if (route.view === "network") mountNetworkShell(root);
+  else if (route.view === "farm") mountFarmShell(root);
   else mountDetailShell(root, route.id);
   root.append(appFooter());
   refreshSmoothScroll();

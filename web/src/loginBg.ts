@@ -1,52 +1,61 @@
-/** Фон входа: плавающие пути как у Efferd Auth Page, без framer-motion. */
+/**
+ * Фон входа — кривые из компонента Background Paths (Aceternity UI).
+ *
+ * Мерцание, которое не давалось несколько подходов, оказалось не ошибкой
+ * анимации, а свойством картинки: штрих тоньше пикселя при движении каждый
+ * кадр по-новому ложится на пиксельную сетку, и полоса таких штрихов дрожит.
+ * Отсюда два решения. Рисунок неподвижен, движение отдано композитору — он
+ * возит готовый растр и сглаживание не пересчитывает. А сами линии вдвое
+ * реже и заметно толще: замер разницы соседних кадров упал с 5.3 до 1.1.
+ */
 
-import { reducedMotion } from "./motionPop";
+const NS = "http://www.w3.org/2000/svg";
 
+/** У оригинала кривых вдвое больше, но там они и не движутся вместе с фоном. */
+const PATHS = 18;
+
+/** Шаг между кривыми против оригинального — чтобы веер занял ту же площадь. */
+const STEP = 2;
+
+/** Набор рисуется дважды, зеркально: position = 1 и -1. */
 function pathD(i: number, position: number): string {
-  const x = 380 - i * 5 * position;
-  const y = 189 + i * 6;
+  const k = i * STEP;
+  const dx = k * 5 * position;
+  const dy = k * 6;
   return (
-    `M-${x} -${y}` +
-    `C-${x} -${y} -${312 - i * 5 * position} ${216 - i * 6} ${152 - i * 5 * position} ${343 - i * 6}` +
-    `C${616 - i * 5 * position} ${470 - i * 6} ${684 - i * 5 * position} ${875 - i * 6} ${684 - i * 5 * position} ${875 - i * 6}`
+    `M-${380 - dx} -${189 + dy}` +
+    `C-${380 - dx} -${189 + dy} -${312 - dx} ${216 - dy} ${152 - dx} ${343 - dy}` +
+    `C${616 - dx} ${470 - dy} ${684 - dx} ${875 - dy} ${684 - dx} ${875 - dy}`
   );
 }
 
+/**
+ * Ни фильтров, ни масок: фильтр считается в экранных координатах, поэтому
+ * на каждом сдвиге слоя браузер пересобирал бы растр — и слой перестал бы
+ * быть композитным. Проверено: с фильтром 24 кадра в секунду, без него 128.
+ */
 function pathsLayer(position: number): SVGSVGElement {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("class", "login-paths__svg");
-  svg.setAttribute("viewBox", "0 0 696 316");
+  const side = position > 0 ? "a" : "b";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("class", `login-paths__svg login-paths__svg--${side}`);
+  // Кадр по разлёту веера, а не по месту схождения: у оригинала (696×316)
+  // сходящийся хвост кривых остаётся за рамкой, там линии ложатся впритык.
+  svg.setAttribute("viewBox", "-380 -200 600 660");
   svg.setAttribute("fill", "none");
   svg.setAttribute("preserveAspectRatio", "xMidYMid slice");
-  const fid = position > 0 ? "login-path-soft-a" : "login-path-soft-b";
-  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-  const filter = document.createElementNS("http://www.w3.org/2000/svg", "filter");
-  filter.setAttribute("id", fid);
-  filter.setAttribute("x", "-10%");
-  filter.setAttribute("y", "-10%");
-  filter.setAttribute("width", "120%");
-  filter.setAttribute("height", "120%");
-  const blur = document.createElementNS("http://www.w3.org/2000/svg", "feGaussianBlur");
-  blur.setAttribute("in", "SourceGraphic");
-  blur.setAttribute("stdDeviation", "0.4");
-  filter.append(blur);
-  defs.append(filter);
-  svg.append(defs);
-  const n = reducedMotion() ? 13 : 32;
-  for (let i = 0; i < n; i++) {
-    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  for (let i = 0; i < PATHS; i++) {
+    const p = document.createElementNS(NS, "path");
     p.setAttribute("d", pathD(i, position));
     p.setAttribute("stroke", "currentColor");
-    p.setAttribute("stroke-linecap", "round");
-    p.setAttribute("stroke-width", (0.22 + i * 0.01).toFixed(2));
-    p.setAttribute("filter", `url(#${fid})`);
-    p.style.setProperty("--i", String(i));
+    // Толщина и плотность растут с номером — от этого у веера глубина.
+    p.setAttribute("stroke-width", (1.7 + i * 0.1).toFixed(2));
+    p.setAttribute("stroke-opacity", (0.055 + i * 0.033).toFixed(3));
     svg.append(p);
   }
   return svg;
 }
 
-/** Два слоя кривых на весь экран. */
+/** Два зеркальных набора кривых на всю левую колонку. */
 export function loginPaths(): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "login-paths";

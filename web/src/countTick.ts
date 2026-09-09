@@ -6,7 +6,6 @@ import { reducedMotion, type MotionCtrl } from "./motionPop";
 export type TickFmt = (n: number) => string;
 
 export const CHIP_TICK_SEL = ".tray-toggle__val";
-export const ROW_TICK_SEL = ".tray-row__value, .tray-row__sub";
 
 const TICK_SPRING = {
   type: "spring" as const,
