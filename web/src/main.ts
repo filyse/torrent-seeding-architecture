@@ -32,6 +32,44 @@ import {
   type HistoryPeriod,
   type UploadedHistory,
 } from "./uploadChart";
+import { creatorBrowseRow, fillCreatorCrumbs } from "./dirBrowser";
+import { intakeDrop, intakeFoot, intakeHead, intakeSegment, type ElFn, type IconFn } from "./intake";
+import {
+  CHIP_TICK_SEL,
+  ROW_TICK_SEL,
+  dropHold,
+  holdTicks,
+  lockTickMinWidth,
+  releaseTicks,
+  tickNumber,
+  unlockTickMinWidth,
+  type TickFmt,
+} from "./countTick";
+import { loginPaths } from "./loginBg";
+import { animate } from "motion";
+import {
+  applyPopProgress,
+  closePopPanel,
+  EASE_OUT_QUINT,
+  INDICATOR_SPRING,
+  morphBox,
+  openAnchorPanel,
+  openPopPanel,
+  playFold,
+  playPop,
+  POP_SPRING,
+  presentModal,
+  reducedMotion,
+  staggerIn,
+  type MotionCtrl,
+} from "./motionPop";
+import {
+  formatReleaseCount,
+  formatSeason,
+  groupReleasesBySeason,
+  parseReleaseName,
+} from "./searchTitle";
+import { refreshSmoothScroll, scrollToTop, startSmoothScroll } from "./smoothScroll";
 import { WEB_VERSION } from "./version";
 import { onWsUnavailable, wsAvailable, wsSubscribe } from "./ws";
 
@@ -406,11 +444,54 @@ function isAdmin(): boolean {
   return currentRole === "admin";
 }
 
+const API_KEY_NAME = "seedingApiKey";
+const REMEMBER_LOGIN_KEY = "ui.rememberLogin";
+
+function ssGet(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function ssSet(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
+}
+function storageDel(store: "local" | "session", key: string): void {
+  try {
+    (store === "local" ? localStorage : sessionStorage).removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+function rememberLogin(): boolean {
+  return lsGet(REMEMBER_LOGIN_KEY) !== "0";
+}
+function setRememberLogin(on: boolean): void {
+  lsSet(REMEMBER_LOGIN_KEY, on ? "1" : "0");
+}
+
 function getApiKey(): string {
-  return lsGet("seedingApiKey") ?? "";
+  return lsGet(API_KEY_NAME) || ssGet(API_KEY_NAME) || "";
 }
 function setApiKey(key: string): void {
-  lsSet("seedingApiKey", key);
+  if (!key) {
+    storageDel("local", API_KEY_NAME);
+    storageDel("session", API_KEY_NAME);
+    return;
+  }
+  if (rememberLogin()) {
+    lsSet(API_KEY_NAME, key);
+    storageDel("session", API_KEY_NAME);
+  } else {
+    ssSet(API_KEY_NAME, key);
+    storageDel("local", API_KEY_NAME);
+  }
 }
 
 function lsGet(key: string): string | null {
@@ -425,6 +506,63 @@ function lsSet(key: string, value: string): void {
     localStorage.setItem(key, value);
   } catch {
     /* ignore (private mode / quota) */
+  }
+}
+
+const SEARCH_HISTORY_MAX = 12;
+type SearchHistoryItem = {
+  q: string;
+  torrentId?: number;
+  name?: string;
+  engine?: string;
+  status?: string;
+  label?: string;
+  at: number;
+};
+function searchAccountKey(): string {
+  const name = currentMe?.name?.trim();
+  return name || "anon";
+}
+function readSearchHistory(): SearchHistoryItem[] {
+  try {
+    const raw = lsGet(`ui.searchHistory.${searchAccountKey()}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((x): x is SearchHistoryItem => {
+        if (!x || typeof x !== "object") return false;
+        const it = x as SearchHistoryItem;
+        return typeof it.q === "string";
+      })
+      .slice(0, SEARCH_HISTORY_MAX);
+  } catch {
+    return [];
+  }
+}
+function rememberSearch(entry: Omit<SearchHistoryItem, "at">): void {
+  const q = entry.q.trim();
+  if (!q && entry.torrentId == null) return;
+  const prev = readSearchHistory();
+  const next = prev.filter((x) => {
+    if (entry.torrentId != null) return x.torrentId !== entry.torrentId;
+    return !(x.q === q && x.torrentId == null);
+  });
+  next.unshift({ ...entry, q: q || entry.name || "", at: Date.now() });
+  lsSet(`ui.searchHistory.${searchAccountKey()}`, JSON.stringify(next.slice(0, SEARCH_HISTORY_MAX)));
+}
+function forgetSearch(entry: { q?: string; torrentId?: number }): void {
+  const next = readSearchHistory().filter((x) => {
+    if (entry.torrentId != null) return x.torrentId !== entry.torrentId;
+    return !(x.q === entry.q && x.torrentId == null);
+  });
+  lsSet(`ui.searchHistory.${searchAccountKey()}`, JSON.stringify(next));
+}
+function clearSearchHistory(): void {
+  try {
+    localStorage.removeItem(`ui.searchHistory.${searchAccountKey()}`);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -447,10 +585,38 @@ type ListView = "cards" | "table";
 type ViewPreset = "grid" | "list" | "mini" | "table";
 type ThemeMode = "auto" | "light" | "dark";
 
+function lsOrOpen(key: string, openKey: string): string {
+  const stored = lsGet(key);
+  if (stored !== null) return stored;
+  return lsGet(openKey) ?? "";
+}
+function getOpenLabel(): string {
+  return lsGet("ui.openLabel") ?? "";
+}
+function getOpenEngine(): string {
+  return lsGet("ui.openEngine") ?? "";
+}
+function applyOpenListPrefs(): void {
+  listLabelFilter = getOpenLabel();
+  listEngineFilter = getOpenEngine();
+  lsSet("ui.label", listLabelFilter);
+  lsSet("ui.engine", listEngineFilter);
+}
+
 let listSearch = lsGet("ui.search") ?? "";
+let onSearchOverlayEsc: ((ev: KeyboardEvent) => void) | null = null;
+
+function releaseSearchOverlay(): void {
+  document.querySelectorAll(".search-palette").forEach((n) => n.remove());
+  document.querySelectorAll(".search-dock.is-open").forEach((n) => n.classList.remove("is-open"));
+  if (onSearchOverlayEsc) {
+    document.removeEventListener("keydown", onSearchOverlayEsc);
+    onSearchOverlayEsc = null;
+  }
+}
 let listStatusFilter = lsGet("ui.status") ?? "";
-let listLabelFilter = lsGet("ui.label") ?? "";
-let listEngineFilter = lsGet("ui.engine") ?? "";
+let listLabelFilter = lsOrOpen("ui.label", "ui.openLabel");
+let listEngineFilter = lsOrOpen("ui.engine", "ui.openEngine");
 let listState: ListState = ((): ListState => {
   const v = lsGet("ui.state") ?? "";
   return (STATE_VALUES as readonly string[]).includes(v) ? (v as ListState) : "";
@@ -634,12 +800,8 @@ function clearViewPolls(): void {
 function apiHeaders(json = true): HeadersInit {
   const h: Record<string, string> = {};
   if (json) h["Content-Type"] = "application/json";
-  try {
-    const key = localStorage.getItem("seedingApiKey");
-    if (key) h["X-API-Key"] = key;
-  } catch {
-    /* ignore */
-  }
+  const key = getApiKey();
+  if (key) h["X-API-Key"] = key;
   return h;
 }
 
@@ -732,6 +894,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
 const ICON_PATHS: Record<string, string> = {
   edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
   rows: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
   grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
@@ -741,6 +904,9 @@ const ICON_PATHS: Record<string, string> = {
     '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
   "file-plus":
     '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  magnet:
+    '<path d="M6 13V8a6 6 0 0 1 12 0v5"/><rect x="2" y="13" width="6" height="7" rx="2"/><rect x="16" y="13" width="6" height="7" rx="2"/>',
   list:
     '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
   download:
@@ -753,12 +919,15 @@ const ICON_PATHS: Record<string, string> = {
   "arrow-up": '<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>',
   plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   "chevron-down": '<polyline points="6 9 12 15 18 9"/>',
+  "chevron-right": '<polyline points="9 18 15 12 9 6"/>',
+  folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
   tag:
     '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
   swap:
     '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
   refresh:
-    '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
+    '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
   settings:
     '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   inbox:
@@ -783,6 +952,28 @@ function icon(name: keyof typeof ICON_PATHS): HTMLElement {
   return span;
 }
 
+/** Квадратная «Обновить» как на главной: hover 50°, клик — полный оборот. */
+function refreshIconBtn(onClick: () => void): HTMLButtonElement {
+  const btn = el(
+    "button",
+    {
+      type: "button",
+      className: "btn btn--ghost btn--sm list-controls__icon",
+      title: "Обновить",
+      "aria-label": "Обновить",
+    },
+    [icon("refresh")],
+  ) as HTMLButtonElement;
+  btn.addEventListener("click", () => {
+    btn.classList.remove("is-refreshing");
+    void btn.offsetWidth;
+    btn.classList.add("is-refreshing");
+    window.setTimeout(() => btn.classList.remove("is-refreshing"), 650);
+    onClick();
+  });
+  return btn;
+}
+
 // —— Кастомный выпадающий список для <select> ————————————————————————————————
 // Нативный <select> оставляем как есть (закрытый вид и вся логика/значение — его),
 // но перехватываем ОТКРЫТИЕ и вместо системного меню рисуем свой стилизованный список.
@@ -790,14 +981,38 @@ function icon(name: keyof typeof ICON_PATHS): HTMLElement {
 // программная смена value работают без синхронизации.
 let closeActiveCselect: (() => void) | null = null;
 
+/** Ширина <select> по текущей подписи, а не по самому длинному option. */
+function fitSelectToSelected(select: HTMLSelectElement): void {
+  if (!select.isConnected) return;
+  const label = select.selectedOptions[0]?.textContent ?? "";
+  const cs = getComputedStyle(select);
+  const probe = document.createElement("span");
+  probe.textContent = label;
+  probe.style.position = "absolute";
+  probe.style.visibility = "hidden";
+  probe.style.whiteSpace = "nowrap";
+  probe.style.font = cs.font;
+  probe.style.letterSpacing = cs.letterSpacing;
+  document.body.append(probe);
+  const extra =
+    (parseFloat(cs.paddingLeft) || 0) +
+    (parseFloat(cs.paddingRight) || 0) +
+    (parseFloat(cs.borderLeftWidth) || 0) +
+    (parseFloat(cs.borderRightWidth) || 0);
+  select.style.width = `${Math.ceil(probe.getBoundingClientRect().width + extra + 1)}px`;
+  probe.remove();
+}
+
 function enhanceSelect(select: HTMLSelectElement): void {
   if (select.dataset.cselDone === "1") return;
   select.dataset.cselDone = "1";
 
   const panel = el("div", { className: "cselect-panel", role: "listbox" });
   let open = false;
+  let panelMotion: MotionCtrl | null = null;
+  let opensBelow = true;
 
-  const reposition = () => {
+  const reposition = (): boolean => {
     const r = select.getBoundingClientRect();
     const gap = 4;
     const spaceBelow = window.innerHeight - r.bottom;
@@ -812,10 +1027,13 @@ function enhanceSelect(select: HTMLSelectElement): void {
     if (below) {
       panel.style.top = `${r.bottom + gap}px`;
       panel.style.bottom = "";
+      panel.style.transformOrigin = "50% 0%";
     } else {
       panel.style.top = "";
       panel.style.bottom = `${window.innerHeight - r.top + gap}px`;
+      panel.style.transformOrigin = "50% 100%";
     }
+    return below;
   };
 
   const build = () => {
@@ -848,15 +1066,15 @@ function enhanceSelect(select: HTMLSelectElement): void {
     }
   };
   const onViewportChange = () => {
-    if (open) reposition();
+    if (open) opensBelow = reposition();
   };
 
   function open_() {
     if (select.disabled) return;
     closeActiveCselect?.();
     build();
-    document.body.append(panel);
-    reposition();
+    if (!panel.isConnected) document.body.append(panel);
+    opensBelow = reposition();
     open = true;
     select.classList.add("cselect-active");
     panel.querySelector(".is-selected")?.scrollIntoView({ block: "nearest" });
@@ -865,18 +1083,21 @@ function enhanceSelect(select: HTMLSelectElement): void {
     window.addEventListener("scroll", onViewportChange, true);
     window.addEventListener("resize", onViewportChange, true);
     closeActiveCselect = close;
+    panelMotion = openAnchorPanel(panel, opensBelow ? "top" : "bottom", panelMotion);
+    staggerIn(panel.querySelectorAll(".cselect-option"), 0.03, 0);
   }
 
   function close() {
     if (!open) return;
     open = false;
     select.classList.remove("cselect-active");
-    panel.remove();
     document.removeEventListener("mousedown", onDocDown, true);
     document.removeEventListener("keydown", onKeyClose, true);
     window.removeEventListener("scroll", onViewportChange, true);
     window.removeEventListener("resize", onViewportChange, true);
     if (closeActiveCselect === close) closeActiveCselect = null;
+    panelMotion = closePopPanel(panel, panelMotion);
+    panel.remove();
   }
 
   // Блокируем системное меню и открываем своё.
@@ -1049,6 +1270,7 @@ function paintProfile(host: HTMLElement): void {
     type: "button",
     className: "pf-toggle",
     "aria-haspopup": "true",
+    "aria-expanded": "false",
   });
   toggle.append(
     avatarNode(avatar, name, 22),
@@ -1089,21 +1311,27 @@ function paintProfile(host: HTMLElement): void {
       setHashCabinet();
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     }),
-  );
-  if (me.source === "session") {
-    menu.append(item("key", "Сменить пароль", () => openPasswordDialog({ kind: "self" })));
-  }
-  menu.append(
-    item("user", "Сменить аватар", () => openAvatarPicker()),
     item("swap", "Сменить аккаунт", () => showLoginDialog()),
     item("log-out", "Выйти", () => void doLogout(), true),
   );
 
-  const close = (): void => {
-    host.classList.remove("is-open");
-    document.removeEventListener("click", onOutside, true);
-    document.removeEventListener("keydown", onEsc, true);
+  let menuMotion: MotionCtrl | null = null;
+  const setOpen = (on: boolean): void => {
+    const was = host.classList.contains("is-open");
+    if (on === was) return;
+    host.classList.toggle("is-open", on);
+    toggle.setAttribute("aria-expanded", on ? "true" : "false");
+    if (on) {
+      document.addEventListener("click", onOutside, true);
+      document.addEventListener("keydown", onEsc, true);
+      menuMotion = openPopPanel(menu, menuMotion);
+    } else {
+      document.removeEventListener("click", onOutside, true);
+      document.removeEventListener("keydown", onEsc, true);
+      menuMotion = closePopPanel(menu, menuMotion);
+    }
   };
+  const close = (): void => setOpen(false);
   const onOutside = (ev: Event): void => {
     if (!host.contains(ev.target as Node)) close();
   };
@@ -1114,14 +1342,11 @@ function paintProfile(host: HTMLElement): void {
     ev.stopPropagation();
     closeOpenTrays();
     closeOpenCardMenus();
-    if (host.classList.toggle("is-open")) {
-      document.addEventListener("click", onOutside, true);
-      document.addEventListener("keydown", onEsc, true);
-    } else {
-      close();
-    }
+    setOpen(!host.classList.contains("is-open"));
   });
-
+  menu.hidden = true;
+  applyPopProgress(menu, 0);
+  profileSetOpen.set(host, setOpen);
   host.append(toggle, menu);
 }
 
@@ -1163,20 +1388,26 @@ function diskUsedPct(e: EngineOut): number | null {
   return Math.max(0, Math.min(100, Math.round(((total - free) / total) * 100)));
 }
 
+const profileSetOpen = new WeakMap<HTMLElement, (on: boolean) => void>();
+const traySetOpen = new WeakMap<HTMLElement, (on: boolean) => void>();
+const statsDockRoll = new WeakMap<HTMLElement, (on: boolean) => void>();
+
 function closeOpenProfiles(): void {
-  for (const h of profileHosts) h.classList.remove("is-open");
+  for (const h of profileHosts) profileSetOpen.get(h)?.(false);
 }
 
 function closeOpenTrays(except?: HTMLElement): void {
   for (const h of trayHosts) {
     if (h === except) continue;
-    h.classList.remove("is-open");
-    const t = h.querySelector(".tray-toggle");
-    if (t) t.setAttribute("aria-expanded", "false");
+    traySetOpen.get(h)?.(false);
   }
 }
 
 const cardMoreHosts = new Set<HTMLElement>();
+const cardMoreSetOpen = new WeakMap<HTMLElement, (on: boolean, opts?: { snap?: boolean }) => void>();
+
+const MORE_CLOSED = 32;
+const MORE_OPEN_W = 220;
 
 function closeOpenCardMenus(except?: HTMLElement): void {
   for (const h of [...cardMoreHosts]) {
@@ -1185,10 +1416,7 @@ function closeOpenCardMenus(except?: HTMLElement): void {
       continue;
     }
     if (h === except) continue;
-    h.classList.remove("is-open");
-    h.closest(".torrent-card")?.classList.remove("is-menu-open");
-    const t = h.querySelector(".torrent-card__more-toggle");
-    if (t) t.setAttribute("aria-expanded", "false");
+    cardMoreSetOpen.get(h)?.(false, { snap: true });
   }
 }
 
@@ -1201,6 +1429,7 @@ function attachCardMore(
 ): HTMLElement {
   const more = el("div", { className: "torrent-card__more" });
   cardMoreHosts.add(more);
+  const shell = el("div", { className: "torrent-card__more-shell" });
   const moreToggle = el("button", {
     type: "button",
     className: "btn btn--ghost btn--sm torrent-card__more-toggle",
@@ -1218,7 +1447,9 @@ function attachCardMore(
       ]),
     );
   }
-  moreKids.push(pauseBtn, resumeBtn, delBtn);
+  const ind = el("div", { className: "torrent-card__more-ind" });
+  const bar = el("div", { className: "torrent-card__more-bar" });
+  moreKids.push(ind, bar, pauseBtn, resumeBtn, delBtn);
   const moreMenu = el("div", { className: "torrent-card__more-menu", role: "menu" }, moreKids);
   pauseBtn.className = "pf-item";
   resumeBtn.className = "pf-item";
@@ -1226,13 +1457,121 @@ function attachCardMore(
   pauseBtn.setAttribute("role", "menuitem");
   resumeBtn.setAttribute("role", "menuitem");
   delBtn.setAttribute("role", "menuitem");
-  const closeMore = (): void => {
-    more.classList.remove("is-open");
-    card.classList.remove("is-menu-open");
-    moreToggle.setAttribute("aria-expanded", "false");
+  const items = [pauseBtn, resumeBtn, delBtn];
+  let open = false;
+  let closeGen = 0;
+  let boxMotion: MotionCtrl | null = null;
+  let itemMotion: MotionCtrl[] = [];
+  const stopItems = () => {
+    for (const m of itemMotion) m.stop();
+    itemMotion = [];
+  };
+  const applyClosedChrome = () => {
+    shell.style.width = `${MORE_CLOSED}px`;
+    shell.style.height = `${MORE_CLOSED}px`;
+    shell.style.borderRadius = "12px";
+    moreMenu.style.opacity = "0";
+    moreMenu.style.pointerEvents = "none";
+    moreToggle.style.opacity = "1";
+    moreToggle.style.transform = "scale(1)";
+    moreToggle.style.pointerEvents = "auto";
+    for (const item of items) {
+      item.style.opacity = "0";
+      item.style.transform = "translateX(8px)";
+    }
+    ind.style.opacity = "0";
+    bar.style.opacity = "0";
+  };
+  const placeInd = (item: HTMLButtonElement | null) => {
+    if (!item || item.disabled) {
+      animate(ind, { opacity: 0 }, { duration: 0.12 });
+      animate(bar, { opacity: 0 }, { duration: 0.12 });
+      return;
+    }
+    const danger = item.classList.contains("pf-item--danger");
+    ind.classList.toggle("is-danger", danger);
+    bar.classList.toggle("is-danger", danger);
+    const top = item.offsetTop;
+    const h = item.offsetHeight;
+    animate(ind, { top, height: h, opacity: 1 }, INDICATOR_SPRING);
+    animate(bar, { top: top + Math.max(0, (h - 20) / 2), opacity: 1 }, INDICATOR_SPRING);
+  };
+  const playItems = (show: boolean) => {
+    stopItems();
+    const ease = reducedMotion();
+    items.forEach((item, i) => {
+      if (ease) {
+        item.style.opacity = show ? "1" : "0";
+        item.style.transform = show ? "none" : "translateX(8px)";
+        return;
+      }
+      if (show) {
+        item.style.opacity = "0";
+        item.style.transform = "translateX(8px)";
+      }
+      itemMotion.push(
+        animate(
+          item,
+          { opacity: show ? 1 : 0, x: show ? 0 : 8 },
+          {
+            delay: show ? 0.06 + i * 0.02 : 0,
+            duration: item.classList.contains("pf-item--danger") ? 0.12 : 0.15,
+            ease: EASE_OUT_QUINT,
+          },
+        ) as MotionCtrl,
+      );
+    });
+  };
+  const setOpen = (on: boolean, opts?: { snap?: boolean }): void => {
+    if (on === open) return;
+    open = on;
+    more.classList.toggle("is-open", on);
+    card.classList.toggle("is-menu-open", on);
+    moreToggle.setAttribute("aria-expanded", on ? "true" : "false");
+    if (on) {
+      document.addEventListener("click", onOutside, true);
+      document.addEventListener("keydown", onEsc, true);
+      const openH = Math.max(MORE_CLOSED, moreMenu.scrollHeight);
+      boxMotion = morphBox(shell, { w: MORE_OPEN_W, h: openH, radius: 14 }, boxMotion);
+      if (reducedMotion()) {
+        moreToggle.style.opacity = "0";
+        moreToggle.style.pointerEvents = "none";
+        moreMenu.style.opacity = "1";
+        moreMenu.style.pointerEvents = "auto";
+        playItems(true);
+      } else {
+        animate(moreToggle, { opacity: 0, scale: 0.8 }, { duration: 0.15 });
+        moreToggle.style.pointerEvents = "none";
+        animate(moreMenu, { opacity: 1 }, { duration: 0.2, delay: 0.08 });
+        moreMenu.style.pointerEvents = "auto";
+        playItems(true);
+      }
+      return;
+    }
     document.removeEventListener("click", onOutside, true);
     document.removeEventListener("keydown", onEsc, true);
+    placeInd(null);
+    if (opts?.snap || reducedMotion()) {
+      closeGen += 1;
+      boxMotion?.stop();
+      boxMotion = null;
+      stopItems();
+      applyClosedChrome();
+      return;
+    }
+    animate(moreToggle, { opacity: 1, scale: 1 }, { duration: 0.15, delay: 0.08 });
+    moreToggle.style.pointerEvents = "auto";
+    animate(moreMenu, { opacity: 0 }, { duration: 0.12 });
+    moreMenu.style.pointerEvents = "none";
+    playItems(false);
+    const my = ++closeGen;
+    boxMotion = morphBox(shell, { w: MORE_CLOSED, h: MORE_CLOSED, radius: 12 }, boxMotion);
+    void boxMotion.finished.then(() => {
+      if (my !== closeGen || open) return;
+      applyClosedChrome();
+    });
   };
+  const closeMore = (): void => setOpen(false);
   const onOutside = (ev: Event): void => {
     if (!more.contains(ev.target as Node)) closeMore();
   };
@@ -1244,19 +1583,21 @@ function attachCardMore(
     closeOpenProfiles();
     closeOpenTrays();
     closeOpenCardMenus(more);
-    if (more.classList.toggle("is-open")) {
-      card.classList.add("is-menu-open");
-      moreToggle.setAttribute("aria-expanded", "true");
-      document.addEventListener("click", onOutside, true);
-      document.addEventListener("keydown", onEsc, true);
-    } else {
-      closeMore();
-    }
+    setOpen(!open);
   });
-  for (const btn of [pauseBtn, resumeBtn, delBtn]) {
+  for (const btn of items) {
     btn.addEventListener("click", () => closeMore());
+    btn.addEventListener("mouseenter", () => {
+      if (open) placeInd(btn);
+    });
+    btn.addEventListener("mouseleave", () => {
+      if (open) placeInd(null);
+    });
   }
-  more.append(moreToggle, moreMenu);
+  applyClosedChrome();
+  cardMoreSetOpen.set(more, setOpen);
+  shell.append(moreToggle, moreMenu);
+  more.append(shell);
   return more;
 }
 
@@ -1301,32 +1642,48 @@ function trayEngineOnline(id: string): boolean {
   return true;
 }
 
-function traySummaryLabel(kind: TrayKind): string {
+const fmtInt: TickFmt = (v) => String(Math.round(Math.max(0, v)));
+const fmtPctTick: TickFmt = (v) => `${Math.round(Math.max(0, Math.min(100, v)))}%`;
+const fmtBytesTick: TickFmt = (v) => fmtBytes(Math.max(0, v));
+const fmtRateTick: TickFmt = (v) => fmtRate(v);
+
+function traySummaryTick(kind: TrayKind): { n: number | null; fmt: TickFmt } {
   const stats = lastSessionStats;
   if (kind === "engines") {
+    let ok: number | null = null;
+    let total = 0;
     if (stats?.engines_ok != null && stats.engines_total != null) {
-      return `${stats.engines_ok}/${stats.engines_total}`;
+      ok = stats.engines_ok;
+      total = stats.engines_total;
+    } else if (lastEngines?.length) {
+      ok = lastEngines.filter((e) => e.online !== false).length;
+      total = lastEngines.length;
     }
-    if (lastEngines?.length) {
-      const ok = lastEngines.filter((e) => e.online !== false).length;
-      return `${ok}/${lastEngines.length}`;
-    }
-    return "…";
+    return { n: ok, fmt: (v) => `${fmtInt(v)}/${total}` };
   }
-  if (kind === "torrents") return stats ? String(stats.torrents) : "…";
-  if (kind === "size") return fmtBytes(stats?.total_size ?? lastTotalContentSize);
-  if (kind === "dl") {
-    const n = (stats?.download_rate ?? 0) + fileUploadInboundTotal();
-    return fmtRate(n);
-  }
-  if (kind === "ul") return fmtRate(stats?.upload_rate);
-  return fmtBytes(stats?.total_uploaded);
+  if (kind === "torrents") return { n: stats ? stats.torrents : null, fmt: fmtInt };
+  if (kind === "size") return { n: stats?.total_size ?? lastTotalContentSize ?? null, fmt: fmtBytesTick };
+  if (kind === "dl") return { n: (stats?.download_rate ?? 0) + fileUploadInboundTotal(), fmt: fmtRateTick };
+  if (kind === "ul") return { n: stats?.upload_rate ?? 0, fmt: fmtRateTick };
+  return { n: stats?.total_uploaded ?? null, fmt: fmtBytesTick };
 }
 
-function trayRowBits(
-  kind: TrayKind,
-  id: string,
-): { value: string; sub: string; title: string } {
+function traySummaryLabel(kind: TrayKind): string {
+  const t = traySummaryTick(kind);
+  return t.n == null ? "…" : t.fmt(t.n);
+}
+
+type TrayBits = {
+  n: number | null;
+  fmt: TickFmt;
+  sub: string;
+  subN: number | null;
+  subFmt: TickFmt;
+  title: string;
+  online: boolean;
+};
+
+function trayRowBits(kind: TrayKind, id: string): TrayBits {
   const rec = lastEngines?.find((e) => e.id === id);
   const online = trayEngineOnline(id);
   const ses = lastSessionStats?.by_engine?.[id];
@@ -1335,93 +1692,140 @@ function trayRowBits(
     const pct = rec ? diskUsedPct(rec) : null;
     const torrents = ses && !ses.error ? ses.torrents : undefined;
     return {
-      value: pct != null ? `${pct}%` : torrents != null ? String(torrents) : "—",
+      n: pct ?? torrents ?? null,
+      fmt: pct != null ? fmtPctTick : fmtInt,
       sub: !online ? "нет связи" : pct != null ? "диск занят" : torrents != null ? "раздач" : "онлайн",
+      subN: null,
+      subFmt: fmtInt,
       title: rec?.disk_free != null ? `${id} · свободно ${fmtBytes(rec.disk_free)}` : id,
+      online,
     };
   }
   if (kind === "torrents") {
     const n = ses && !ses.error ? ses.torrents : undefined;
     const active = ses && !ses.error ? ses.torrents_active : undefined;
     return {
-      value: n != null ? String(n) : "—",
-      sub: !online ? "нет связи" : active != null ? `${active} актив.` : "раздач",
+      n: n ?? null,
+      fmt: fmtInt,
+      sub: !online ? "нет связи" : active != null ? "актив." : "раздач",
+      subN: !online ? null : (active ?? null),
+      subFmt: (v) => `${fmtInt(v)} актив.`,
       title: id,
+      online,
     };
   }
   if (kind === "size") {
     const bytes = lastEngineSizes?.[id];
     const n = ses && !ses.error ? ses.torrents : undefined;
     return {
-      value: bytes != null ? fmtBytes(bytes) : "—",
-      sub: !online ? "нет связи" : n != null ? `${n} раздач` : "объём",
+      n: bytes ?? null,
+      fmt: fmtBytesTick,
+      sub: !online ? "нет связи" : n != null ? "раздач" : "объём",
+      subN: !online ? null : (n ?? null),
+      subFmt: (v) => `${fmtInt(v)} раздач`,
       title: id,
+      online,
     };
   }
   if (kind === "dl") {
     const n = (ses && !ses.error ? ses.download_rate ?? 0 : 0) + files;
     return {
-      value: fmtRate(n),
-      sub: !online ? "нет связи" : files > 0 ? `файлы ${fmtRate(files)}` : "скачивание",
+      n,
+      fmt: fmtRateTick,
+      sub: !online ? "нет связи" : files > 0 ? "файлы" : "скачивание",
+      subN: !online || files <= 0 ? null : files,
+      subFmt: (v) => `файлы ${fmtRateTick(v)}`,
       title: id,
+      online,
     };
   }
   if (kind === "ul") {
     const n = ses && !ses.error ? ses.upload_rate : undefined;
     return {
-      value: fmtRate(n),
+      n: n ?? null,
+      fmt: fmtRateTick,
       sub: !online ? "нет связи" : "отдача",
+      subN: null,
+      subFmt: fmtInt,
       title: id,
+      online,
     };
   }
   const n = ses && !ses.error ? ses.total_uploaded : undefined;
   return {
-    value: fmtBytes(n),
+    n: n ?? null,
+    fmt: fmtBytesTick,
     sub: !online ? "нет связи" : "отдано",
+    subN: null,
+    subFmt: fmtInt,
     title: id,
+    online,
   };
+}
+
+function paintTrayRow(row: HTMLElement, kind: TrayKind, id: string): void {
+  const bits = trayRowBits(kind, id);
+  row.classList.toggle("tray-row--down", !bits.online);
+  row.title = bits.title;
+  const value = row.querySelector(".tray-row__value");
+  const sub = row.querySelector(".tray-row__sub");
+  if (value instanceof HTMLElement) tickNumber(value, bits.n, bits.fmt);
+  if (sub instanceof HTMLElement) {
+    if (bits.subN != null) tickNumber(sub, bits.subN, bits.subFmt);
+    else sub.textContent = bits.sub;
+  }
+}
+
+function makeTrayRow(host: HTMLElement, kind: TrayKind, id: string): HTMLElement {
+  const row = el("button", {
+    type: "button",
+    className: "tray-row",
+    role: "menuitem",
+    "data-engine": id,
+  });
+  row.append(
+    el("span", { className: "tray-row__icon" }, [icon("server")]),
+    el("span", { className: "tray-row__name" }, [id]),
+    el("span", { className: "tray-row__right" }, [
+      el("span", { className: "tray-row__value" }),
+      el("span", { className: "tray-row__sub" }),
+    ]),
+  );
+  row.addEventListener("click", () => {
+    traySetOpen.get(host)?.(false);
+    openTrayRow(kind, id);
+  });
+  paintTrayRow(row, kind, id);
+  return row;
 }
 
 function fillTray(host: HTMLElement): void {
   const kind = trayKindOf(host);
   const val = host.querySelector(".tray-toggle__val");
-  if (val) val.textContent = traySummaryLabel(kind);
+  if (val instanceof HTMLElement) {
+    const t = traySummaryTick(kind);
+    if (t.n == null) val.textContent = "…";
+    else tickNumber(val, t.n, t.fmt);
+  }
   const list = host.querySelector(".tray-menu__list");
   if (!list) return;
-  list.replaceChildren();
   const ids = trayEngineIds();
   if (!lastEngines && ids.length === 0) {
-    list.append(el("div", { className: "tray-empty" }, ["Загрузка…"]));
+    list.replaceChildren(el("div", { className: "tray-empty" }, ["Загрузка…"]));
     return;
   }
   if (ids.length === 0) {
-    list.append(el("div", { className: "tray-empty" }, ["Движки недоступны"]));
+    list.replaceChildren(el("div", { className: "tray-empty" }, ["Движки недоступны"]));
     return;
   }
-  for (const id of ids) {
-    const online = trayEngineOnline(id);
-    const bits = trayRowBits(kind, id);
-    const row = el("button", {
-      type: "button",
-      className: `tray-row${online ? "" : " tray-row--down"}`,
-      role: "menuitem",
-      title: bits.title,
-    });
-    row.append(
-      el("span", { className: "tray-row__icon" }, [icon("server")]),
-      el("span", { className: "tray-row__name" }, [id]),
-      el("span", { className: "tray-row__right" }, [
-        el("span", { className: "tray-row__value" }, [bits.value]),
-        el("span", { className: "tray-row__sub" }, [bits.sub]),
-      ]),
-    );
-    row.addEventListener("click", () => {
-      host.classList.remove("is-open");
-      host.querySelector(".tray-toggle")?.setAttribute("aria-expanded", "false");
-      openTrayRow(kind, id);
-    });
-    list.append(row);
+  const rows = [...list.querySelectorAll<HTMLElement>(":scope > .tray-row")];
+  const same = rows.length === ids.length && rows.every((row, i) => row.dataset.engine === ids[i]);
+  if (!same) {
+    list.replaceChildren();
+    for (const id of ids) list.append(makeTrayRow(host, kind, id));
+    return;
   }
+  for (const row of rows) paintTrayRow(row, kind, row.dataset.engine ?? "");
 }
 
 function openTrayRow(kind: TrayKind, id: string): void {
@@ -1453,6 +1857,27 @@ function fillAllTrays(): void {
   }
 }
 
+function placeTrayMenu(host: HTMLElement, menu: HTMLElement): void {
+  const toggle = host.querySelector(".tray-toggle");
+  if (!(toggle instanceof HTMLElement)) return;
+  const r = toggle.getBoundingClientRect();
+  const gap = 4;
+  const mw = Math.min(248, window.innerWidth - 16);
+  const idx = host.parentElement ? [...host.parentElement.children].indexOf(host) : 2;
+  menu.style.position = "fixed";
+  menu.style.width = `${mw}px`;
+  menu.style.top = `${Math.round(r.bottom + gap)}px`;
+  if (idx >= 0 && idx < 2) {
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - mw - 8);
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.right = "auto";
+  } else {
+    const right = Math.max(8, window.innerWidth - r.right);
+    menu.style.left = "auto";
+    menu.style.right = `${Math.round(right)}px`;
+  }
+}
+
 function paintTray(host: HTMLElement): void {
   const kind = trayKindOf(host);
   const spec = TRAY_SPEC[kind];
@@ -1464,7 +1889,7 @@ function paintTray(host: HTMLElement): void {
     className: "tray-toggle",
     "aria-haspopup": "true",
     "aria-expanded": "false",
-    title: spec.title,
+    "aria-label": spec.title,
   });
   toggle.append(icon(spec.ic), el("span", { className: "tray-toggle__val" }, [traySummaryLabel(kind)]));
 
@@ -1482,8 +1907,7 @@ function paintTray(host: HTMLElement): void {
     more.append(icon("more-horizontal"));
     more.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      host.classList.remove("is-open");
-      toggle.setAttribute("aria-expanded", "false");
+      traySetOpen.get(host)?.(false);
       spec.go?.();
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
@@ -1491,33 +1915,63 @@ function paintTray(host: HTMLElement): void {
   }
   menu.append(head, el("div", { className: "tray-menu__list" }));
 
-  const close = (): void => {
-    host.classList.remove("is-open");
-    toggle.setAttribute("aria-expanded", "false");
-    document.removeEventListener("click", onOutside, true);
-    document.removeEventListener("keydown", onEsc, true);
-  };
+  let menuMotion: MotionCtrl | null = null;
+  let menuTickGen = 0;
+  const onPlace = (): void => placeTrayMenu(host, menu);
   const onOutside = (ev: Event): void => {
-    if (!host.contains(ev.target as Node)) close();
+    if (!host.contains(ev.target as Node) && !menu.contains(ev.target as Node)) {
+      setOpen(false);
+    }
   };
   const onEsc = (ev: KeyboardEvent): void => {
-    if (ev.key === "Escape") close();
+    if (ev.key === "Escape") setOpen(false);
+  };
+  const setOpen = (on: boolean): void => {
+    const was = host.classList.contains("is-open");
+    if (on === was) return;
+    host.classList.toggle("is-open", on);
+    toggle.setAttribute("aria-expanded", on ? "true" : "false");
+    if (on) {
+      document.addEventListener("click", onOutside, true);
+      document.addEventListener("keydown", onEsc, true);
+      window.addEventListener("resize", onPlace);
+      window.addEventListener("scroll", onPlace, true);
+      placeTrayMenu(host, menu);
+      const my = ++menuTickGen;
+      menu.dataset.tickReveal = "1";
+      lockTickMinWidth(menu, ROW_TICK_SEL);
+      holdTicks(menu, ROW_TICK_SEL);
+      // rise 0: без translateY — иначе меню «проваливается» вниз от кнопки.
+      menuMotion = openPopPanel(menu, menuMotion, 0);
+      void menuMotion.finished.then(() => {
+        if (my !== menuTickGen || !host.classList.contains("is-open")) return;
+        delete menu.dataset.tickReveal;
+        releaseTicks(menu, ROW_TICK_SEL, 0.028);
+      });
+      void refreshTrayEngines();
+    } else {
+      menuTickGen += 1;
+      delete menu.dataset.tickReveal;
+      dropHold(menu, ROW_TICK_SEL);
+      document.removeEventListener("click", onOutside, true);
+      document.removeEventListener("keydown", onEsc, true);
+      window.removeEventListener("resize", onPlace);
+      window.removeEventListener("scroll", onPlace, true);
+      menuMotion = closePopPanel(menu, menuMotion);
+    }
+    const dock = host.closest(".stats-dock");
+    if (dock instanceof HTMLElement) statsDockRoll.get(dock)?.(on || dock.matches(":hover"));
   };
   toggle.addEventListener("click", (ev) => {
     ev.stopPropagation();
     closeOpenProfiles();
     closeOpenCardMenus();
     closeOpenTrays(host);
-    if (host.classList.toggle("is-open")) {
-      toggle.setAttribute("aria-expanded", "true");
-      document.addEventListener("click", onOutside, true);
-      document.addEventListener("keydown", onEsc, true);
-      void refreshTrayEngines();
-    } else {
-      close();
-    }
+    setOpen(!host.classList.contains("is-open"));
   });
-
+  menu.hidden = true;
+  applyPopProgress(menu, 0, 0);
+  traySetOpen.set(host, setOpen);
   host.append(toggle, menu);
   fillTray(host);
 }
@@ -1530,10 +1984,6 @@ function miniTrayControl(kind: TrayKind): HTMLElement {
   return host;
 }
 
-function statusTrayControl(): HTMLElement {
-  return miniTrayControl("engines");
-}
-
 function statsDock(metaEl: HTMLElement): HTMLElement {
   const traysInner = el("div", { className: "stats-dock__trays-inner" }, [
     miniTrayControl("torrents"),
@@ -1544,7 +1994,61 @@ function statsDock(metaEl: HTMLElement): HTMLElement {
     miniTrayControl("engines"),
   ]);
   const trays = el("div", { className: "stats-dock__trays" }, [traysInner]);
-  return el("div", { className: "stats-dock" }, [trays, metaEl]);
+  const dock = el("div", { className: "stats-dock" }, [trays, metaEl]);
+  let roll = 0;
+  let rollWidth = 0;
+  let rollMotion: MotionCtrl | null = null;
+  let rollTickGen = 0;
+  const applyRoll = (p: number) => {
+    roll = Math.min(1, Math.max(0, p));
+    const px = Math.round(roll * rollWidth);
+    trays.style.width = `${px}px`;
+    trays.style.maxWidth = `${px}px`;
+    trays.style.opacity = String(roll);
+    trays.style.pointerEvents = roll > 0.12 ? "auto" : "none";
+    dock.classList.toggle("is-expanded", roll > 0.08);
+  };
+  const setRoll = (on: boolean) => {
+    if (dock.querySelector(".tray.is-open")) on = true;
+    const to = on ? 1 : 0;
+    if (Math.abs(roll - to) < 0.001) return;
+    const from = roll;
+    const my = ++rollTickGen;
+    rollMotion?.stop();
+    if (on && from < 0.2) {
+      lockTickMinWidth(dock, CHIP_TICK_SEL);
+      rollWidth = Math.ceil(traysInner.scrollWidth);
+      holdTicks(dock, CHIP_TICK_SEL);
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      applyRoll(to);
+      if (!on) {
+        rollWidth = 0;
+        trays.style.width = "";
+        unlockTickMinWidth(dock, CHIP_TICK_SEL);
+      }
+      return;
+    }
+    rollMotion = animate(from, to, {
+      ...POP_SPRING,
+      onUpdate: (v) => applyRoll(Number(v)),
+    }) as MotionCtrl;
+    void rollMotion.finished.then(() => {
+      if (my !== rollTickGen) return;
+      if (on) {
+        releaseTicks(dock, CHIP_TICK_SEL);
+        return;
+      }
+      rollWidth = 0;
+      trays.style.width = "";
+      unlockTickMinWidth(dock, CHIP_TICK_SEL);
+    });
+  };
+  statsDockRoll.set(dock, setRoll);
+  dock.addEventListener("mouseenter", () => setRoll(true));
+  dock.addEventListener("mouseleave", () => setRoll(false));
+  applyRoll(0);
+  return dock;
 }
 
 function downscaleImage(dataUrl: string, max = 128): Promise<string> {
@@ -1587,7 +2091,12 @@ function openAvatarPicker(): void {
     "aria-modal": "true",
     "aria-labelledby": "avatar-dialog-title",
   });
-  const close = (): void => overlay.remove();
+  let dismiss: () => Promise<void> = async () => {
+    overlay.remove();
+  };
+  const close = (): void => {
+    void dismiss();
+  };
 
   const preview = el("div", { className: "avatar-preview" });
   const grid = el("div", { className: "avatar-grid" });
@@ -1704,7 +2213,7 @@ function openAvatarPicker(): void {
   overlay.addEventListener("click", (ev) => {
     if (ev.target === overlay) close();
   });
-  document.body.append(overlay);
+  dismiss = presentModal(overlay);
   renderPreview();
   renderGrid();
 }
@@ -1719,7 +2228,12 @@ function openPasswordDialog(opts: PasswordDialogOpts): void {
     "aria-modal": "true",
     "aria-labelledby": "password-dialog-title",
   });
-  const close = (): void => overlay.remove();
+  let dismiss: () => Promise<void> = async () => {
+    overlay.remove();
+  };
+  const close = (): void => {
+    void dismiss();
+  };
 
   const currentInput = el("input", {
     type: "password",
@@ -1819,7 +2333,7 @@ function openPasswordDialog(opts: PasswordDialogOpts): void {
   overlay.addEventListener("click", (ev) => {
     if (ev.target === overlay) close();
   });
-  document.body.append(overlay);
+  dismiss = presentModal(overlay);
   (opts.kind === "self" ? currentInput : nextInput).focus();
 }
 
@@ -2220,8 +2734,6 @@ function mountWanLimitsPanel(): HTMLElement {
 function mountEngineLimitsPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Лимиты движков"]);
-  const refreshBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Обновить"]);
-  head.append(refreshBtn);
   panel.append(head);
 
   const body = el("div", { className: "panel__body" });
@@ -2295,7 +2807,7 @@ function mountEngineLimitsPanel(): HTMLElement {
     }
   };
 
-  refreshBtn.addEventListener("click", () => void reload());
+  head.append(refreshIconBtn(() => void reload()));
   reloadEngineLimitsPanel = reload;
   void reload();
   return panel;
@@ -2585,8 +3097,6 @@ function mountPrivateMaintenancePanel(): HTMLElement {
 function mountQuotasPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Квоты по меткам"]);
-  const refreshBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Обновить"]);
-  head.append(refreshBtn);
   panel.append(head);
 
   const body = el("div", { className: "panel__body" });
@@ -2715,7 +3225,7 @@ function mountQuotasPanel(): HTMLElement {
     }
   });
 
-  refreshBtn.addEventListener("click", () => void reload());
+  head.append(refreshIconBtn(() => void reload()));
   void loadLabels();
   void reload();
   return panel;
@@ -3542,6 +4052,9 @@ function buildPrivateRow(data: TorrentDetailOut, onApplied: () => void): HTMLEle
 function showDeleteTorrentDialog(torrent: { id: number; display_name?: string }): Promise<DeleteTorrentChoice> {
   return new Promise((resolve) => {
     const overlay = el("div", { className: "modal-overlay" });
+    let dismiss: () => Promise<void> = async () => {
+      overlay.remove();
+    };
     const title = torrent.display_name?.trim() || `торрент #${torrent.id}`;
     const dialog = el("div", {
       className: "modal-dialog",
@@ -3560,9 +4073,8 @@ function showDeleteTorrentDialog(torrent: { id: number; display_name?: string })
           "И файлы с диска",
         ]);
         const finish = (c: DeleteTorrentChoice) => {
-          overlay.remove();
           document.removeEventListener("keydown", onKey);
-          resolve(c);
+          void dismiss().then(() => resolve(c));
         };
         cancelBtn.addEventListener("click", () => finish("cancel"));
         keepBtn.addEventListener("click", () => finish("torrent_only"));
@@ -3580,7 +4092,7 @@ function showDeleteTorrentDialog(torrent: { id: number; display_name?: string })
       })(),
     );
     overlay.append(dialog);
-    document.body.append(overlay);
+    dismiss = presentModal(overlay);
   });
 }
 
@@ -3914,16 +4426,27 @@ function updateLiveMeta(metaEl: HTMLElement, items: TorrentOut[]): void {
   );
 }
 
+function revealListContent(listEl: HTMLElement, next: HTMLElement, animate: boolean): void {
+  const fromSkeleton = Boolean(listEl.querySelector(".skeleton-list"));
+  listEl.replaceChildren(next);
+  if (!animate) return;
+  applyPopProgress(next, 0);
+  playPop(next, true);
+  if (fromSkeleton) {
+    staggerIn(next.querySelectorAll(".torrent-list > li, .ttable tbody tr"));
+  }
+}
+
 function paintTorrentList(refs: ListHostRefs, items: TorrentOut[], animate = false): void {
   const { listEl, countEl, metaEl } = refs;
   // Фильтрация/сортировка/пагинация — целиком на сервере (в т.ч. по «живым» полям из снимка).
   const shown = items;
   countEl.textContent = `${listTotal} ${listTotal === 1 ? "торрент" : listTotal < 5 ? "торрента" : "торрентов"}`;
   updateLiveMeta(metaEl, items);
-  listEl.replaceChildren();
   if (shown.length === 0) {
     const hasFilter = Boolean(listSearch || listStatusFilter || listLabelFilter || listEngineFilter);
-    listEl.append(
+    revealListContent(
+      listEl,
       el("div", { className: "empty-state" }, [
         el("div", { className: "empty-state__icon" }, [icon("inbox")]),
         el("p", { className: "empty-state__title" }, [
@@ -3933,6 +4456,7 @@ function paintTorrentList(refs: ListHostRefs, items: TorrentOut[], animate = fal
           listTotal === 0 && !hasFilter ? "Добавьте magnet, URL или .torrent ниже" : "Измените фильтр",
         ]),
       ]),
+      animate,
     );
     renderPager();
     return;
@@ -3949,13 +4473,11 @@ function paintTorrentList(refs: ListHostRefs, items: TorrentOut[], animate = fal
     selectionChanged?.();
   };
   if (listView === "table") {
-    const wrap = renderTorrentTable(shown, refresh, onSelectToggle);
-    if (animate) wrap.classList.add("ttable--enter");
-    listEl.append(wrap);
+    revealListContent(listEl, renderTorrentTable(shown, refresh, onSelectToggle), animate);
   } else {
-    const ul = el("ul", { className: `torrent-list${animate ? " torrent-list--enter" : ""}` });
+    const ul = el("ul", { className: "torrent-list" });
     for (const t of shown) ul.append(renderTorrentCard(t, refresh, onSelectToggle));
-    listEl.append(ul);
+    revealListContent(listEl, ul, animate);
   }
   renderPager();
 }
@@ -4107,12 +4629,8 @@ function applySessionStats(sessionBarHost: HTMLElement, stats?: SessionStats | n
 
 function startListSse(sessionBarHost: HTMLElement, onFallback: () => void): void {
   let url = `${API}/stream?interval=3`;
-  try {
-    const key = localStorage.getItem("seedingApiKey");
-    if (key) url += `&api_key=${encodeURIComponent(key)}`;
-  } catch {
-    /* ignore */
-  }
+  const streamKey = getApiKey();
+  if (streamKey) url += `&api_key=${encodeURIComponent(streamKey)}`;
   let es: EventSource;
   try {
     es = new EventSource(url);
@@ -4259,16 +4777,17 @@ function createLabelCombo(opts?: { storageKey?: string; persist?: boolean }): La
   return { control, value, refresh };
 }
 
-function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) => void): HTMLElement {
-  const panel = el("section", { className: "panel" });
-  panel.append(el("div", { className: "panel__head" }, ["Добавить торрент"]));
-  const body = el("div", { className: "panel__body" });
-
-  const tabs = el("div", { className: "tabs" });
-  const tabFile = el("button", { type: "button", className: "tab tab--active", "data-tab": "file" }, ["Файл"]);
-  const tabMagnet = el("button", { type: "button", className: "tab", "data-tab": "magnet" }, ["Magnet"]);
-  const tabUrl = el("button", { type: "button", className: "tab", "data-tab": "url" }, ["URL"]);
-  tabs.append(tabFile, tabMagnet, tabUrl);
+function mountAddPanel(
+  savePathDefault: string,
+  onAdded: (created?: TorrentOut) => void,
+  onClose: () => void,
+): HTMLElement {
+  const dialog = el("div", {
+    className: "modal-dialog intake",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "add-dialog-title",
+  });
 
   const magnetPanel = el("div", { className: "tab-panel", "data-panel": "magnet", hidden: "" });
   const urlPanel = el("div", { className: "tab-panel", "data-panel": "url", hidden: "" });
@@ -4276,10 +4795,12 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
 
   const magnetInput = el("input", {
     type: "text",
+    className: "intake-input",
     placeholder: "magnet:?xt=urn:btih:…",
   }) as HTMLInputElement;
   const urlInput = el("input", {
     type: "url",
+    className: "intake-input",
     placeholder: "https://example.com/file.torrent",
   }) as HTMLInputElement;
   const engineSelect = el("select", { className: "select" }) as HTMLSelectElement;
@@ -4292,25 +4813,40 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
   // Метка: общий комбобокс (готовые метки + «Новая метка…»), помнит выбор в ui.addLabel.
   const labelCombo = createLabelCombo({ storageKey: "ui.addLabel" });
   const nameInput = el("input", { type: "text", placeholder: "Название (необязательно)" }) as HTMLInputElement;
-  const torrentFile = el("input", { type: "file", accept: ".torrent", multiple: "", className: "file-input" }) as HTMLInputElement;
+  const drop = intakeDrop({
+    el: el as ElFn,
+    icon,
+    accept: ".torrent",
+    multiple: true,
+    title: "Перетащите .torrent",
+    hint: "Один или несколько файлов",
+    browse: "Выбрать файлы",
+    onFiles: () => undefined,
+  });
+  const torrentFile = drop.input;
 
   let activeTab: "magnet" | "url" | "file" = "file";
   const switchTab = (name: "magnet" | "url" | "file") => {
     activeTab = name;
-    tabMagnet.classList.toggle("tab--active", name === "magnet");
-    tabUrl.classList.toggle("tab--active", name === "url");
-    tabFile.classList.toggle("tab--active", name === "file");
     magnetPanel.hidden = name !== "magnet";
     urlPanel.hidden = name !== "url";
     filePanel.hidden = name !== "file";
   };
-  tabMagnet.addEventListener("click", () => switchTab("magnet"));
-  tabUrl.addEventListener("click", () => switchTab("url"));
-  tabFile.addEventListener("click", () => switchTab("file"));
+  const tabs = intakeSegment({
+    el: el as ElFn,
+    icon,
+    items: [
+      { id: "file" as const, icon: "upload", label: "Файл" },
+      { id: "magnet" as const, icon: "magnet", label: "Magnet" },
+      { id: "url" as const, icon: "link", label: "URL" },
+    ],
+    initial: "file",
+    onChange: switchTab,
+  });
 
   magnetPanel.append(field("Magnet-ссылка", magnetInput));
   urlPanel.append(field("Ссылка на .torrent", urlInput));
-  filePanel.append(field("Файлы .torrent", torrentFile, "Можно выбрать сразу несколько файлов"));
+  filePanel.append(drop.wrap);
 
   const advanced = el("details", { className: "advanced" });
   advanced.append(
@@ -4324,18 +4860,27 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     ),
   );
 
-  const addBtn = el("button", { type: "button", className: "btn btn--primary add-submit" }, [
+  const addBtn = el("button", { type: "button", className: "btn btn--primary" }, [
     "Добавить",
   ]) as HTMLButtonElement;
 
-  body.append(
-    tabs,
+  dialog.append(
+    intakeHead({
+      el: el as ElFn,
+      icon,
+      mark: "file-plus",
+      title: "Добавить торрент",
+      titleId: "add-dialog-title",
+      lead: "Файл, magnet или ссылка — и диск, куда класть раздачу.",
+      closeBtn: modalCloseBtn(onClose),
+    }),
+    tabs.el,
     filePanel,
     magnetPanel,
     urlPanel,
     field("Движок", engineSelect, "Куда сохранять — хранилище выбранного движка"),
     advanced,
-    el("div", { className: "btn-row" }, [addBtn]),
+    intakeFoot(el as ElFn, addBtn),
   );
 
   void (async () => {
@@ -4487,45 +5032,38 @@ function mountAddPanel(savePathDefault: string, onAdded: (created?: TorrentOut) 
     else void doFile();
   });
 
-  panel.append(body);
-  return panel;
+  return dialog;
 }
 
 function showAddTorrentDialog(savePathDefault: string, onAdded: (created?: TorrentOut) => void): void {
   const overlay = el("div", { className: "modal-overlay" });
-  const close = () => {
+  let dismiss: () => Promise<void> = async () => {
     overlay.remove();
+  };
+  const close = () => {
     document.removeEventListener("keydown", onKey);
+    void dismiss();
   };
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key === "Escape") close();
   };
 
-  const panel = mountAddPanel(savePathDefault, (created) => {
-    close();
-    onAdded(created);
-  });
-  panel.classList.add("modal-panel");
-
-  const closeBtn = el(
-    "button",
-    { type: "button", className: "btn btn--ghost btn--sm modal-close", "aria-label": "Закрыть" },
-    ["✕"],
+  const dialog = mountAddPanel(
+    savePathDefault,
+    (created) => {
+      close();
+      onAdded(created);
+    },
+    close,
   );
-  closeBtn.addEventListener("click", close);
-  const head = panel.querySelector(".panel__head");
-  if (head) {
-    head.classList.add("panel__head--with-action");
-    head.append(closeBtn);
-  }
 
   overlay.addEventListener("click", (ev) => {
     if (ev.target === overlay) close();
   });
   document.addEventListener("keydown", onKey);
 
-  overlay.append(panel);
-  document.body.append(overlay);
+  overlay.append(dialog);
+  dismiss = presentModal(overlay);
 }
 
 function field(label: string, input: HTMLElement, hint?: string): HTMLElement {
@@ -4535,17 +5073,115 @@ function field(label: string, input: HTMLElement, hint?: string): HTMLElement {
   return f;
 }
 
-/** Шапка модалки: заголовок + крестик закрытия, с разделительной чертой снизу (единый стиль). */
-function modalHead(title: string, titleId: string, onClose: () => void): HTMLElement {
-  const closeX = el(
+const SWITCH_SPRING = { type: "spring" as const, duration: 0.48, bounce: 0.22, restDelta: 0.4 };
+
+function bindLoginInputFeel(inp: HTMLInputElement): void {
+  let ctrl: MotionCtrl | null = null;
+  let from = 0;
+  const go = (pressed: boolean) => {
+    const to = pressed ? 1 : 0;
+    ctrl?.stop();
+    if (reducedMotion()) {
+      inp.style.transform = pressed ? "translateY(1px)" : "";
+      from = to;
+      return;
+    }
+    const start = from;
+    ctrl = animate(start, to, {
+      type: "spring",
+      duration: 0.36,
+      bounce: 0.16,
+      onUpdate: (v) => {
+        const t = Number(v);
+        inp.style.transform = t < 0.02 ? "" : `translateY(${(t * 1.5).toFixed(2)}px)`;
+      },
+    }) as MotionCtrl;
+    from = to;
+  };
+  inp.addEventListener("pointerdown", () => go(true));
+  inp.addEventListener("pointerup", () => go(false));
+  inp.addEventListener("pointercancel", () => go(false));
+  inp.addEventListener("blur", () => go(false));
+}
+
+/** Переключатель с пружиной. Нужен на входе и дальше в кабинете. */
+function switchControl(
+  label: string,
+  checked: boolean,
+  onChange?: (on: boolean) => void,
+): { el: HTMLButtonElement; get: () => boolean; set: (on: boolean, animated?: boolean) => void } {
+  const thumb = el("span", { className: "switch__thumb" });
+  const track = el("span", { className: "switch__track" }, [thumb]);
+  const btn = el(
     "button",
-    { type: "button", className: "btn btn--ghost btn--sm modal-close", "aria-label": "Закрыть" },
-    ["✕"],
-  );
-  closeX.addEventListener("click", onClose);
+    {
+      type: "button",
+      className: "switch",
+      role: "switch",
+      "aria-checked": checked ? "true" : "false",
+    },
+    [track, el("span", { className: "switch__text" }, [label])],
+  ) as HTMLButtonElement;
+
+  let on = checked;
+  let fromX = 0;
+  let motion: MotionCtrl | null = null;
+
+  const travel = (): number => {
+    const pad = Number.parseFloat(getComputedStyle(track).paddingLeft) || 3;
+    return Math.max(0, track.clientWidth - thumb.offsetWidth - pad * 2);
+  };
+
+  const apply = (next: boolean, animated: boolean): void => {
+    on = next;
+    btn.classList.toggle("is-on", next);
+    btn.setAttribute("aria-checked", next ? "true" : "false");
+    const to = next ? travel() : 0;
+    motion?.stop();
+    if (!animated || reducedMotion() || !btn.isConnected) {
+      thumb.style.transform = `translateX(${to}px)`;
+      fromX = to;
+      return;
+    }
+    const start = fromX;
+    motion = animate(start, to, {
+      ...SWITCH_SPRING,
+      onUpdate: (v) => {
+        thumb.style.transform = `translateX(${Number(v).toFixed(2)}px)`;
+      },
+    }) as MotionCtrl;
+    fromX = to;
+  };
+
+  btn.addEventListener("click", () => {
+    apply(!on, true);
+    onChange?.(on);
+  });
+
+  return {
+    el: btn,
+    get: () => on,
+    set: (value, animated = true) => apply(value, animated),
+  };
+}
+
+/** Крестик закрытия попапа — одна иконка и размер во всех модалках. */
+function modalCloseBtn(onClose: () => void): HTMLButtonElement {
+  const btn = el(
+    "button",
+    { type: "button", className: "modal-close", "aria-label": "Закрыть" },
+    [icon("x")],
+  ) as HTMLButtonElement;
+  btn.addEventListener("click", onClose);
+  return btn;
+}
+
+/** Шапка модалки: заголовок + крестик, с разделительной чертой снизу. */
+function modalHead(title: string, titleId: string, onClose: () => void, extra?: HTMLElement): HTMLElement {
+  const close = modalCloseBtn(onClose);
   return el("div", { className: "modal-head panel__head--with-action" }, [
     el("h2", { id: titleId, className: "modal-title" }, [title]),
-    closeX,
+    extra ? el("div", { className: "modal-head__actions" }, [extra, close]) : close,
   ]);
 }
 
@@ -4623,6 +5259,25 @@ function buildTorrentPicker(
   return { el: wrap, getId: () => chosenId };
 }
 
+function updateChangeBtn(label: string, onClick: () => void): HTMLButtonElement {
+  const btn = el("button", { type: "button", className: "btn btn--ghost btn--sm update-row__change" }, [
+    label,
+  ]) as HTMLButtonElement;
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+function updateDestBlock(t: TorrentOut, action: HTMLElement): HTMLElement {
+  return el("div", { className: "update-row__dest" }, [
+    el("div", { className: "update-row__hit" }, [
+      el("div", { className: "update-row__k" }, ["Заменю"]),
+      el("div", { className: "update-row__dest-name" }, [t.display_name]),
+      el("div", { className: "update-row__dest-meta" }, [`${t.engine_id} · ${t.save_path}`]),
+    ]),
+    action,
+  ]);
+}
+
 /** Строка одного файла в диалоге обновления: автосовпадение / выбор / ручной поиск. */
 function buildUpdateRow(
   file: File,
@@ -4630,53 +5285,61 @@ function buildUpdateRow(
   onChange: () => void,
 ): { el: HTMLElement; getTargetId: () => number | null } {
   const row = el("div", { className: "update-row" });
-  row.append(el("div", { className: "update-row__file" }, [file.name]));
-  const targetHost = el("div", { className: "update-row__target" });
-  row.append(targetHost);
+  const status = el("span", { className: "badge update-row__status" });
+  const head = el("div", { className: "update-row__head" }, [
+    el("span", { className: "update-row__mark", "aria-hidden": "true" }, [icon("file")]),
+    el("div", { className: "update-row__file" }, [file.name]),
+    status,
+  ]);
+  const body = el("div", { className: "update-row__body" });
+  row.append(head, body);
 
   const candLine = (t: TorrentOut) => `${t.display_name} · ${t.engine_id} · ${t.save_path}`;
   let getId: () => number | null = () => null;
 
+  const paintStatus = (kind: "seeding" | "queued" | "paused", text: string) => {
+    status.className = `badge badge--${kind} update-row__status`;
+    status.textContent = text;
+  };
+
   const showPicker = () => {
+    paintStatus("paused", "вручную");
     const picker = buildTorrentPicker(stripTorrentExt(file.name), onChange);
-    targetHost.replaceChildren(
-      el("span", { className: "update-row__match" }, ["Выберите раздачу для замены:"]),
+    body.replaceChildren(
+      el("div", { className: "update-row__k" }, ["Выберите раздачу"]),
       picker.el,
     );
+    staggerIn(body.children, 0.04);
     getId = picker.getId;
     onChange();
   };
 
   if (candidates.length === 1) {
     const t = candidates[0];
-    const changeLink = el("a", { href: "#", className: "update-row__change" }, ["изменить"]);
-    changeLink.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      showPicker();
-    });
-    targetHost.append(
-      el("span", { className: "badge badge--seeding" }, ["найдено"]),
-      el("span", { className: "update-row__match" }, [`→ ${candLine(t)}`]),
-      changeLink,
-    );
+    paintStatus("seeding", "найдено");
+    body.append(updateDestBlock(t, updateChangeBtn("Изменить", showPicker)));
     getId = () => t.id;
   } else if (candidates.length > 1) {
-    const sel = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
+    const t0 = candidates[0];
+    paintStatus("queued", `совпадений: ${candidates.length}`);
+    const sel = el("select", { className: "list-filter__select update-row__select" }) as HTMLSelectElement;
     for (const t of candidates) sel.append(el("option", { value: String(t.id) }, [candLine(t)]));
-    const changeLink = el("a", { href: "#", className: "update-row__change" }, ["вручную"]);
-    changeLink.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      showPicker();
-    });
-    targetHost.append(
-      el("span", { className: "badge badge--queued" }, [`совпадений: ${candidates.length}`]),
+    const hit = el("div", { className: "update-row__hit" }, [
+      el("div", { className: "update-row__k" }, ["Заменю одну из"]),
       sel,
-      changeLink,
-    );
+      el("div", { className: "update-row__dest-meta" }, [`${t0.engine_id} · ${t0.save_path}`]),
+    ]);
+    sel.addEventListener("change", () => {
+      const t = candidates.find((c) => String(c.id) === sel.value);
+      const meta = hit.querySelector(".update-row__dest-meta");
+      if (t && meta) meta.textContent = `${t.engine_id} · ${t.save_path}`;
+      onChange();
+    });
+    body.append(el("div", { className: "update-row__dest" }, [hit, updateChangeBtn("Вручную", showPicker)]));
     getId = () => (sel.value ? Number(sel.value) : null);
   } else {
-    targetHost.append(el("span", { className: "badge badge--paused" }, ["не найдено"]));
     showPicker();
+    paintStatus("paused", "не найдено");
   }
 
   return { el: row, getTargetId: () => getId() };
@@ -4686,51 +5349,35 @@ function buildUpdateRow(
     с сохранением движка/пути/скачанного (recheck докачивает только новое). */
 function showUpdateTorrentDialog(onDone: () => void): void {
   const overlay = el("div", { className: "modal-overlay" });
+  let dismiss: () => Promise<void> = async () => {
+    overlay.remove();
+  };
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key === "Escape") close();
   };
   const close = () => {
-    overlay.remove();
     document.removeEventListener("keydown", onKey);
+    void dismiss();
   };
 
-  const panel = el("div", { className: "panel modal-panel update-panel" });
-  const closeBtn = el(
-    "button",
-    { type: "button", className: "btn btn--ghost btn--sm modal-close", "aria-label": "Закрыть" },
-    ["✕"],
-  );
-  closeBtn.addEventListener("click", close);
-  panel.append(el("div", { className: "panel__head panel__head--with-action" }, ["Обновить торрент", closeBtn]));
-  const body = el("div", { className: "panel__body" });
-  panel.append(body);
-  body.append(
-    el("p", { className: "field__hint update-intro" }, [
-      "Загрузите новый .torrent (например, сезон с новой серией). Найду старую раздачу по имени " +
-        "и заменю её — движок, путь и уже скачанное сохранятся, докачается только новое. " +
-        "Если совпадение не найдено — выберите раздачу вручную.",
-    ]),
-  );
-
-  const fileInput = el("input", { type: "file", accept: ".torrent", multiple: "", className: "file-input" }) as HTMLInputElement;
-  body.append(field("Новые .torrent-файлы", fileInput));
-
+  const dialog = el("div", {
+    className: "modal-dialog intake modal-dialog--wide",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "update-dialog-title",
+  });
   const rowsHost = el("div", { className: "update-rows" });
-  body.append(rowsHost);
-
-  const replaceBtn = el("button", { type: "button", className: "btn btn--primary btn--sm" }, [
+  const replaceBtn = el("button", { type: "button", className: "btn btn--primary" }, [
     "Заменить",
   ]) as HTMLButtonElement;
   replaceBtn.disabled = true;
-  body.append(el("div", { className: "update-footer" }, [replaceBtn]));
 
   let rows: { file: File; getTargetId: () => number | null }[] = [];
   const syncReplaceBtn = () => {
     replaceBtn.disabled = rows.length === 0 || !rows.some((r) => r.getTargetId() != null);
   };
 
-  fileInput.addEventListener("change", async () => {
-    const files = fileInput.files ? Array.from(fileInput.files) : [];
+  const applyFiles = async (files: File[]) => {
     rows = [];
     rowsHost.replaceChildren();
     if (files.length === 0) {
@@ -4765,8 +5412,37 @@ function showUpdateTorrentDialog(onDone: () => void): void {
       rows.push({ file: f, getTargetId: ctl.getTargetId });
       rowsHost.append(ctl.el);
     });
+    staggerIn(rowsHost.children, 0.045);
     syncReplaceBtn();
+  };
+
+  const drop = intakeDrop({
+    el: el as ElFn,
+    icon,
+    accept: ".torrent",
+    multiple: true,
+    title: "Перетащите новый .torrent",
+    hint: "Сезон с новой серией — найду старую раздачу",
+    browse: "Выбрать файлы",
+    onFiles: (files) => {
+      void applyFiles(files);
+    },
   });
+
+  dialog.append(
+    intakeHead({
+      el: el as ElFn,
+      icon,
+      mark: "swap",
+      title: "Обновить торрент",
+      titleId: "update-dialog-title",
+      lead: "Новый .torrent вместо старой раздачи. Движок, путь и скачанное сохранятся.",
+      closeBtn: modalCloseBtn(close),
+    }),
+    drop.wrap,
+    rowsHost,
+    intakeFoot(el as ElFn, replaceBtn),
+  );
 
   replaceBtn.addEventListener("click", async () => {
     const tasks = rows
@@ -4808,8 +5484,8 @@ function showUpdateTorrentDialog(onDone: () => void): void {
     if (ev.target === overlay) close();
   });
   document.addEventListener("keydown", onKey);
-  overlay.append(panel);
-  document.body.append(overlay);
+  overlay.append(dialog);
+  dismiss = presentModal(overlay);
 }
 
 function mountListShell(root: HTMLElement): void {
@@ -4849,19 +5525,487 @@ function mountListShell(root: HTMLElement): void {
   };
 
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
-  const searchInput = el("input", {
-    type: "search",
-    placeholder: "Поиск по названию, метке, hash…",
-    className: "list-filter__search",
-    value: listSearch,
-  }) as HTMLInputElement;
-  searchInput.addEventListener("input", () => {
-    listSearch = searchInput.value;
-    lsSet("ui.search", listSearch);
-    syncReset();
+  let searchListDebounce: ReturnType<typeof setTimeout> | null = null;
+  const clearSearchTimers = () => {
     if (searchDebounce) clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(() => reloadFromFilters(), 300);
+    if (searchListDebounce) clearTimeout(searchListDebounce);
+    searchDebounce = null;
+    searchListDebounce = null;
+  };
+  const SEARCH_STATUS: Record<string, string> = {
+    seeding: "Раздача",
+    downloading: "Загрузка",
+    paused: "Пауза",
+  };
+  const searchInput = el("input", {
+    type: "text",
+    placeholder: "Поиск…",
+    className: "search-dock__input",
+    value: listSearch,
+    "aria-label": "Поиск",
+    autocomplete: "off",
+    spellcheck: "false",
+  }) as HTMLInputElement;
+  const searchToggle = el(
+    "button",
+    {
+      type: "button",
+      className: "search-dock__toggle",
+      title: "Поиск",
+      "aria-label": "Поиск",
+      "aria-expanded": "false",
+    },
+    [icon("search")],
+  );
+  const searchClose = el(
+    "button",
+    {
+      type: "button",
+      className: "search-dock__close",
+      title: "Очистить и закрыть",
+      "aria-label": "Очистить и закрыть",
+    },
+    [icon("x")],
+  );
+  const searchRow = el("div", { className: "search-dock__row" }, [
+    searchInput,
+    searchClose,
+  ]);
+  const searchForm = el("form", { className: "search-dock__shell", role: "search" }, [searchRow]);
+  const searchResults = el("div", { className: "search-palette__results", role: "listbox" });
+  const searchPanel = el("div", {
+    className: "search-palette__panel",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-hidden": "true",
+    "aria-label": "Поиск",
+  }, [searchResults]);
+  const searchScrim = el("div", { className: "search-palette__scrim" });
+  const searchLayer = el("div", { className: "search-palette" }, [searchScrim]);
+  const searchDock = el("div", { className: "search-dock" }, [searchToggle, searchForm, searchPanel]);
+  const syncSearchToggle = () => {
+    const on = Boolean(listSearch.trim());
+    searchToggle.classList.toggle("is-active", on);
+    searchDock.classList.toggle("has-query", on);
+  };
+  type SearchAction =
+    | { kind: "torrent"; t: TorrentOut }
+    | { kind: "query"; q: string }
+    | { kind: "recent"; item: SearchHistoryItem }
+    | {
+        kind: "title";
+        title: string;
+        pretty: string;
+        season: number | null;
+        query: string;
+        count: number;
+        label: string;
+      };
+  let searchOpen = false;
+  let searchActions: SearchAction[] = [];
+  let searchShowingHistory = false;
+  let searchActive = 0;
+  let searchFetchGen = 0;
+  type SearchAnim = { stop: () => void; finished: Promise<unknown> };
+  let searchMotion: SearchAnim[] = [];
+  const stopSearchMotion = () => {
+    for (const a of searchMotion) a.stop();
+    searchMotion = [];
+  };
+  const searchClosedW = () => 2.4 * 16;
+  const searchOpenW = () => {
+    if (window.innerWidth <= 640) return Math.max(200, window.innerWidth - 24);
+    return 20 * 16;
+  };
+  let searchWidth = searchClosedW();
+  let searchPanelReady = false;
+  const searchProgress = (w: number) => {
+    const a = searchClosedW();
+    const b = searchOpenW();
+    return Math.min(1, Math.max(0, (w - a) / (b - a || 1)));
+  };
+  const paintPanelFrame = (p: number) => {
+    if (!searchOpen || !searchPanelReady) {
+      searchPanel.style.opacity = "0";
+      searchPanel.style.transform = "translateZ(0) translateY(-12px)";
+      searchPanel.style.pointerEvents = "none";
+      return;
+    }
+    searchPanel.style.opacity = String(p);
+    searchPanel.style.transform = `translateZ(0) translateY(${((1 - p) * -12).toFixed(2)}px)`;
+    searchPanel.style.pointerEvents = "auto";
+  };
+  const sizeSearchPanel = () => {
+    const r = searchDock.getBoundingClientRect();
+    const width = Math.min(36 * 16, window.innerWidth - Math.max(8, r.left) - 8);
+    searchPanel.style.width = `${Math.max(width, 280)}px`;
+    searchPanel.style.maxHeight = `${Math.min(28 * 16, window.innerHeight - r.bottom - 16)}px`;
+  };
+  const restSearchChrome = () => {
+    searchWidth = searchClosedW();
+    searchForm.style.width = `${searchWidth}px`;
+    searchPanel.style.opacity = "";
+    searchPanel.style.transform = "";
+    searchScrim.style.opacity = "";
+    searchPanelReady = false;
+  };
+  const applySearchWidth = (w: number) => {
+    searchWidth = w;
+    searchForm.style.width = `${w}px`;
+    const p = searchProgress(w);
+    searchScrim.style.opacity = String(Math.min(1, p * 1.1));
+    paintPanelFrame(p);
+  };
+  const markPanelReady = () => {
+    searchPanelReady = true;
+    paintPanelFrame(searchProgress(searchWidth));
+  };
+  const hitsFromList = (): TorrentOut[] => {
+    const q = searchInput.value.trim().toLowerCase();
+    const src = q
+      ? lastListItems.filter((t) => {
+          const name = t.display_name.toLowerCase();
+          const label = (t.label || "").toLowerCase();
+          return name.includes(q) || label.includes(q) || t.engine_id.toLowerCase().includes(q);
+        })
+      : lastListItems;
+    return src.slice(0, 24);
+  };
+  const playSearch = async (open: boolean): Promise<void> => {
+    stopSearchMotion();
+    sizeSearchPanel();
+    const to = open ? searchOpenW() : searchClosedW();
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      applySearchWidth(to);
+      return;
+    }
+    const ctrl = animate(searchWidth, to, {
+      type: "spring",
+      duration: 0.58,
+      bounce: 0.03,
+      restDelta: 0.4,
+      onUpdate: applySearchWidth,
+    }) as SearchAnim;
+    searchMotion = [ctrl];
+    await ctrl.finished.catch(() => undefined);
+  };
+  const onSearchLayout = () => {
+    if (!searchOpen) return;
+    applySearchWidth(searchOpenW());
+    sizeSearchPanel();
+  };
+  const applySearchQuery = (value: string) => {
+    listSearch = value;
+    lsSet("ui.search", listSearch);
+    syncSearchToggle();
+    syncReset();
+  };
+  const historyActions = (): SearchAction[] =>
+    readSearchHistory().map((h) => {
+      if (h.torrentId != null) {
+        const live = lastListItems.find((t) => t.id === h.torrentId);
+        if (live) return { kind: "torrent", t: live };
+        return { kind: "recent", item: h };
+      }
+      return { kind: "query", q: h.q };
+    });
+  const runSearchAction = (a: SearchAction) => {
+    if (a.kind === "title") {
+      searchInput.value = a.query;
+      applySearchQuery(a.query);
+      rememberSearch({ q: a.query, name: a.pretty });
+      clearSearchTimers();
+      setSearchOpen(false);
+      reloadFromFilters();
+      return;
+    }
+    if (a.kind === "query") {
+      searchInput.value = a.q;
+      applySearchQuery(a.q);
+      rememberSearch({ q: a.q });
+      clearSearchTimers();
+      reloadFromFilters();
+      setSearchOpen(false);
+      return;
+    }
+    const recent = a.kind === "recent" ? a.item : null;
+    const t = a.kind === "torrent" ? a.t : null;
+    const id = t?.id ?? recent?.torrentId;
+    if (id == null) return;
+    rememberSearch({
+      q: searchInput.value.trim() || t?.display_name || recent?.name || recent?.q || "",
+      torrentId: id,
+      name: t?.display_name || recent?.name,
+      engine: t?.engine_id || recent?.engine,
+      status: t?.status || recent?.status,
+      label: t?.label || recent?.label,
+    });
+    applySearchQuery(searchInput.value);
+    clearSearchTimers();
+    setSearchOpen(false);
+    setHashDetail(id);
+  };
+  const paintSearchActions = (actions: SearchAction[], opts?: { scroll?: boolean; motion?: boolean }) => {
+    searchActions = actions;
+    if (searchActive >= actions.length) searchActive = actions.length ? actions.length - 1 : 0;
+    searchResults.replaceChildren();
+    if (actions.length === 0) {
+      const empty = searchInput.value.trim()
+        ? "Ничего не найдено"
+        : "Здесь появятся недавние поиски";
+      searchResults.append(el("div", { className: "search-palette__empty" }, [empty]));
+      if (opts?.motion !== false) staggerIn(searchResults.children);
+      if (searchOpen) markPanelReady();
+      return;
+    }
+    const markActive = () => {
+      const items = searchResults.querySelectorAll(".search-palette__item");
+      items.forEach((n, i) => n.classList.toggle("is-active", i === searchActive));
+    };
+    actions.forEach((a, i) => {
+      const kids: (string | Node)[] = [];
+      if (a.kind === "title") {
+        const season = formatSeason(a.season);
+        kids.push(
+          el("span", { className: "search-palette__title" }, [a.pretty]),
+          el("span", { className: "search-palette__desc" }, [
+            a.label ? `${formatReleaseCount(a.count)} · ${a.label}` : formatReleaseCount(a.count),
+          ]),
+          el("span", { className: "search-palette__cat" }, [season || "без сезона"]),
+        );
+      } else if (a.kind === "query") {
+        const parsed = parseReleaseName(a.q);
+        const season = formatSeason(parsed.season);
+        kids.push(
+          el("span", { className: "search-palette__title" }, [parsed.pretty || a.q]),
+          el("span", { className: "search-palette__desc" }, ["Недавний поиск"]),
+          el("span", { className: "search-palette__cat" }, [season || icon("clock")]),
+        );
+      } else if (a.kind === "torrent") {
+        kids.push(
+          el("span", { className: "search-palette__title" }, [a.t.display_name]),
+          el("span", { className: "search-palette__desc" }, [
+            `${SEARCH_STATUS[a.t.status] ?? a.t.status} · ${a.t.engine_id}`,
+          ]),
+          el("span", { className: "search-palette__cat" }, [a.t.label || "без метки"]),
+        );
+      } else {
+        kids.push(
+          el("span", { className: "search-palette__title" }, [a.item.name || a.item.q]),
+          el("span", { className: "search-palette__desc" }, [
+            a.item.engine
+              ? `${SEARCH_STATUS[a.item.status ?? ""] ?? "Недавняя раздача"} · ${a.item.engine}`
+              : "Недавняя раздача",
+          ]),
+          el("span", { className: "search-palette__cat" }, [a.item.label || "без метки"]),
+        );
+      }
+      const row = el("button", {
+        type: "button",
+        className: `search-palette__item${i === searchActive ? " is-active" : ""}`,
+        role: "option",
+        "aria-selected": i === searchActive ? "true" : "false",
+      }, kids);
+      row.addEventListener("mouseenter", () => {
+        searchActive = i;
+        markActive();
+      });
+      row.addEventListener("click", () => runSearchAction(a));
+      if (!searchShowingHistory) {
+        searchResults.append(row);
+        return;
+      }
+      const forget = el("button", {
+        type: "button",
+        className: "search-palette__forget",
+        title: "Убрать из истории",
+        "aria-label": "Убрать из истории",
+      }, [icon("x")]);
+      forget.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (a.kind === "query" || a.kind === "title") forgetSearch({ q: a.kind === "query" ? a.q : a.query });
+        else if (a.kind === "torrent") forgetSearch({ torrentId: a.t.id });
+        else forgetSearch({ torrentId: a.item.torrentId, q: a.item.q });
+        showSearchPalette();
+      });
+      const wrap = el("div", { className: "search-palette__row" }, [row, forget]);
+      wrap.addEventListener("mouseenter", () => {
+        searchActive = i;
+        markActive();
+      });
+      searchResults.append(wrap);
+    });
+    if (searchShowingHistory) {
+      const clear = el("button", {
+        type: "button",
+        className: "search-palette__clear",
+      }, ["Очистить историю"]);
+      clear.addEventListener("click", () => {
+        clearSearchHistory();
+        showSearchPalette();
+      });
+      searchResults.append(clear);
+    }
+    if (opts?.scroll !== false) {
+      const activeEl = searchResults.querySelectorAll(".search-palette__item")[searchActive] as
+        | HTMLElement
+        | undefined;
+      activeEl?.scrollIntoView({ block: "nearest" });
+    }
+    if (opts?.motion !== false) staggerIn(searchResults.children);
+    if (searchOpen) markPanelReady();
+  };
+  const paintSearchHits = (items: TorrentOut[], opts?: { scroll?: boolean }) => {
+    paintSearchActions(
+      groupReleasesBySeason(items)
+        .slice(0, 16)
+        .map((g) => ({ kind: "title" as const, ...g })),
+      opts,
+    );
+  };
+  const showSearchPalette = () => {
+    const q = searchInput.value.trim();
+    if (!q) {
+      searchShowingHistory = true;
+      searchActive = 0;
+      paintSearchActions(historyActions(), { scroll: false });
+      return;
+    }
+    searchShowingHistory = false;
+    searchActive = 0;
+    paintSearchHits(hitsFromList(), { scroll: false });
+    void fetchSearchHits();
+  };
+  const fetchSearchHits = async () => {
+    const q = searchInput.value.trim();
+    if (!q) {
+      showSearchPalette();
+      return;
+    }
+    const gen = ++searchFetchGen;
+    const params = new URLSearchParams({ limit: "80", sort: "name", q });
+    try {
+      const page = await fetchJson<TorrentPageOut>(`/torrents?${params.toString()}`);
+      if (gen !== searchFetchGen || !searchOpen) return;
+      searchShowingHistory = false;
+      searchActive = 0;
+      paintSearchHits(page.items, { scroll: false });
+    } catch (e) {
+      if (gen !== searchFetchGen || !searchOpen) return;
+      searchResults.replaceChildren(
+        el("div", { className: "search-palette__empty" }, [
+          e instanceof Error ? e.message : "Не удалось найти",
+        ]),
+      );
+      if (searchOpen) markPanelReady();
+    }
+  };
+  const bindSearchEsc = () => {
+    if (onSearchOverlayEsc) return;
+    onSearchOverlayEsc = (ev) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        setSearchOpen(false);
+        return;
+      }
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        if (searchActions.length === 0) return;
+        searchActive =
+          ev.key === "ArrowDown"
+            ? (searchActive + 1) % searchActions.length
+            : (searchActive - 1 + searchActions.length) % searchActions.length;
+        paintSearchActions(searchActions, { motion: false });
+      }
+    };
+    document.addEventListener("keydown", onSearchOverlayEsc);
+  };
+  const unbindSearchEsc = () => {
+    if (!onSearchOverlayEsc) return;
+    document.removeEventListener("keydown", onSearchOverlayEsc);
+    onSearchOverlayEsc = null;
+  };
+  const setSearchOpen = (open: boolean, opts?: { clear?: boolean; focus?: boolean }): void => {
+    if (!open && !searchOpen) {
+      if (opts?.clear && (listSearch || searchInput.value)) {
+        searchInput.value = "";
+        applySearchQuery("");
+        clearSearchTimers();
+        reloadFromFilters();
+      }
+      syncSearchToggle();
+      return;
+    }
+    searchOpen = open;
+    searchToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    searchPanel.setAttribute("aria-hidden", open ? "false" : "true");
+    if (open) {
+      searchPanelReady = false;
+      searchPanel.style.opacity = "0";
+      showSearchPalette();
+      searchDock.classList.add("is-open");
+      if (!searchLayer.isConnected) document.body.append(searchLayer);
+      searchLayer.classList.add("is-open");
+      window.addEventListener("resize", onSearchLayout);
+      window.addEventListener("scroll", onSearchLayout, true);
+      bindSearchEsc();
+      void playSearch(true);
+      if (opts?.focus !== false) window.setTimeout(() => searchInput.focus(), 180);
+    } else {
+      window.removeEventListener("resize", onSearchLayout);
+      window.removeEventListener("scroll", onSearchLayout, true);
+      unbindSearchEsc();
+      searchPanelReady = false;
+      paintPanelFrame(0);
+      searchLayer.classList.remove("is-open");
+      searchScrim.style.opacity = "0";
+      void playSearch(false).then(() => {
+        if (searchOpen) return;
+        searchDock.classList.remove("is-open");
+        searchLayer.remove();
+        restSearchChrome();
+      });
+      if (opts?.clear && (listSearch || searchInput.value)) {
+        searchInput.value = "";
+        applySearchQuery("");
+        clearSearchTimers();
+        reloadFromFilters();
+      }
+    }
+    syncSearchToggle();
+  };
+  searchInput.addEventListener("input", () => {
+    applySearchQuery(searchInput.value);
+    if (!searchInput.value.trim()) {
+      clearSearchTimers();
+      showSearchPalette();
+      reloadFromFilters();
+      return;
+    }
+    paintSearchHits(hitsFromList(), { scroll: false });
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => void fetchSearchHits(), 160);
+    if (searchListDebounce) clearTimeout(searchListDebounce);
+    searchListDebounce = setTimeout(() => reloadFromFilters(), 400);
   });
+  searchScrim.addEventListener("click", () => setSearchOpen(false));
+  searchToggle.addEventListener("click", () => setSearchOpen(!searchOpen));
+  searchClose.addEventListener("click", () => setSearchOpen(false, { clear: true }));
+  searchForm.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    if (searchActions[searchActive]) {
+      runSearchAction(searchActions[searchActive]);
+      return;
+    }
+    const q = searchInput.value.trim();
+    if (q) rememberSearch({ q });
+    clearSearchTimers();
+    applySearchQuery(searchInput.value);
+    reloadFromFilters();
+    setSearchOpen(false);
+  });
+  syncSearchToggle();
 
   const statusSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
   for (const [val, label] of [
@@ -4934,32 +6078,38 @@ function mountListShell(root: HTMLElement): void {
     syncReset();
   });
 
-  const sortSelect = el("select", { className: "list-filter__select sort-select" }) as HTMLSelectElement;
+  const sortSelect = el("select", {
+    className: "list-filter__select sort-select",
+    title: "Сортировка",
+    "aria-label": "Сортировка",
+  }) as HTMLSelectElement;
   for (const [val, label] of [
-    ["name", "Сорт: имя"],
-    ["added", "Сорт: новые"],
-    ["up", "Сорт: скорость"],
-    ["down", "Сорт: скачивание"],
-    ["peers", "Сорт: пиры"],
-    ["uploaded", "Сорт: раздано всего"],
-    ["ratio", "Сорт: рейтинг"],
-    ["size", "Сорт: размер"],
-    ["progress", "Сорт: прогресс"],
+    ["name", "Имя"],
+    ["added", "Новые"],
+    ["up", "Скорость"],
+    ["down", "Скачивание"],
+    ["peers", "Пиры"],
+    ["uploaded", "Роздано всего"],
+    ["ratio", "Рейтинг"],
+    ["size", "Размер"],
+    ["progress", "Прогресс"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
     if (val === listSort) o.selected = true;
     sortSelect.append(o);
   }
+  const fitSort = () => fitSelectToSelected(sortSelect);
   sortSelect.addEventListener("change", () => {
     listSort = sortSelect.value as ListSort;
     lsSet("ui.sort", listSort);
+    fitSort();
     reloadFromFilters();
     syncReset();
   });
 
   const stateSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
   for (const [val, label] of [
-    ["", "Состояние: все"],
+    ["", "Все состояния"],
     ["active", "Активные (отдача)"],
     ["peers", "Есть пиры"],
     ["idle", "Простаивают"],
@@ -5282,15 +6432,29 @@ function mountListShell(root: HTMLElement): void {
         type: "button",
         className: `btn btn--sm tb-menu__toggle${primary ? " btn--primary" : ""}`,
         "aria-haspopup": "true",
+        "aria-expanded": "false",
       },
       [icon(labelIcon), label, el("span", { className: "tb-menu__caret" }, [icon("chevron-down")])],
     );
     const list = el("div", { className: "tb-menu__list", role: "menu" });
-    const closeMenu = () => {
-      if (!menu.classList.contains("is-open")) return;
-      menu.classList.remove("is-open");
-      document.removeEventListener("click", onOutside, true);
+    let listMotion: MotionCtrl | null = null;
+    let leaveTimer: ReturnType<typeof setTimeout> | null = null;
+    const setOpen = (on: boolean) => {
+      const was = menu.classList.contains("is-open");
+      if (on === was) return;
+      menu.classList.toggle("is-open", on);
+      toggle.setAttribute("aria-expanded", on ? "true" : "false");
+      if (on) {
+        closeOpenProfiles();
+        closeOpenTrays();
+        document.addEventListener("click", onOutside, true);
+        listMotion = openPopPanel(list, listMotion);
+      } else {
+        document.removeEventListener("click", onOutside, true);
+        listMotion = closePopPanel(list, listMotion);
+      }
     };
+    const closeMenu = () => setOpen(false);
     const onOutside = (ev: Event) => {
       if (!menu.contains(ev.target as Node)) closeMenu();
     };
@@ -5306,14 +6470,22 @@ function mountListShell(root: HTMLElement): void {
       });
       list.append(b);
     }
+    menu.addEventListener("mouseenter", () => {
+      if (leaveTimer) {
+        clearTimeout(leaveTimer);
+        leaveTimer = null;
+      }
+      setOpen(true);
+    });
+    menu.addEventListener("mouseleave", () => {
+      leaveTimer = setTimeout(() => setOpen(false), 120);
+    });
     toggle.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      if (menu.classList.toggle("is-open")) {
-        document.addEventListener("click", onOutside, true);
-      } else {
-        document.removeEventListener("click", onOutside, true);
-      }
+      setOpen(!menu.classList.contains("is-open"));
     });
+    list.hidden = true;
+    applyPopProgress(list, 0);
     menu.append(toggle, list);
     return menu;
   };
@@ -5369,29 +6541,24 @@ function mountListShell(root: HTMLElement): void {
   resetFilters.addEventListener("click", () => {
     listSearch = "";
     listStatusFilter = "";
-    listLabelFilter = "";
-    listEngineFilter = "";
     listState = "";
     listSort = "name";
-    for (const k of ["ui.search", "ui.status", "ui.label", "ui.engine", "ui.state", "ui.sort"]) lsSet(k, "");
+    applyOpenListPrefs();
+    for (const k of ["ui.search", "ui.status", "ui.state", "ui.sort"]) lsSet(k, "");
     searchInput.value = "";
+    setSearchOpen(false);
     statusSelect.value = "";
     stateSelect.value = "";
-    labelSelect.value = "";
-    engineSelect.value = "";
+    labelSelect.value = listLabelFilter;
+    engineSelect.value = listEngineFilter;
     sortSelect.value = "name";
+    fitSort();
     closePopover();
     reloadFromFilters();
     syncReset();
   });
 
-  const refreshBtn = el("button", {
-    type: "button",
-    className: "btn btn--ghost btn--sm list-controls__icon",
-    title: "Обновить",
-    "aria-label": "Обновить",
-  }, [icon("refresh")]);
-  refreshBtn.addEventListener("click", () => void refresh());
+  const refreshBtn = refreshIconBtn(() => void refresh());
 
   // Вторичные фильтры (статус/состояние/метка) спрятаны в поповер — панель остаётся чистой,
   // а активные фильтры показываются «чипсами» под строкой поиска и снимаются в один клик.
@@ -5418,20 +6585,32 @@ function mountListShell(root: HTMLElement): void {
   const onEsc = (ev: KeyboardEvent) => {
     if (ev.key === "Escape") closePopover();
   };
+  let popoverMotion: MotionCtrl | null = null;
   function closePopover(): void {
     if (!popoverOpen) return;
     popoverOpen = false;
-    popover.hidden = true;
+    const activeSel = document.querySelector("select.cselect-active");
+    if (activeSel && filterWrap.contains(activeSel)) closeActiveCselect?.();
     filterBtn.classList.remove("is-open");
     document.removeEventListener("click", onDocClick);
     document.removeEventListener("keydown", onEsc);
+    popoverMotion?.stop();
+    popoverMotion = null;
+    popover.hidden = true;
+    popover.style.pointerEvents = "none";
+    popover.style.opacity = "";
+    popover.style.transform = "";
   }
   function openPopover(): void {
+    const wasHidden = popover.hidden;
     popoverOpen = true;
+    if (wasHidden) applyPopProgress(popover, 0);
     popover.hidden = false;
+    popover.style.pointerEvents = "auto";
     filterBtn.classList.add("is-open");
     document.addEventListener("click", onDocClick);
     document.addEventListener("keydown", onEsc);
+    popoverMotion = playPop(popover, true, popoverMotion);
   }
   filterBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
@@ -5515,17 +6694,20 @@ function mountListShell(root: HTMLElement): void {
       );
     }
 
-    const anyActive =
-      Boolean(listSearch || listStatusFilter || listLabelFilter || listEngineFilter || listState) ||
-      listSort !== "name";
+    const atOpenStart =
+      !listSearch &&
+      !listStatusFilter &&
+      !listState &&
+      listSort === "name" &&
+      listLabelFilter === getOpenLabel() &&
+      listEngineFilter === getOpenEngine();
     chipsRow.replaceChildren(...chips);
-    if (anyActive) chipsRow.append(resetFilters);
-    chipsRow.hidden = !anyActive;
+    if (!atOpenStart) chipsRow.append(resetFilters);
+    chipsRow.hidden = chips.length === 0 && atOpenStart;
   }
 
-  const searchField = el("div", { className: "list-controls__search" }, [icon("search"), searchInput]);
   const filters = el("div", { className: "list-controls" }, [
-    searchField,
+    searchDock,
     el("div", { className: "list-controls__actions" }, [filterWrap, sortSelect, viewSwitch, refreshBtn]),
     labelSuggestions,
   ]);
@@ -5546,7 +6728,7 @@ function mountListShell(root: HTMLElement): void {
     repaint();
     syncBulkBar();
   });
-  const bulkBar = el("div", { className: "bulk-bar", hidden: "" }, [
+  const bulkBar = el("div", { className: "bulk-bar" }, [
     el("div", { className: "bulk-bar__row bulk-bar__row--play" }, [
       bulkCount,
       clearSelBtn,
@@ -5562,13 +6744,19 @@ function mountListShell(root: HTMLElement): void {
       bulkDel,
     ]),
   ]);
+  const bulkSlot = el("div", { className: "bulk-bar-slot", hidden: "" }, [bulkBar]);
   bulkBarHost = bulkBar;
   applyView();
+  let bulkOpen = false;
+  let bulkMotion: MotionCtrl | null = null;
   function syncBulkBar(): void {
     const n = selectedIds.size;
-    bulkBar.hidden = n === 0;
     bulkCount.textContent = `Выбрано: ${n}`;
-    // Список движков для переноса тянем лениво — при первом появлении панели.
+    const show = n > 0;
+    if (show !== bulkOpen) {
+      bulkOpen = show;
+      bulkMotion = playFold(bulkSlot, show, bulkMotion);
+    }
     if (n > 0) void loadBulkEngines();
   }
   selectionChanged = syncBulkBar;
@@ -5582,10 +6770,11 @@ function mountListShell(root: HTMLElement): void {
     sessionBarHost,
     filters,
     chipsRow,
-    bulkBar,
+    bulkSlot,
     listHost,
     pager,
   );
+  fitSort();
   syncReset();
 
   reloadEngines();
@@ -6025,7 +7214,7 @@ function mountDetailShell(root: HTMLElement, id: number): void {
     el("header", { className: "app-header" }, [
       el("div", {}, [el("h1", {}, ["Торрент"]), el("p", { className: "field__hint" }, [`#${id}`])]),
       el("div", { className: "app-header__side" }, [
-        el("div", { className: "app-header__actions" }, [statusTrayControl(), profileControl()]),
+        el("div", { className: "app-header__actions" }, [profileControl()]),
         metaEl,
       ]),
     ]),
@@ -6116,8 +7305,6 @@ type AlertsOut = { generated_at: string; count: number; critical: number; alerts
 function mountAlertsPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Уведомления"]);
-  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" }, [icon("refresh")]);
-  head.append(refreshBtn);
   panel.append(head);
 
   const body = el("div", { className: "panel__body" });
@@ -6162,7 +7349,7 @@ function mountAlertsPanel(): HTMLElement {
       }
     }
   };
-  refreshBtn.addEventListener("click", () => void load());
+  head.append(refreshIconBtn(() => void load()));
   void load();
   return panel;
 }
@@ -6215,8 +7402,6 @@ function meterBar(pct: number | null): HTMLElement {
 function mountSystemPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Нагрузка системы"]);
-  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" }, [icon("refresh")]);
-  head.append(refreshBtn);
   panel.append(head);
 
   const body = el("div", { className: "panel__body" });
@@ -6326,7 +7511,7 @@ function mountSystemPanel(): HTMLElement {
       }
     }
   };
-  refreshBtn.addEventListener("click", () => void load());
+  head.append(refreshIconBtn(() => void load()));
   void load();
   return panel;
 }
@@ -6353,12 +7538,6 @@ async function ensureWebBuildTime(): Promise<void> {
 function mountHealthPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Состояние сервисов"]);
-  const refreshBtn = el(
-    "button",
-    { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" },
-    [icon("refresh")],
-  );
-  head.append(refreshBtn);
   panel.append(head);
 
   const body = el("div", { className: "panel__body" });
@@ -6408,10 +7587,9 @@ function mountHealthPanel(): HTMLElement {
     );
   };
 
-  const tick = async (manual = false) => {
+  const tick = async () => {
     if (busy) return;
     busy = true;
-    if (manual) refreshBtn.classList.add("is-spinning");
     try {
       const data = await fetchJson<HealthFull>("/health/full");
       if (parseRoute().view !== "settings") return;
@@ -6425,7 +7603,6 @@ function mountHealthPanel(): HTMLElement {
       meta.textContent = e instanceof Error ? e.message : String(e);
     } finally {
       busy = false;
-      refreshBtn.classList.remove("is-spinning");
       if (settingsHealthTimer !== null) clearTimeout(settingsHealthTimer);
       if (parseRoute().view === "settings" && !document.hidden) {
         // При живом WS канал engines пушит health сам — поллинг реже (бэкстоп).
@@ -6434,7 +7611,7 @@ function mountHealthPanel(): HTMLElement {
     }
   };
 
-  refreshBtn.addEventListener("click", () => void tick(true));
+  head.append(refreshIconBtn(() => void tick()));
   void ensureWebBuildTime().then(() => void tick());
   // WS (Фаза 7, WS-4): health движков/ядра пушем через канал engines (бэкенд — ws_pollers).
   settingsEnginesUnsub?.();
@@ -6573,50 +7750,41 @@ function openCreateTorrentDialog(
   };
 
   const renderBreadcrumb = () => {
-    breadcrumb.replaceChildren();
-    const parts = currentPath ? currentPath.split("/") : [];
-    const rootLink = el("button", { type: "button", className: "creator-crumb" }, ["/ (диск)"]);
-    rootLink.addEventListener("click", () => void navigate(""));
-    breadcrumb.append(rootLink);
-    let acc = "";
-    for (const p of parts) {
-      acc = acc ? `${acc}/${p}` : p;
-      const target = acc;
-      breadcrumb.append(document.createTextNode(" / "));
-      const link = el("button", { type: "button", className: "creator-crumb" }, [p]);
-      link.addEventListener("click", () => void navigate(target));
-      breadcrumb.append(link);
-    }
+    fillCreatorCrumbs({
+      host: breadcrumb,
+      el: el as ElFn,
+      icon: icon as IconFn,
+      path: currentPath,
+      onGo: (path) => void navigate(path),
+    });
   };
 
   const renderItems = (items: CreatorBrowseItem[]) => {
     listBox.replaceChildren();
     if (items.length === 0) {
       listBox.append(el("div", { className: "creator-empty" }, ["Пусто"]));
+      staggerIn(listBox.children);
       return;
     }
     for (const item of items) {
-      const row = el("div", { className: "creator-row" });
-      const check = el("input", { type: "checkbox" }) as HTMLInputElement;
-      check.checked = selected.has(item.path);
-      check.addEventListener("change", () => {
-        if (check.checked) selected.add(item.path);
-        else selected.delete(item.path);
-        updateSelectionInfo();
-      });
-      const ic = item.is_dir ? "📁" : "📄";
-      const nameEl = item.is_dir
-        ? el("button", { type: "button", className: "creator-name creator-name--dir" }, [`${ic} ${item.name}`])
-        : el("span", { className: "creator-name" }, [`${ic} ${item.name}`]);
-      if (item.is_dir) {
-        (nameEl as HTMLButtonElement).addEventListener("click", () => void navigate(item.path));
-      }
-      const meta = el("span", { className: "creator-row__meta" }, [
-        item.is_dir ? "" : fmtBytes(item.size),
-      ]);
-      row.append(check, nameEl, meta);
-      listBox.append(row);
+      listBox.append(
+        creatorBrowseRow({
+          el: el as ElFn,
+          icon: icon as IconFn,
+          name: item.name,
+          isDir: item.is_dir,
+          sizeText: item.is_dir ? undefined : fmtBytes(item.size),
+          checked: selected.has(item.path),
+          onCheck: (on) => {
+            if (on) selected.add(item.path);
+            else selected.delete(item.path);
+            updateSelectionInfo();
+          },
+          onOpen: item.is_dir ? () => void navigate(item.path) : undefined,
+        }),
+      );
     }
+    staggerIn(listBox.children);
   };
 
   const navigate = async (path: string, fallbackToRoot = false) => {
@@ -6654,9 +7822,12 @@ function openCreateTorrentDialog(
     void navigate(engineSubdir(currentEngine), true);
   });
 
-  const finish = () => {
+  let dismiss: () => Promise<void> = async () => {
     overlay.remove();
+  };
+  const finish = () => {
     document.removeEventListener("keydown", onKey);
+    void dismiss();
   };
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key === "Escape") finish();
@@ -6750,8 +7921,7 @@ function openCreateTorrentDialog(
   dialog.append(
     modalHead("Создать торрент", "create-dialog-title", finish),
     field("Диск (движок)", engineSelect),
-    breadcrumb,
-    listBox,
+    el("div", { className: "creator-picker" }, [breadcrumb, listBox]),
     el("div", { className: "creator-selection" }, [selectionInfo]),
     modeRow,
     episodeRow,
@@ -6764,7 +7934,7 @@ function openCreateTorrentDialog(
     })(),
   );
   overlay.append(dialog);
-  document.body.append(overlay);
+  dismiss = presentModal(overlay);
 
   createBtn.disabled = true;
   void (async () => {
@@ -6824,16 +7994,18 @@ function openCreatorQueueDialog(onSeeded: () => void): void {
   });
 
   const listBox = el("div", { className: "creator-queue" });
-  const refreshBtn = el("button", { type: "button", className: "btn btn--sm" }, [icon("refresh"), "Обновить"]);
 
   let timer: number | null = null;
   let closed = false;
 
+  let dismiss: () => Promise<void> = async () => {
+    overlay.remove();
+  };
   const finish = () => {
     closed = true;
     if (timer !== null) clearTimeout(timer);
-    overlay.remove();
     document.removeEventListener("keydown", onKey);
+    void dismiss();
   };
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key === "Escape") finish();
@@ -6957,32 +8129,25 @@ function openCreatorQueueDialog(onSeeded: () => void): void {
     }
   };
 
-  refreshBtn.addEventListener("click", () => void load());
-
   dialog.append(
-    modalHead("Очередь создания торрентов", "creator-queue-title", finish),
+    modalHead("Очередь создания торрентов", "creator-queue-title", finish, refreshIconBtn(() => void load())),
     el("p", { className: "field__hint" }, [
       "Задачи создания на всех движках. Хранятся в памяти движка, автоудаляются через 24 часа " +
         "и очищаются при его перезапуске.",
     ]),
     listBox,
-    (() => {
-      const bar = el("div", { className: "modal-actions modal-actions--row" });
-      bar.append(refreshBtn);
-      return bar;
-    })(),
   );
   overlay.append(dialog);
-  document.body.append(overlay);
+  dismiss = presentModal(overlay);
 
   listBox.append(el("div", { className: "creator-empty" }, ["Загрузка…"]));
   void load();
 }
 
 function showLoginDialog(): void {
-  document.querySelector(".modal-overlay.login-overlay")?.remove();
-  const overlay = el("div", { className: "modal-overlay login-overlay" });
-  const dialog = el("div", { className: "modal-dialog", role: "dialog", "aria-modal": "true" });
+  document.querySelector(".login-overlay")?.remove();
+  const canDismiss = Boolean(currentRole);
+  const overlay = el("div", { className: "login-overlay" });
 
   const userInput = el("input", {
     type: "text",
@@ -7018,17 +8183,36 @@ function showLoginDialog(): void {
     credsWrap.toggleAttribute("hidden", show);
     toggleKey.textContent = show ? "Войти по логину и паролю" : "Войти по API-ключу";
     subText.textContent = show ? "Войдите по API-ключу." : "Войдите по имени пользователя и паролю.";
+    staggerIn((show ? keyWrap : credsWrap).children, 0.04);
     if (show) keyInput.focus();
     else userInput.focus();
   });
 
   const errLine = el("p", { className: "login-error", hidden: "" });
+  const remember = switchControl("Запомнить вход", rememberLogin(), (on) => setRememberLogin(on));
   const submit = el("button", { type: "button", className: "btn btn--primary login-submit" }, ["Войти"]);
+
+  const win = el("div", {
+    className: "login-window",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "login-title",
+  });
+
+  const onEsc = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape" && canDismiss) void dismiss();
+  };
+
+  const dismiss = async () => {
+    document.removeEventListener("keydown", onEsc);
+    await playPop(win, false).finished.catch(() => undefined);
+    overlay.remove();
+  };
 
   const finish = async () => {
     await loadMe();
     if (currentRole) {
-      overlay.remove();
+      await dismiss();
       render();
       return true;
     }
@@ -7042,9 +8226,9 @@ function showLoginDialog(): void {
       const keyVisible = !keyWrap.hasAttribute("hidden");
       const u = userInput.value.trim();
       const p = passInput.value;
+      setRememberLogin(remember.get());
       if (keyVisible && keyInput.value.trim() && !u) {
         setApiKey(keyInput.value.trim());
-        // Явно отмечаем вход по ключу в аудите (best-effort).
         try {
           await fetchJson("/auth/key-login", { method: "POST" });
         } catch {
@@ -7065,29 +8249,51 @@ function showLoginDialog(): void {
   };
   submit.addEventListener("click", () => void doLogin());
   for (const inp of [userInput, passInput, keyInput]) {
+    bindLoginInputFeel(inp);
     inp.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") void doLogin();
     });
   }
 
-  dialog.classList.add("login-dialog");
-  const divider = el("div", { className: "login-divider" }, ["или"]);
-  dialog.append(
-    el("div", { className: "login-head" }, [
-      el("h2", { className: "modal-title" }, ["Вход"]),
-      subText,
+  const titleRow = el("div", { className: "login-head__row" }, [
+    el("h2", { id: "login-title", className: "modal-title" }, ["Вход"]),
+  ]);
+  if (canDismiss) titleRow.append(modalCloseBtn(() => void dismiss()));
+
+  const stage = el("aside", { className: "login-stage" }, [
+    loginPaths(),
+    brandLockup(),
+    el("div", { className: "login-stage__copy" }, [
+      el("p", { className: "login-stage__lead" }, ["Кабинет раздач"]),
+      el("p", { className: "login-stage__text" }, [
+        "Список, переносы и очереди — с одного входа.",
+      ]),
     ]),
-    el("div", { className: "login-form" }, [
-      credsWrap,
-      keyWrap,
-      errLine,
-      submit,
+    el("p", { className: "login-stage__foot" }, [`v${WEB_VERSION}`]),
+  ]);
+  const panel = el("div", { className: "login-panel" }, [
+    el("div", { className: "login-glow", "aria-hidden": "true" }),
+    el("div", { className: "login-brand-mobile" }, [brandLockup()]),
+    el("div", { className: "login-panel__inner" }, [
+      el("div", { className: "login-head" }, [titleRow, subText]),
+      el("div", { className: "login-form" }, [credsWrap, keyWrap, remember.el, errLine, submit]),
+      el("div", { className: "login-divider" }, ["или"]),
+      toggleKey,
     ]),
-    divider,
-    toggleKey,
-  );
-  overlay.append(dialog);
+  ]);
+  win.append(stage, panel);
+  overlay.append(win);
+  if (canDismiss) {
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) void dismiss();
+    });
+  }
   document.body.append(overlay);
+  document.addEventListener("keydown", onEsc);
+  playPop(win, true);
+  remember.set(remember.get(), false);
+  staggerIn(stage.querySelectorAll(".brand, .login-stage__copy, .login-stage__foot"), 0.07);
+  staggerIn(panel.querySelectorAll(".login-head, .login-form, .login-divider, .login-alt"), 0.05);
   userInput.focus();
 }
 
@@ -7422,12 +8628,6 @@ function mountComponentsPanel(): HTMLElement {
   const head = el("div", { className: "panel__head panel__head--with-action" }, [
     "Перезагрузка компонентов",
   ]);
-  const refreshBtn = el(
-    "button",
-    { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" },
-    [icon("refresh")],
-  );
-  head.append(refreshBtn);
   panel.append(head);
 
   const body = el("div", { className: "panel__body" });
@@ -7501,7 +8701,7 @@ function mountComponentsPanel(): HTMLElement {
     }
   };
 
-  refreshBtn.addEventListener("click", () => void reload());
+  head.append(refreshIconBtn(() => void reload()));
   void reload();
   return panel;
 }
@@ -7670,37 +8870,27 @@ function showEngineDetailModal(engineId: string, engineName: string): void {
     className: "modal-dialog modal-dialog--wide",
     role: "dialog",
     "aria-modal": "true",
-    "aria-label": `Движок ${engineName}`,
+    "aria-labelledby": "engine-dialog-title",
   });
-  const closeBtn = el(
-    "button",
-    { type: "button", className: "btn btn--ghost btn--sm", "aria-label": "Закрыть" },
-    ["✕"],
-  ) as HTMLButtonElement;
-  const head = el("div", { className: "engine-modal__head" }, [
-    el("h2", { className: "modal-title" }, [`Движок ${engineName}`]),
-    closeBtn,
-  ]);
   const bodyEl = el("div", { className: "engine-modal__body" }, [
     el("p", { className: "field__hint" }, ["Загрузка…"]),
   ]);
-  dialog.append(head, bodyEl);
-  overlay.append(dialog);
 
   const close = () => {
-    overlay.remove();
     document.removeEventListener("keydown", onKey);
+    void dismiss();
   };
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key === "Escape") close();
   };
-  closeBtn.addEventListener("click", close);
+  dialog.append(modalHead(`Движок ${engineName}`, "engine-dialog-title", close), bodyEl);
+  overlay.append(dialog);
   overlay.addEventListener("click", (ev) => {
     if (ev.target === overlay) close();
   });
   document.addEventListener("keydown", onKey);
-  document.body.append(overlay);
-  closeBtn.focus();
+  const dismiss = presentModal(overlay);
+  dialog.querySelector<HTMLButtonElement>(".modal-close")?.focus();
 
   void (async () => {
     try {
@@ -7717,10 +8907,6 @@ function showEngineDetailModal(engineId: string, engineName: string): void {
 function mountEngineRegistryPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Реестр движков"]);
-  const refreshBtn = el("button", { type: "button", className: "btn btn--ghost btn--sm", title: "Обновить" }, [
-    icon("refresh"),
-  ]);
-  head.append(refreshBtn);
   panel.append(head);
 
   const body = el("div", { className: "panel__body" });
@@ -7852,7 +9038,7 @@ function mountEngineRegistryPanel(): HTMLElement {
     }
   };
 
-  refreshBtn.addEventListener("click", () => void reload());
+  head.append(refreshIconBtn(() => void reload()));
   void reload();
   return panel;
 }
@@ -8056,8 +9242,6 @@ function auditStatusClass(status: number): string {
 function mountAuditPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   const head = el("div", { className: "panel__head panel__head--with-action" }, ["Журнал действий"]);
-  const refreshBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Обновить"]);
-  head.append(refreshBtn);
   panel.append(head);
 
   const body = el("div", { className: "panel__body" });
@@ -8093,7 +9277,7 @@ function mountAuditPanel(): HTMLElement {
     }
   };
 
-  refreshBtn.addEventListener("click", () => void reload());
+  head.append(refreshIconBtn(() => void reload()));
   void reload();
   return panel;
 }
@@ -8113,7 +9297,7 @@ function showNewKeyDialog(key: string): void {
     }
   });
   const closeBtn = el("button", { type: "button", className: "btn btn--primary" }, ["Готово"]);
-  closeBtn.addEventListener("click", () => overlay.remove());
+  closeBtn.addEventListener("click", () => void dismiss());
   dialog.append(
     el("h2", { className: "modal-title" }, ["Новый ключ создан"]),
     el("p", { className: "modal-text" }, ["Сохраните ключ сейчас — позже он не отобразится."]),
@@ -8121,7 +9305,7 @@ function showNewKeyDialog(key: string): void {
     el("div", { className: "modal-actions" }, [copyBtn, closeBtn]),
   );
   overlay.append(dialog);
-  document.body.append(overlay);
+  const dismiss = presentModal(overlay);
 }
 
 /** «1 Гбит/с» из ёмкости в битах/с — для подписи к шкале утилизации канала. */
@@ -8509,7 +9693,7 @@ function mountNetworkShell(root: HTMLElement): void {
       el("h1", {}, ["Сеть"]),
       el("p", { className: "field__hint" }, [hint]),
     ]),
-    el("div", { className: "app-header__actions" }, [tabBar, statusTrayControl(), profileControl()]),
+    el("div", { className: "app-header__actions" }, [tabBar, profileControl()]),
   ]);
   const host = el("div", { className: "wan-grid" }, [
     el("p", { className: "wan-note" }, ["Загрузка карты каналов…"]),
@@ -8766,8 +9950,17 @@ function cabinetSeg<T extends string>(
 function cabinetPrefRow(label: string, control: HTMLElement): HTMLElement {
   return el("div", { className: "cabinet-pref" }, [
     el("span", { className: "cabinet-pref__label" }, [label]),
-    control,
+    el("div", { className: "cabinet-pref__control" }, [control]),
   ]);
+}
+
+function cabinetPrefGroup(title: string, hint: string | null, rows: HTMLElement[]): HTMLElement {
+  const box = el("section", { className: "cabinet-pref-group" }, [
+    el("h3", { className: "cabinet-pref-group__title" }, [title]),
+  ]);
+  if (hint) box.append(el("p", { className: "cabinet-pref-group__hint" }, [hint]));
+  box.append(el("div", { className: "cabinet-pref-list" }, rows));
+  return box;
 }
 
 function cabinetFact(value: string, label: string): HTMLElement {
@@ -8798,7 +9991,7 @@ function mountCabinetShell(root: HTMLElement): void {
         el("div", { className: "field__hint" }, [ROLE_LABEL[(me.role ?? "viewer") as Role]]),
       ]),
     ]);
-    const actions = el("div", { className: "btn-row" });
+    const actions = el("div", { className: "btn-row cabinet-who__actions" });
     const avaBtn = el("button", { type: "button", className: "btn" }, ["Сменить аватар"]);
     avaBtn.addEventListener("click", () => openAvatarPicker());
     actions.append(avaBtn);
@@ -8807,6 +10000,11 @@ function mountCabinetShell(root: HTMLElement): void {
       pwBtn.addEventListener("click", () => openPasswordDialog({ kind: "self" }));
       actions.append(pwBtn);
     }
+    const switchBtn = el("button", { type: "button", className: "btn" }, ["Сменить аккаунт"]);
+    switchBtn.addEventListener("click", () => showLoginDialog());
+    const outBtn = el("button", { type: "button", className: "btn btn--danger" }, ["Выйти"]);
+    outBtn.addEventListener("click", () => void doLogout());
+    actions.append(switchBtn, outBtn);
     profileBody.append(who, actions);
   }
   profile.append(profileBody);
@@ -8814,57 +10012,100 @@ function mountCabinetShell(root: HTMLElement): void {
   const prefs = el("section", { className: "panel" });
   prefs.append(el("div", { className: "panel__head" }, ["Как мне удобно"]));
   const prefsBody = el("div", { className: "panel__body cabinet-prefs" });
-  prefsBody.append(
-    cabinetPrefRow(
-      "Тема",
-      cabinetSeg(
-        [
-          { id: "auto", label: "Как в системе" },
-          { id: "light", label: "Светлая" },
-          { id: "dark", label: "Тёмная" },
-        ],
-        getThemeMode(),
-        (id) => applyTheme(id),
-      ),
-    ),
-    cabinetPrefRow(
-      "Список раздач",
-      cabinetSeg(
-        [
-          { id: "grid", label: "Плитка" },
-          { id: "list", label: "Карточки" },
-          { id: "mini", label: "Мини таблица" },
-          { id: "table", label: "Таблица" },
-        ],
-        currentViewPreset(),
-        (id) => applyViewPreset(id),
-      ),
-    ),
-    cabinetPrefRow(
-      "Строк на странице",
-      cabinetSeg(
-        PAGE_SIZES.map((n) => ({ id: String(n), label: String(n) })),
-        String(listPageSize),
-        (id) => {
-          listPageSize = parseInt(id, 10) || 50;
-          lsSet("ui.pageSize", String(listPageSize));
-          listPage = 0;
-        },
-      ),
-    ),
-  );
+  const openLabelSelect = el("select", { className: "select" }) as HTMLSelectElement;
+  openLabelSelect.append(el("option", { value: "" }, ["Все метки"]));
+  const openEngineSelect = el("select", { className: "select" }) as HTMLSelectElement;
+  openEngineSelect.append(el("option", { value: "" }, ["Все движки"]));
+  const rememberOpen = (): void => {
+    lsSet("ui.openLabel", openLabelSelect.value);
+    lsSet("ui.openEngine", openEngineSelect.value);
+    applyOpenListPrefs();
+  };
+  openLabelSelect.addEventListener("change", rememberOpen);
+  openEngineSelect.addEventListener("change", rememberOpen);
+  void (async () => {
+    try {
+      const labels = await fetchJson<string[]>("/labels");
+      for (const lb of labels) openLabelSelect.append(el("option", { value: lb }, [lb]));
+    } catch {
+      /* список меток необязателен */
+    }
+    const savedLabel = getOpenLabel();
+    if (savedLabel && ![...openLabelSelect.options].some((o) => o.value === savedLabel)) {
+      openLabelSelect.append(el("option", { value: savedLabel }, [savedLabel]));
+    }
+    openLabelSelect.value = savedLabel;
+    try {
+      const engines = await fetchJson<EngineOut[]>("/engines");
+      engines.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      for (const e of engines) openEngineSelect.append(el("option", { value: e.id }, [e.id]));
+    } catch {
+      /* список движков необязателен */
+    }
+    const savedEngine = getOpenEngine();
+    if (savedEngine && ![...openEngineSelect.options].some((o) => o.value === savedEngine)) {
+      openEngineSelect.append(el("option", { value: savedEngine }, [savedEngine]));
+    }
+    openEngineSelect.value = savedEngine;
+  })();
   const labelCombo = createLabelCombo({ storageKey: "ui.addLabel" });
-  prefsBody.append(cabinetPrefRow("Метка при добавлении", labelCombo.control));
   void labelCombo.refresh();
   prefsBody.append(
-    cabinetPrefRow(
-      "Период графиков",
-      cabinetSeg(
-        HISTORY_PERIODS.map((p) => ({ id: p.id, label: p.label })),
-        getHistoryPeriod(),
-        (id) => setHistoryPeriod(id),
+    cabinetPrefGroup("Вид", null, [
+      cabinetPrefRow(
+        "Тема",
+        cabinetSeg(
+          [
+            { id: "auto", label: "Как в системе" },
+            { id: "light", label: "Светлая" },
+            { id: "dark", label: "Тёмная" },
+          ],
+          getThemeMode(),
+          (id) => applyTheme(id),
+        ),
       ),
+      cabinetPrefRow(
+        "Список раздач",
+        cabinetSeg(
+          [
+            { id: "grid", label: "Плитка" },
+            { id: "list", label: "Карточки" },
+            { id: "mini", label: "Мини таблица" },
+            { id: "table", label: "Таблица" },
+          ],
+          currentViewPreset(),
+          (id) => applyViewPreset(id),
+        ),
+      ),
+      cabinetPrefRow(
+        "Строк на странице",
+        cabinetSeg(
+          PAGE_SIZES.map((n) => ({ id: String(n), label: String(n) })),
+          String(listPageSize),
+          (id) => {
+            listPageSize = parseInt(id, 10) || 50;
+            lsSet("ui.pageSize", String(listPageSize));
+            listPage = 0;
+          },
+        ),
+      ),
+      cabinetPrefRow(
+        "Период графиков",
+        cabinetSeg(
+          HISTORY_PERIODS.map((p) => ({ id: p.id, label: p.label })),
+          getHistoryPeriod(),
+          (id) => setHistoryPeriod(id),
+        ),
+      ),
+    ]),
+    cabinetPrefGroup(
+      "Открывать список",
+      "С этих фильтров начинается список. «Сбросить всё» возвращает сюда.",
+      [cabinetPrefRow("Метка", openLabelSelect), cabinetPrefRow("Движок", openEngineSelect)],
     ),
+    cabinetPrefGroup("При добавлении", "Какая метка подставляется в новое окно добавления.", [
+      cabinetPrefRow("Метка", labelCombo.control),
+    ]),
   );
   prefs.append(prefsBody);
 
@@ -8880,12 +10121,12 @@ function mountCabinetShell(root: HTMLElement): void {
 
   const sessions = el("section", { className: "panel" });
   sessions.append(el("div", { className: "panel__head" }, ["Сессии"]));
-  const sessionsBody = el("div", { className: "panel__body" });
+  const sessionsBody = el("div", { className: "panel__body cabinet-sessions" });
   const sessionsHint = el("p", { className: "field__hint" }, ["Загрузка…"]);
   const sessionsList = el("div", { className: "keys-list" });
   const revokeOthers = el(
     "button",
-    { type: "button", className: "btn btn--sm" },
+    { type: "button", className: "btn btn--sm btn--danger" },
     ["Выйти на всех, кроме этого"],
   ) as HTMLButtonElement;
   sessionsBody.append(sessionsHint, sessionsList, revokeOthers);
@@ -8913,7 +10154,7 @@ function mountCabinetShell(root: HTMLElement): void {
       if (row.current) {
         item.append(el("span", { className: "field__hint" }, ["текущая"]));
       } else {
-        const btn = el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["Выйти"]);
+        const btn = el("button", { type: "button", className: "btn btn--sm btn--danger" }, ["Выйти"]);
         btn.addEventListener("click", () => void revokeSession(row.id));
         item.append(btn);
       }
@@ -8985,14 +10226,7 @@ function mountCabinetShell(root: HTMLElement): void {
     }
   };
 
-  const foot = el("div", { className: "btn-row" });
-  const switchBtn = el("button", { type: "button", className: "btn btn--ghost" }, ["Сменить аккаунт"]);
-  switchBtn.addEventListener("click", () => showLoginDialog());
-  const outBtn = el("button", { type: "button", className: "btn btn--ghost" }, ["Выйти"]);
-  outBtn.addEventListener("click", () => void doLogout());
-  foot.append(switchBtn, outBtn);
-
-  root.append(back, header, profile, prefs, facts, sessions, audit, foot);
+  root.append(back, header, profile, prefs, facts, sessions, audit);
   void loadSessions();
   void loadAudit();
 }
@@ -9121,6 +10355,7 @@ function mountSettingsShell(root: HTMLElement): void {
 }
 
 function render(): void {
+  releaseSearchOverlay();
   clearViewPolls();
   const root = document.getElementById("app");
   if (!root) return;
@@ -9134,6 +10369,7 @@ function render(): void {
   else if (route.view === "network") mountNetworkShell(root);
   else mountDetailShell(root, route.id);
   root.append(appFooter());
+  refreshSmoothScroll();
 }
 
 /** Плавающая кнопка «наверх» — появляется справа внизу после прокрутки. Создаётся один раз. */
@@ -9143,7 +10379,7 @@ function mountScrollTopButton(): void {
     { type: "button", className: "scrolltop", title: "Наверх", "aria-label": "Наверх" },
     [icon("arrow-up")],
   ) as HTMLButtonElement;
-  btn.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+  btn.addEventListener("click", () => scrollToTop());
   const toggle = () => btn.classList.toggle("scrolltop--visible", window.scrollY > 400);
   window.addEventListener("scroll", toggle, { passive: true });
   toggle();
@@ -9174,6 +10410,7 @@ async function bootstrap(): Promise<void> {
 
 document.title = "RelaySeed";
 applyTheme(getThemeMode());
+startSmoothScroll();
 mountScrollTopButton();
 initCustomSelects();
 // Кнопки «назад/вперёд» браузера (History API) → перерисовка.

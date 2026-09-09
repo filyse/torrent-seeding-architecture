@@ -34,6 +34,31 @@ def uploaded_with_carry(total: int, seen: int, current: int) -> int:
     return accumulate_uploaded(total, seen, current)[0]
 
 
+def runtime_from_snapshot(row: TorrentRecord) -> dict:
+    """Рантайм для списка из снимка БД — без обхода движков.
+
+    Снимок пишет фоновый воркер (~10 с). Для страницы списка этого достаточно:
+    сортировка уже по этим полям, цифры совпадают с порядком.
+    """
+    size = int(row.size or 0)
+    uploaded = int(row.uploaded_total or 0)
+    return {
+        "db_id": row.id,
+        "magnet_uri": row.magnet_uri,
+        "save_path": row.save_path or "",
+        "runtime_status": row.status,
+        "info_hash": row.info_hash,
+        "progress": row.progress,
+        "download_rate": int(row.down_rate or 0),
+        "upload_rate": int(row.up_rate or 0),
+        "total_uploaded": uploaded,
+        "peers": int(row.peers or 0),
+        "name": row.display_name,
+        "size": size,
+        "ratio": (uploaded / size) if size else None,
+    }
+
+
 def apply_uploaded_carry(row: TorrentRecord, runtime: dict | None) -> dict | None:
     """Подменить в рантайме `total_uploaded` на объём за всю жизнь раздачи.
 

@@ -11,8 +11,8 @@ from seeding_db.models import TorrentStatus
 from seeding_db.repository import MigrationRepository, TorrentRepository
 
 from seeding_api.deps import DbSession, EnginePoolDep
-from seeding_api.migrate import cancel_migration, run_migration, set_progress
-from seeding_api.runtime_sync import apply_uploaded_carry, merge_runtime_into_row
+from seeding_api.migrate import cancel_migration, launch_migration
+from seeding_api.runtime_sync import apply_uploaded_carry, merge_runtime_into_row, runtime_from_snapshot
 from seeding_api.schemas import (
     BatchUploadItem,
     BatchUploadResult,
@@ -113,11 +113,16 @@ async def list_torrents(
     sort: str = Query("name", description="name|added|up|down|peers|uploaded|ratio|size|progress"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    live: bool = Query(
+        False,
+        description="Подтянуть рантайм с движков. По умолчанию — снимок из БД (быстрый список/поиск).",
+    ),
 ):
-    """Постраничный список раздач. Фильтр/сортировка/пагинация — на стороне БД, поэтому
-    масштабируется на тысячи раздач: рантайм с движков тянется ТОЛЬКО для текущей страницы,
-    и одним батч-запросом на движок (а не по торренту). Сорт/фильтр по «живым» полям
-    (отдача/пиры/…) работает по снимку, который пишет фоновый воркер."""
+    """Постраничный список раздач. Фильтр/сортировка/пагинация — на стороне БД.
+
+    По умолчанию цифры берём из снимка, который пишет фоновый воркер: не обходим движки
+    на каждый запрос (иначе поиск и поллинг тянут полный /internal/v1/torrents с каждого
+    движка страницы). ``live=1`` — прежний путь, если нужны секундные значения."""
     repo = TorrentRepository(session)
     rows, total = await repo.list_page(
         q=q,
@@ -130,34 +135,38 @@ async def list_torrents(
         offset=offset,
     )
 
-    # Рантайм только для движков текущей страницы: один список с движка, параллельно.
-    engine_ids = {row.engine_id for row in rows if row.engine_id}
+    runtime_by_engine: dict[str, dict[int, dict]] = {}
+    if live:
+        engine_ids = {row.engine_id for row in rows if row.engine_id}
 
-    async def _fetch(eid: str) -> tuple[str, dict[int, dict]]:
-        try:
-            return eid, await pool.client_for(eid).list_runtime()
-        except (httpx.HTTPError, KeyError):
-            return eid, {}
+        async def _fetch(eid: str) -> tuple[str, dict[int, dict]]:
+            try:
+                return eid, await pool.client_for(eid).list_runtime()
+            except (httpx.HTTPError, KeyError):
+                return eid, {}
 
-    fetched = await asyncio.gather(*(_fetch(eid) for eid in engine_ids))
-    runtime_by_engine: dict[str, dict[int, dict]] = dict(fetched)
+        fetched = await asyncio.gather(*(_fetch(eid) for eid in engine_ids))
+        runtime_by_engine = dict(fetched)
 
     items: list[TorrentDetailOut] = []
     runtimes: list[dict | None] = []
     for row in rows:
-        runtime = runtime_by_engine.get(row.engine_id, {}).get(row.id)
-        merged = await merge_runtime_into_row(repo, row, runtime)
-        runtime = apply_uploaded_carry(row, runtime)
+        if live:
+            runtime = runtime_by_engine.get(row.engine_id, {}).get(row.id)
+            merged = await merge_runtime_into_row(repo, row, runtime)
+            runtime = apply_uploaded_carry(row, runtime) or runtime_from_snapshot(row)
+            status = merged
+        else:
+            runtime = runtime_from_snapshot(row)
+            status = row.status
         data = TorrentOut.model_validate(row).model_dump()
-        data["status"] = merged
+        data["status"] = status
         data["runtime"] = runtime
         items.append(TorrentDetailOut.model_validate(data))
         runtimes.append(runtime)
 
-    # Страница ВЫБРАНА по снимку рантайма в БД (его пишет фоновый воркер раз в N секунд),
-    # но в UI показываются «живые» значения, взятые в момент запроса. Из-за лага снимка
-    # видимый порядок мог не совпадать с показанными числами. До-сортируем текущую страницу
-    # по тому же «живому» полю, что отображается, — чтобы порядок строго совпадал с числами.
+    # live=1: страница выбрана по снимку, а цифры — с движка. До-сортируем страницу,
+    # чтобы порядок совпал с показанными числами. Для снимка порядок уже из БД.
     live_key = {
         "up": "upload_rate",
         "down": "download_rate",
@@ -167,7 +176,7 @@ async def list_torrents(
         "ratio": "ratio",
         "size": "size",
     }.get(sort)
-    if live_key is not None:
+    if live and live_key is not None:
         paired = sorted(
             zip(runtimes, items),
             key=lambda pair: float((pair[0] or {}).get(live_key) or 0),
@@ -628,8 +637,8 @@ async def migrate_torrent(
     await repo.update_status(torrent_id, TorrentStatus.migrating.value)
     await session.commit()
 
-    _launch_migration(
-        request, pool,
+    launch_migration(
+        request.app, pool,
         torrent_id=torrent_id,
         source_engine_id=row.engine_id,
         target_engine_id=target_id,
@@ -650,57 +659,6 @@ async def migrate_torrent(
     }
 
 
-def _launch_migration(
-    request: Request,
-    pool,
-    *,
-    torrent_id: int,
-    source_engine_id,
-    target_engine_id: str,
-    source_save_path: str,
-    target_save_path: str,
-    src_content_path: str,
-    display_name: str,
-    transport: str,
-    source_url: str,
-    resume: bool,
-) -> None:
-    """Запустить фоновую задачу переноса и зарегистрировать её в app.state."""
-    progress_store = getattr(request.app.state, "migrate_progress", None)
-    if progress_store is None:
-        progress_store = {}
-        request.app.state.migrate_progress = progress_store
-    # WS (Фаза 7): привязываем хаб к стору, чтобы set_progress пушил прогресс переноса.
-    progress_store["__hub__"] = getattr(request.app.state, "ws_hub", None)
-    set_progress(
-        progress_store, torrent_id, "preparing",
-        message=f"{'resume' if resume else 'start'} → {target_engine_id}",
-    )
-    task = asyncio.create_task(
-        run_migration(
-            request.app.state.session_factory,
-            pool,
-            torrent_id=torrent_id,
-            source_engine_id=source_engine_id,
-            target_engine_id=target_engine_id,
-            source_save_path=source_save_path,
-            target_save_path=target_save_path,
-            src_content_path=src_content_path,
-            display_name=display_name,
-            transport=transport,
-            source_url=source_url,
-            progress_store=progress_store,
-            resume=resume,
-        )
-    )
-    tasks = getattr(request.app.state, "migrate_tasks", None)
-    if tasks is None:
-        tasks = set()
-        request.app.state.migrate_tasks = tasks
-    tasks.add(task)
-    task.add_done_callback(tasks.discard)
-
-
 @router.post("/{torrent_id}/migrate/resume")
 async def resume_migration(torrent_id: int, request: Request, session: DbSession, pool: EnginePoolDep):
     """Возобновить прерванный/неуспешный перенос с места обрыва (без копии с нуля)."""
@@ -718,8 +676,8 @@ async def resume_migration(torrent_id: int, request: Request, session: DbSession
     await repo.update_status(torrent_id, TorrentStatus.migrating.value)
     await session.commit()
 
-    _launch_migration(
-        request, pool,
+    launch_migration(
+        request.app, pool,
         torrent_id=torrent_id,
         source_engine_id=job.source_engine_id,
         target_engine_id=job.target_engine_id,

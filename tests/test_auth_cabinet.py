@@ -121,3 +121,32 @@ def test_my_audit_is_own_rows_only(monkeypatch, tmp_path):
         admin_log = client.get("/api/v1/audit", headers={"X-API-Key": bob})
         assert admin_log.status_code == 200
         assert any(row["actor"] == "alice" for row in admin_log.json())
+
+
+def test_list_users_includes_avatar(monkeypatch, tmp_path):
+    main = _app(monkeypatch, tmp_path)
+    with TestClient(main.app) as client:
+        client.post(
+            "/api/v1/auth/users",
+            json={"username": "bob", "password": "secret1", "role": "admin"},
+        )
+        bob = _login(client, "bob")
+        created = client.post(
+            "/api/v1/auth/users",
+            headers={"X-API-Key": bob},
+            json={"username": "alice", "password": "secret1", "role": "operator"},
+        )
+        assert created.status_code == 201
+        assert created.json()["avatar"] == ""
+        alice = _login(client, "alice")
+        put = client.put(
+            "/api/v1/auth/me/avatar",
+            headers={"X-API-Key": alice},
+            json={"avatar": "aurora"},
+        )
+        assert put.status_code == 200
+        listed = client.get("/api/v1/auth/users", headers={"X-API-Key": bob})
+        assert listed.status_code == 200
+        by_name = {u["username"]: u for u in listed.json()}
+        assert by_name["alice"]["avatar"] == "aurora"
+        assert by_name["bob"]["avatar"] == ""

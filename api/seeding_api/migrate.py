@@ -454,6 +454,106 @@ async def cancel_migration(
     return True
 
 
+def launch_migration(
+    app,
+    pool,
+    *,
+    torrent_id: int,
+    source_engine_id,
+    target_engine_id: str,
+    source_save_path: str,
+    target_save_path: str,
+    src_content_path: str,
+    display_name: str,
+    transport: str,
+    source_url: str,
+    resume: bool,
+) -> None:
+    """Запустить фоновую задачу переноса и зарегистрировать её в app.state."""
+    progress_store = getattr(app.state, "migrate_progress", None)
+    if progress_store is None:
+        progress_store = {}
+        app.state.migrate_progress = progress_store
+    progress_store["__hub__"] = getattr(app.state, "ws_hub", None)
+    set_progress(
+        progress_store, torrent_id, "preparing",
+        message=f"{'resume' if resume else 'start'} → {target_engine_id}",
+    )
+    task = asyncio.create_task(
+        run_migration(
+            app.state.session_factory,
+            pool,
+            torrent_id=torrent_id,
+            source_engine_id=source_engine_id,
+            target_engine_id=target_engine_id,
+            source_save_path=source_save_path,
+            target_save_path=target_save_path,
+            src_content_path=src_content_path,
+            display_name=display_name,
+            transport=transport,
+            source_url=source_url,
+            progress_store=progress_store,
+            resume=resume,
+        )
+    )
+    tasks = getattr(app.state, "migrate_tasks", None)
+    if tasks is None:
+        tasks = set()
+        app.state.migrate_tasks = tasks
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+
+
+async def recover_orphaned_migrations(app, pool) -> int:
+    """После рестарта API задачи в памяти мертвы, а в БД state=running — UI висит
+    и /migrate/resume отвечает 409. Помечаем orphan как failed и сразу возобновляем."""
+    async with app.state.session_factory() as session:
+        jobs = await MigrationRepository(session).list_active()
+        orphans = [j for j in jobs if j.state == "running"]
+    if not orphans:
+        return 0
+    n = 0
+    for job in orphans:
+        src_spec = pool.spec(job.source_engine_id)
+        if pool.spec(job.target_engine_id) is None or src_spec is None:
+            log.warning(
+                "migrate %s: orphan after restart, engine missing src=%s dst=%s",
+                job.torrent_id, job.source_engine_id, job.target_engine_id,
+            )
+            continue
+        async with app.state.session_factory() as session:
+            await MigrationRepository(session).set_state(
+                job.torrent_id,
+                "failed",
+                phase=job.phase,
+                error="оркестратор перезапущен — перенос возобновлён",
+            )
+            repo = TorrentRepository(session)
+            await repo.update_status(job.torrent_id, TorrentStatus.migrating.value)
+            await session.commit()
+        launch_migration(
+            app,
+            pool,
+            torrent_id=job.torrent_id,
+            source_engine_id=job.source_engine_id,
+            target_engine_id=job.target_engine_id,
+            source_save_path=job.source_save_path,
+            target_save_path=job.target_save_path,
+            src_content_path=job.src_content_path,
+            display_name=job.display_name,
+            transport=job.transport,
+            source_url=src_spec.url,
+            resume=True,
+        )
+        n += 1
+        log.info(
+            "migrate %s: resumed after API restart %s → %s phase=%s copied=%s/%s",
+            job.torrent_id, job.source_engine_id, job.target_engine_id,
+            job.phase, job.copied, job.total,
+        )
+    return n
+
+
 async def _resume_source(source, torrent_id: int) -> None:
     try:
         await source.resume(torrent_id)

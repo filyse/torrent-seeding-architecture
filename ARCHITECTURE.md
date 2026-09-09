@@ -30,7 +30,7 @@
 
 | Компонент | Технологии | Роль |
 |-----------|-----------|------|
-| `web/` | Vite + TypeScript, nginx | Браузерный клиент; nginx проксирует `/api` → `api` |
+| `web/` | Vite + TypeScript, Motion, Lenis, nginx | Браузерный клиент; nginx проксирует `/api` → `api` |
 | `desktop/` | Python CLI + GUI PySide6 | Клиент для Windows: `seeding-desktop` и `python -m seeding_desktop.gui` |
 | `api/` | FastAPI, SQLAlchemy async | Публичный HTTP, оркестрация, восстановление, агрегация |
 | `engine/` | Python + libtorrent | Сессия раздачи, внутренний HTTP API (:8081) |

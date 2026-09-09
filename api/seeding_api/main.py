@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import time
 
@@ -78,6 +79,15 @@ async def startup() -> None:
     pool = EnginePool(session_factory=app.state.session_factory)
     await pool.refresh()
     app.state.engine_pool = pool
+    app.state.ws_hub = WsHub()
+    try:
+        from seeding_api.migrate import recover_orphaned_migrations
+
+        n = await recover_orphaned_migrations(app, pool)
+        if n:
+            logging.getLogger(__name__).info("resumed %s orphaned migration(s) after API start", n)
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).exception("failed to resume orphaned migrations")
     _t0 = time.perf_counter()
     await maybe_restore_torrents_to_engine(app.state.session_factory, pool)
     try:
@@ -97,7 +107,6 @@ async def startup() -> None:
     redis_url = os.getenv("REDIS_URL")
     if redis_url:
         app.state.arq_pool = await create_pool(redis_settings_from_url(redis_url))
-    app.state.ws_hub = WsHub()
     app.state.engine_refresh_task = asyncio.create_task(_engine_refresh_loop(pool))
     app.state.alert_task = asyncio.create_task(alert_notifier_loop(app))
     app.state.runtime_snapshot_task = asyncio.create_task(

@@ -480,3 +480,38 @@ def test_api_key_required_for_torrents(monkeypatch, tmp_path):
             assert (
                 client.get("/api/v1/torrents", headers={"X-API-Key": "secret-one"}).status_code == 200
             )
+
+
+def test_list_torrents_uses_db_snapshot_without_engine_runtime(api_module):
+    """Список по умолчанию не ходит на движок за полным /internal/v1/torrents."""
+    with respx.mock(assert_all_called=False) as mock:
+        _wire_engine_mocks(mock)
+        called = {"n": 0}
+
+        def on_list_runtime(_request: httpx.Request) -> httpx.Response:
+            called["n"] += 1
+            return httpx.Response(200, json=[])
+
+        mock.get(f"{ENGINE}/internal/v1/torrents").mock(side_effect=on_list_runtime)
+        with TestClient(api_module.app) as client:
+            created = client.post(
+                "/api/v1/torrents",
+                json={
+                    "display_name": "Snapshot Show",
+                    "save_path": "/data",
+                    "magnet_uri": "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                },
+            )
+            assert created.status_code == 201
+            page = client.get("/api/v1/torrents?q=Snapshot")
+            assert page.status_code == 200, page.text
+            body = page.json()
+            assert body["total"] == 1
+            item = body["items"][0]
+            assert item["display_name"] == "Snapshot Show"
+            assert item["runtime"]["upload_rate"] == 0
+            assert item["runtime"]["size"] == 0
+            assert called["n"] == 0
+            live = client.get("/api/v1/torrents?q=Snapshot&live=1")
+            assert live.status_code == 200
+            assert called["n"] == 1

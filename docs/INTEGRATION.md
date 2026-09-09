@@ -4,7 +4,8 @@
 
 ## Публичная граница
 
-- **Браузер / десктоп** ↔ только **`api`** (HTTPS или HTTP в dev), пути вида `/api/v1/...`. Торренты: CRUD-образно список/создать/детали/пауза/возобновить/**удалить** (`DELETE /api/v1/torrents/{id}` — БД + снятие с движка), **скачать `.torrent`** (`GET /api/v1/torrents/{id}/torrent-file`, спека [`TORRENT_FILE.md`](TORRENT_FILE.md)). Опционально **`X-API-Key`**, если задано `SEEDING_API_KEYS` на API.
+- **Браузер (`web/`)**: Vite + TypeScript, Motion, Lenis (плавный скролл с 1.53.55).
+  Десктоп — отдельно. Клиенты ↔ только **`api`** (HTTPS или HTTP в dev), пути вида `/api/v1/...`. Торренты: CRUD-образно список/создать/детали/пауза/возобновить/**удалить** (`DELETE /api/v1/torrents/{id}` — БД + снятие с движка), **скачать `.torrent`** (`GET /api/v1/torrents/{id}/torrent-file`, спека [`TORRENT_FILE.md`](TORRENT_FILE.md)). Опционально **`X-API-Key`**, если задано `SEEDING_API_KEYS` на API.
 - **`api` → Kafka → MPW**: при удалении задачи creator (кнопка или TTL) оркестратор
   публикует `creator.task.deleted` (`SEEDING_KAFKA_BOOTSTRAP`). Вкладка Torrent
   снимает строку `a1:0`. Это не список раздач (`/api/v1/torrents`).

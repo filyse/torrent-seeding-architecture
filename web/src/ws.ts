@@ -30,7 +30,7 @@ const unavailCbs = new Set<() => void>();
 
 function getKey(): string {
   try {
-    return localStorage.getItem("seedingApiKey") || "";
+    return localStorage.getItem("seedingApiKey") || sessionStorage.getItem("seedingApiKey") || "";
   } catch {
     return "";
   }

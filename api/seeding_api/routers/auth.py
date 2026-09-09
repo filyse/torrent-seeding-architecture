@@ -345,6 +345,7 @@ def _user_out(row, *, protected: bool = False) -> dict:
         "protected": protected,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "last_login_at": row.last_login_at.isoformat() if row.last_login_at else None,
+        "avatar": getattr(row, "avatar", None) or "",
     }
 
 

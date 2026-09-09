@@ -17,6 +17,9 @@ x-engine-common: &engine-common
     # Периодическое сохранение состояния (сек) — устойчивость к kill -9/падению.
     SEEDING_FASTRESUME_SAVE_INTERVAL: "300"
     LT_CONNECTIONS_LIMIT: "500"
+    # Раздача многим: политика оркестратора /settings/unchoke. Откат: 8 + fastest_upload.
+    # LT_UNCHOKE_SLOTS_LIMIT: "8"
+    # LT_SEED_CHOKING_ALGORITHM: "fastest_upload"
     LT_ENABLE_UPNP: "0"
     LT_ENABLE_NATPMP: "0"
     # Саморегистрация в оркестраторе (Фаза 4.5). id/порт/префикс выводятся из

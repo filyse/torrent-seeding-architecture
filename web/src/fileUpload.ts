@@ -1,3 +1,7 @@
+import { creatorBrowseRow, fillCreatorCrumbs } from "./dirBrowser";
+import { intakeDrop, intakeFoot, intakeHead, type ElFn, type IconFn } from "./intake";
+import { presentModal } from "./motionPop";
+
 /** Тестовая загрузка файлов: ticket → чанки на upload-host → complete. */
 
 export type UploadRoute = "direct" | "relay";
@@ -607,17 +611,21 @@ export function openUploadQueueDialog(d: FileUploadDeps): void {
     "aria-labelledby": "upload-queue-title",
   });
   const listBox = d.el("div", { className: "upload-queue" });
-  const closeBtn = d.el("button", {
-    type: "button",
-    className: "btn btn--ghost btn--sm modal-close",
-    "aria-label": "Закрыть",
-  }, ["✕"]);
+  const closeBtn = d.el(
+    "button",
+    { type: "button", className: "modal-close", "aria-label": "Закрыть" },
+    [d.icon("x")],
+  );
 
-  const finish = () => {
-    queueOverlay = null;
-    queueUi = null;
+  let dismiss: () => Promise<void> = async () => {
     overlay.remove();
+  };
+  const finish = () => {
     document.removeEventListener("keydown", onKey);
+    void dismiss().then(() => {
+      queueOverlay = null;
+      queueUi = null;
+    });
   };
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key === "Escape") finish();
@@ -641,7 +649,7 @@ export function openUploadQueueDialog(d: FileUploadDeps): void {
     listBox,
   );
   overlay.append(dialog);
-  document.body.append(overlay);
+  dismiss = presentModal(overlay);
 
   queueOverlay = overlay;
   queueUi = listBox;
@@ -678,9 +686,10 @@ export function openFileUploadDialog(d: FileUploadDeps): void {
 
   const overlay = d.el("div", { className: "modal-overlay" });
   const dialog = d.el("div", {
-    className: "modal-dialog modal-dialog--wide",
+    className: "modal-dialog intake modal-dialog--wide",
     role: "dialog",
     "aria-modal": "true",
+    "aria-labelledby": "upload-dialog-title",
   });
 
   let engines: { id: string; storage_prefix: string; online?: boolean }[] = [];
@@ -689,11 +698,16 @@ export function openFileUploadDialog(d: FileUploadDeps): void {
   let destLocked = false; // выбран каталог (авто или вручную)
   let selectedFiles: File[] = [];
 
-  const fileInput = d.el("input", {
-    type: "file",
-    multiple: "true",
-    className: "file-input",
-  }) as HTMLInputElement;
+  let takeFiles: (files: File[]) => void = () => undefined;
+  const drop = intakeDrop({
+    el: d.el as ElFn,
+    icon: d.icon,
+    multiple: true,
+    title: "Перетащите файлы",
+    hint: "Или Ctrl+V. Папки целиком — позже",
+    browse: "Выбрать файлы",
+    onFiles: (files) => takeFiles(files),
+  });
   const matchHost = d.el("div", { className: "update-rows" });
   const browserWrap = d.el("div", { className: "upload-browser", hidden: "" });
   const engineSelect = d.el("select", { className: "list-filter__select" }) as HTMLSelectElement;
@@ -746,11 +760,18 @@ export function openFileUploadDialog(d: FileUploadDeps): void {
     d.el("div", { className: "upload-route__tabs" }, [routeDirect, routeRelay]),
   );
 
-  const close = () => {
+  let dismiss: () => Promise<void> = async () => {
     overlay.remove();
-    document.removeEventListener("paste", onPaste);
   };
-  const closeBtn = d.el("button", { type: "button", className: "btn btn--ghost btn--sm" }, ["✕"]);
+  const close = () => {
+    document.removeEventListener("paste", onPaste);
+    void dismiss();
+  };
+  const closeBtn = d.el(
+    "button",
+    { type: "button", className: "modal-close", "aria-label": "Закрыть" },
+    [d.icon("x")],
+  );
   closeBtn.addEventListener("click", close);
 
   const engineSubdir = (id: string): string => {
@@ -795,19 +816,13 @@ export function openFileUploadDialog(d: FileUploadDeps): void {
   };
 
   const renderBreadcrumb = () => {
-    breadcrumb.replaceChildren();
-    const root = d.el("button", { type: "button", className: "creator-crumb" }, ["/ (диск)"]);
-    root.addEventListener("click", () => void navigate(""));
-    breadcrumb.append(root);
-    let acc = "";
-    for (const part of currentPath.split("/").filter(Boolean)) {
-      acc = acc ? `${acc}/${part}` : part;
-      const target = acc;
-      breadcrumb.append(document.createTextNode(" / "));
-      const crumb = d.el("button", { type: "button", className: "creator-crumb" }, [part]);
-      crumb.addEventListener("click", () => void navigate(target));
-      breadcrumb.append(crumb);
-    }
+    fillCreatorCrumbs({
+      host: breadcrumb,
+      el: d.el as ElFn,
+      icon: d.icon as IconFn,
+      path: currentPath,
+      onGo: (path) => void navigate(path),
+    });
   };
 
   const navigate = async (path: string) => {
@@ -827,15 +842,15 @@ export function openFileUploadDialog(d: FileUploadDeps): void {
         return;
       }
       for (const it of items) {
-        const row = d.el("div", { className: "creator-row" });
-        const nameEl = d.el(
-          "button",
-          { type: "button", className: "creator-name creator-name--dir" },
-          [`📁 ${it.name}`],
+        listBox.append(
+          creatorBrowseRow({
+            el: d.el as ElFn,
+            icon: d.icon as IconFn,
+            name: it.name,
+            isDir: true,
+            onOpen: () => void navigate(it.path),
+          }),
         );
-        nameEl.addEventListener("click", () => void navigate(it.path));
-        row.append(nameEl);
-        listBox.append(row);
       }
     } catch (e) {
       listBox.replaceChildren(
@@ -1091,20 +1106,17 @@ export function openFileUploadDialog(d: FileUploadDeps): void {
     }
   };
 
-  fileInput.addEventListener("change", () => {
-    void onFiles(Array.from(fileInput.files ?? []));
-  });
+  takeFiles = (files) => {
+    drop.show(files);
+    void onFiles(files);
+  };
 
   const onPaste = (ev: ClipboardEvent) => {
     const items = ev.clipboardData?.files;
     if (!items?.length) return;
     ev.preventDefault();
     const files = Array.from(items);
-    // DataTransfer в input не всегда пишется — держим свой список.
-    const dt = new DataTransfer();
-    for (const f of files) dt.items.add(f);
-    fileInput.files = dt.files;
-    void onFiles(files);
+    takeFiles(files);
   };
   document.addEventListener("paste", onPaste);
 
@@ -1126,30 +1138,31 @@ export function openFileUploadDialog(d: FileUploadDeps): void {
 
   browserWrap.append(
     d.field("Движок", engineSelect),
-    breadcrumb,
-    listBox,
+    d.el("div", { className: "creator-picker" }, [breadcrumb, listBox]),
     pathLbl,
   );
 
   dialog.append(
-    d.el("div", { className: "panel__head panel__head--with-action" }, ["Загрузить файлы", closeBtn]),
-    d.el("div", { className: "panel__body" }, [
-      d.el("p", { className: "field__hint update-intro" }, [
-        "Выберите или вставьте файлы — найду папку на диске по имени (эпизод s04e05 → сезон s04). " +
-          "Если папки нет — предложу создать новую и выбрать движок.",
-      ]),
-      routeWrap,
-      d.field("Файлы", fileInput, "Только файлы; можно Ctrl+V. Папки целиком — позже"),
-      matchHost,
-      browserWrap,
-      d.el("div", { className: "modal-actions" }, [startBtn]),
-    ]),
+    intakeHead({
+      el: d.el as ElFn,
+      icon: d.icon,
+      mark: "upload",
+      title: "Загрузить файлы",
+      titleId: "upload-dialog-title",
+      lead: "Бросьте файлы или Ctrl+V — найду папку по имени. Если нет — предложу создать.",
+      closeBtn,
+    }),
+    drop.wrap,
+    routeWrap,
+    matchHost,
+    browserWrap,
+    intakeFoot(d.el as ElFn, startBtn),
   );
   overlay.append(dialog);
   overlay.addEventListener("click", (ev) => {
     if (ev.target === overlay) close();
   });
-  document.body.append(overlay);
+  dismiss = presentModal(overlay);
 
   void (async () => {
     try {
