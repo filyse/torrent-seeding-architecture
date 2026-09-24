@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import tarfile
+import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -23,6 +24,7 @@ from seeding_engine.fastresume_io import (
     session_state_path,
     try_read_resume_params,
 )
+from seeding_engine.seed_count import fetch_scrape
 from seeding_engine.store import RuntimeHandle, RuntimeStore
 from seeding_engine.sysinfo import storage_kind
 from seeding_engine.unchoke import (
@@ -604,6 +606,37 @@ def _peer_to_dict(peer, lt=None) -> dict[str, object]:
     }
 
 
+def _info_hash_bytes(h) -> bytes | None:
+    try:
+        raw = h.info_hash() if callable(getattr(h, "info_hash", None)) else h.info_hash
+    except Exception:  # noqa: BLE001
+        return None
+    if isinstance(raw, (bytes, bytearray)) and len(raw) == 20:
+        return bytes(raw)
+    text = str(raw or "")
+    if len(text) == 40:
+        try:
+            return bytes.fromhex(text)
+        except ValueError:
+            return None
+    return None
+
+
+def _announce_url(h) -> str | None:
+    if not hasattr(h, "trackers"):
+        return None
+    try:
+        trackers = h.trackers()
+    except Exception:  # noqa: BLE001
+        return None
+    for tr in trackers:
+        url = tr.get("url") if isinstance(tr, dict) else getattr(tr, "url", None)
+        url = str(url or "")
+        if url.startswith("http"):
+            return url
+    return None
+
+
 def _total_bytes_from_status(st, *names: str) -> int | None:
     for name in names:
         val = getattr(st, name, None)
@@ -667,6 +700,9 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self.disk_kind = storage_kind()
         self._upload_gate = SessionUploadGate(apply=self._apply_session_upload)
         self._check_holds = CheckHoldTracker()
+        # db_id -> (monotonic, сиды, личи). None в снимке, пока скрейпа не было.
+        self._swarm_seeds: dict[int, tuple[float, int, int]] = {}
+        self._scrape_cursor = 0
 
     def _apply_session_upload(self, bps: int) -> None:
         ses = self._ses
@@ -1746,7 +1782,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             name=str(getattr(st, "name", "") or "") or None,
             size=size,
             downloaded=downloaded,
-            num_seeds=int(getattr(st, "num_seeds", 0) or 0),
+            num_seeds=self._cached_swarm_seeds(db_id),
+            num_leechers=self._cached_swarm_leechers(db_id),
             ratio=ratio,
             eta=eta,
             added_time=added_time,
@@ -1814,7 +1851,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 "state": _state_label(lt, st),
                 "progress": float(st.progress),
                 "peers": int(getattr(st, "num_peers", 0) or 0),
-                "seeds": int(getattr(st, "num_seeds", 0) or 0),
+                "seeds": self._cached_swarm_seeds(db_id),
                 "connections": int(getattr(st, "num_connections", 0) or 0),
                 "download_rate": int(getattr(st, "download_payload_rate", 0) or 0),
                 "upload_rate": int(getattr(st, "upload_payload_rate", 0) or 0),
@@ -2182,7 +2219,64 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
 
         return await asyncio.to_thread(_remove)
 
+    def _cached_swarm_seeds(self, db_id: int) -> int | None:
+        hit = self._swarm_seeds.get(db_id)
+        if hit is None:
+            return None
+        return hit[1]
+
+    def _cached_swarm_leechers(self, db_id: int) -> int | None:
+        hit = self._swarm_seeds.get(db_id)
+        if hit is None or len(hit) < 3:
+            return None
+        return hit[2]
+
+    async def _refresh_swarm_seeds(self, limit: int = 8) -> None:
+        """Несколько скрейпов за проход. libtorrent сам complete с анонса не пишет."""
+        now = time.monotonic()
+        ttl = 30 * 60
+        async with self._lock:
+            handles = dict(self._handles)
+        ids = list(handles)
+        if not ids:
+            return
+        start = self._scrape_cursor % len(ids)
+        picked: list[tuple[int, str, bytes]] = []
+        scanned = 0
+        for i in range(len(ids)):
+            scanned = i + 1
+            db_id = ids[(start + i) % len(ids)]
+            hit = self._swarm_seeds.get(db_id)
+            if hit is not None and len(hit) >= 3 and now - hit[0] < ttl:
+                continue
+            url = _announce_url(handles[db_id])
+            ih = _info_hash_bytes(handles[db_id])
+            if url and ih:
+                picked.append((db_id, url, ih))
+            if len(picked) >= limit:
+                break
+        self._scrape_cursor = (start + scanned) % len(ids)
+        if not picked:
+            return
+
+        def _run():
+            out: list[tuple[int, int, int]] = []
+            for db_id, url, ih in picked:
+                try:
+                    pair = fetch_scrape(url, ih)
+                except Exception:  # noqa: BLE001
+                    pair = None
+                if pair is not None:
+                    out.append((db_id, pair[0], pair[1]))
+            return out
+
+        rows = await asyncio.to_thread(_run)
+        stamped = time.monotonic()
+        for db_id, seeds, leechers in rows:
+            self._swarm_seeds[db_id] = (stamped, seeds, leechers)
+
     async def session_stats(self) -> dict[str, object]:
+        await self._refresh_swarm_seeds()
         async with self._lock:
             ses = self._ses
             handles = dict(self._handles)
@@ -2205,6 +2299,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             active = 0
             peers = 0
             seeds = 0
+            leechers = 0
             errors = 0
             checking: set[int] = set()
             lt = self._lt
@@ -2216,7 +2311,12 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     if not getattr(st, "paused", False):
                         active += 1
                     peers += int(getattr(st, "num_peers", 0) or 0)
-                    seeds += int(getattr(st, "num_seeds", 0) or 0)
+                    swarm = self._cached_swarm_seeds(int(db_id))
+                    if swarm is not None:
+                        seeds += swarm
+                    swarm_l = self._cached_swarm_leechers(int(db_id))
+                    if swarm_l is not None:
+                        leechers += swarm_l
                     errc = getattr(st, "errc", None)
                     if errc is not None and getattr(errc, "value", 0):
                         errors += 1
@@ -2251,6 +2351,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 "listening_port": listening_port,
                 "peers": peers,
                 "seeds": seeds,
+                "leechers": leechers,
                 "errors": errors,
             }
 

@@ -90,6 +90,7 @@ class RuntimeHandleOut(BaseModel):
     size: int | None = None
     downloaded: int | None = None
     num_seeds: int | None = None
+    num_leechers: int | None = None
     ratio: float | None = None
     eta: int | None = None
     added_time: int | None = None

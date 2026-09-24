@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from seeding_api.seed_count import display_seed_count
 from seeding_db.models import TorrentRecord, TorrentStatus
 from seeding_db.repository import TorrentRepository
 from seeding_db.status_from_runtime import status_from_runtime
@@ -56,6 +57,8 @@ def runtime_from_snapshot(row: TorrentRecord) -> dict:
         "name": row.display_name,
         "size": size,
         "ratio": (uploaded / size) if size else None,
+        "num_seeds": display_seed_count(getattr(row, "seeds", None)),
+        "num_leechers": display_seed_count(getattr(row, "leechers", None)),
     }
 
 

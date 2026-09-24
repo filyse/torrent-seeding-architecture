@@ -102,6 +102,7 @@ type EngineSessionStats = {
   upload_limit?: number;
   peers?: number;
   seeds?: number;
+  leechers?: number;
   disk_kind?: string;
   creator_upload_hold?: boolean;
   creator_upload_hold_bps?: number;
@@ -255,6 +256,7 @@ type EngineInfoOut = {
     total_downloaded?: number;
     peers?: number;
     seeds?: number;
+    leechers?: number;
   } | null;
   sysinfo: {
     hostname?: string;
@@ -301,6 +303,7 @@ type RuntimeOut = {
   size?: number | null;
   downloaded?: number | null;
   num_seeds?: number | null;
+  num_leechers?: number | null;
   ratio?: number | null;
   eta?: number | null;
   added_time?: number | null;
@@ -3476,6 +3479,10 @@ function mountQuotasPanel(): HTMLElement {
   return panel;
 }
 
+function fmtSeeds(n: number | null | undefined): string {
+  return n == null ? "—" : String(n);
+}
+
 function effectiveStatus(t: TorrentOut | TorrentDetailOut): string {
   const rs = (t.runtime?.runtime_status || "").toLowerCase();
   const lt = (t.runtime?.lt_state || "").toLowerCase();
@@ -4410,7 +4417,7 @@ function renderTorrentCard(
       el("strong", {}, [`↑ ${fmtRate(t.runtime?.upload_rate)}`]),
     ]),
     el("span", { className: "torrent-card__stat" }, [
-      `${t.runtime?.num_seeds ?? 0}↑/${t.runtime?.peers ?? 0}`,
+      `${fmtSeeds(t.runtime?.num_seeds)}↑/${fmtSeeds(t.runtime?.num_leechers)}`,
     ]),
   );
   const act = (
@@ -4558,8 +4565,8 @@ function tableColumns(): TableColumn[] {
     { key: "uploaded", label: "Отдано", sort: "uploaded", num: true, cell: (t) => fmtBytes(t.runtime?.total_uploaded) },
     { key: "down", label: "↓", sort: "down", num: true, cell: (t) => fmtRate(t.runtime?.download_rate) },
     { key: "up", label: "↑", sort: "up", num: true, cell: (t) => fmtRate(t.runtime?.upload_rate) },
-    { key: "seeds", label: "Сиды", num: true, cell: (t) => String(t.runtime?.num_seeds ?? 0) },
-    { key: "peers", label: "Пиры", sort: "peers", num: true, cell: (t) => String(t.runtime?.peers ?? 0) },
+    { key: "seeds", label: "Сиды", num: true, cell: (t) => fmtSeeds(t.runtime?.num_seeds) },
+    { key: "peers", label: "Пиры", sort: "peers", num: true, cell: (t) => fmtSeeds(t.runtime?.num_leechers) },
     { key: "added", label: "Добавлен", sort: "added", cell: (t) => fmtAddedCell(t.created_at) },
     { key: "engine", label: "Движок", cell: (t) => (t.engine_id && t.engine_id.trim() ? t.engine_id : "—") },
     { key: "label", label: "Метка", cell: (t) => (t.label && t.label.trim() ? t.label : "—") },
@@ -7210,7 +7217,7 @@ async function loadDetail(
     const chips = el("div", { className: "detail-chips" });
     const dlChip = statChip(`↓ ${fmtRate(data.runtime?.download_rate)}`, "Скачивание", "dl");
     const ulChip = statChip(`↑ ${fmtRate(data.runtime?.upload_rate)}`, "Отдача", "ul");
-    const peersChip = statChip(`${data.runtime?.num_seeds ?? 0} / ${data.runtime?.peers ?? 0}`, "Сиды / пиры");
+    const peersChip = statChip(`${fmtSeeds(data.runtime?.num_seeds)} / ${fmtSeeds(data.runtime?.num_leechers)}`, "Сиды / пиры");
     const uploadedChip = statChip(fmtBytes(data.runtime?.total_uploaded), "Отдано всего");
     chips.append(dlChip, ulChip, peersChip, uploadedChip);
     const dl = data.runtime?.downloaded ?? 0;
@@ -7412,7 +7419,7 @@ async function loadDetail(
       pctEl.textContent = fmtPercent(prog);
       setChip(dlChip, `↓ ${fmtRate(data.runtime?.download_rate)}`);
       setChip(ulChip, `↑ ${fmtRate(data.runtime?.upload_rate)}`);
-      setChip(peersChip, `${data.runtime?.num_seeds ?? 0} / ${data.runtime?.peers ?? 0}`);
+      setChip(peersChip, `${fmtSeeds(data.runtime?.num_seeds)} / ${fmtSeeds(data.runtime?.num_leechers)}`);
       setChip(uploadedChip, fmtBytes(data.runtime?.total_uploaded));
     };
     detailWsOff = wsSubscribe(`torrent:${id}`, (msg) => {
@@ -9109,7 +9116,7 @@ function buildEngineDetail(info: EngineInfoOut): HTMLElement {
       kv("Отдача / приём", ses ? `${fmtRate(ses.upload_rate)} / ${fmtRate(ses.download_rate)}` : null),
       kv("Роздано всего", fmtBytes(ses?.total_uploaded)),
       kv("Скачано всего", fmtBytes(ses?.total_downloaded)),
-      kv("Пиры / сиды", ses ? `${ses.peers ?? 0} / ${ses.seeds ?? 0}` : null),
+      kv("Пиры / сиды", ses ? `${fmtSeeds(ses.leechers)} / ${fmtSeeds(ses.seeds)}` : null),
     ]),
   );
   return wrap;

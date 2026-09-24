@@ -204,6 +204,9 @@ class EnginePool:
             "upload_rate": 0,
             "total_uploaded": 0,
             "total_downloaded": 0,
+            "peers": 0,
+            "seeds": 0,
+            "leechers": 0,
         }
         engines_ok = 0
         for stats in by_engine.values():

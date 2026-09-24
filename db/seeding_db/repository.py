@@ -149,7 +149,7 @@ class TorrentRepository:
         elif sort == "down":
             page_stmt = page_stmt.order_by(TorrentRecord.down_rate.desc(), tail)
         elif sort == "peers":
-            page_stmt = page_stmt.order_by(TorrentRecord.peers.desc(), tail)
+            page_stmt = page_stmt.order_by(nullslast(TorrentRecord.leechers.desc()), tail)
         elif sort == "uploaded":
             page_stmt = page_stmt.order_by(TorrentRecord.uploaded_total.desc(), tail)
         elif sort == "size":

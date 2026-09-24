@@ -117,6 +117,7 @@ async def render_metrics(app) -> str:
                 "seeding_engine_disk_free_bytes": st.get("disk_free"),
                 "seeding_engine_peers": st.get("peers"),
                 "seeding_engine_seeds": st.get("seeds"),
+                "seeding_engine_leechers": st.get("leechers"),
                 "seeding_engine_dht_nodes": st.get("dht_nodes"),
                 "seeding_engine_torrent_errors": st.get("errors"),
             }

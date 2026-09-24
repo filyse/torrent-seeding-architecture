@@ -69,6 +69,8 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                 upl = r.uploaded_total
                 seen = r.uploaded_seen
                 sz = r.size
+                seeds = r.seeds
+                leechers = r.leechers
             else:
                 up = int(h.get("upload_rate") or 0)
                 down = int(h.get("download_rate") or 0)
@@ -80,6 +82,10 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                     r.uploaded_total, r.uploaded_seen, h.get("total_uploaded") or 0
                 )
                 sz = int(h.get("size") or 0) or r.size
+                raw_seeds = h.get("num_seeds") if "num_seeds" in h else None
+                seeds = int(raw_seeds) if raw_seeds is not None else r.seeds
+                raw_leechers = h.get("num_leechers") if "num_leechers" in h else None
+                leechers = int(raw_leechers) if raw_leechers is not None else r.leechers
 
                 # Согласуем статус по рантайму для ВСЕХ раздач (а не только для открытой страницы
                 # списка). Иначе импортированные сиды навсегда висят в «downloading» с импорта и
@@ -99,6 +105,8 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                 or upl != r.uploaded_total
                 or seen != r.uploaded_seen
                 or sz != r.size
+                or seeds != r.seeds
+                or leechers != r.leechers
             )
             if changed:
                 updates.append(
@@ -111,6 +119,8 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                         "uploaded_total": upl,
                         "uploaded_seen": seen,
                         "size": sz,
+                        "seeds": seeds,
+                        "leechers": leechers,
                         "runtime_at": now,
                     }
                 )

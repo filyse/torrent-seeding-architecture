@@ -39,6 +39,9 @@ class TorrentRecord(Base):
     up_rate: Mapped[int] = mapped_column(Integer, default=0, server_default="0", index=True)
     down_rate: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     peers: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Сиды и личи роя по скрейпу трекера. NULL — ещё не снимали (это не ноль).
+    seeds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    leechers: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     progress: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     # Всего отдано за ВСЮ жизнь раздачи — накопитель, а не зеркало счётчика движка.
     # Счётчик libtorrent живёт в рамках одной «инкарнации»: перенос на другой движок

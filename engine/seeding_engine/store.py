@@ -20,6 +20,7 @@ class RuntimeHandle:
     size: int | None = None  # total_wanted, bytes
     downloaded: int | None = None  # all_time_download, bytes
     num_seeds: int | None = None
+    num_leechers: int | None = None  # личи роя по скрейпу (incomplete), не коннекты
     ratio: float | None = None  # uploaded / downloaded
     eta: int | None = None  # секунды до завершения (None если раздача/неизвестно)
     added_time: int | None = None  # epoch seconds
