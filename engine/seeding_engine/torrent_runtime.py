@@ -703,6 +703,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         # db_id -> (monotonic, сиды, личи). None в снимке, пока скрейпа не было.
         self._swarm_seeds: dict[int, tuple[float, int, int]] = {}
         self._scrape_cursor = 0
+        self._scrape_task: asyncio.Task | None = None
 
     def _apply_session_upload(self, bps: int) -> None:
         ses = self._ses
@@ -820,6 +821,9 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         """Остановка сессии; при SEEDING_LT_STATE_FILE — сохранение состояния (best effort)."""
         lt = self._lt
         state_path = self._state_path
+        if self._scrape_task is not None:
+            self._scrape_task.cancel()
+            self._scrape_task = None
         if self._save_task is not None:
             self._save_task.cancel()
             try:
@@ -2275,8 +2279,15 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         for db_id, seeds, leechers in rows:
             self._swarm_seeds[db_id] = (stamped, seeds, leechers)
 
+    def _kick_swarm_scrape(self) -> None:
+        """Скрейп не должен задерживать /session/stats: от него зависит список движков."""
+        task = self._scrape_task
+        if task is not None and not task.done():
+            return
+        self._scrape_task = asyncio.create_task(self._refresh_swarm_seeds())
+
     async def session_stats(self) -> dict[str, object]:
-        await self._refresh_swarm_seeds()
+        self._kick_swarm_scrape()
         async with self._lock:
             ses = self._ses
             handles = dict(self._handles)

@@ -25,7 +25,7 @@ API отдаёт метрики в текстовом формате экспо�
 | `seeding_engine_download_rate_bytes{engine}` / `_upload_rate_bytes{engine}` | gauge | Скорости движка |
 | `seeding_engine_disk_total_bytes{engine}` / `_disk_free_bytes{engine}` | gauge | Диск движка |
 | `seeding_engine_peers{engine}` | gauge | Подключённые пиры (коннекты libtorrent) |
-| `seeding_engine_seeds{engine}` / `_leechers{engine}` | gauge | Рой по скрейпу: сумма `complete` / `incomplete` |
+| `seeding_engine_seeds{engine}` / `_leechers{engine}` | gauge | Рой по скрейпу: сумма `complete` / `incomplete`. Скрейп фоновый, `/session/stats` его не ждёт |
 | `seeding_engine_dht_nodes{engine}` | gauge | Узлы DHT |
 | `seeding_engine_torrent_errors{engine}` | gauge | Раздачи в ошибке на движке |
 | `seeding_engine_uploaded_bytes_total{engine}` / `_downloaded_bytes_total{engine}` | counter | Накопленный объём |
