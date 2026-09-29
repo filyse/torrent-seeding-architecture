@@ -268,6 +268,18 @@ class UnchokeSettingsOut(BaseModel):
     errors: int | None = None
 
 
+class WorkQueuesIn(BaseModel):
+    migrate_per_engine: int | None = Field(default=None, ge=1, le=16)
+    hash_per_engine: int | None = Field(default=None, ge=1, le=8)
+
+
+class WorkQueuesOut(BaseModel):
+    migrate_per_engine: int
+    hash_per_engine: int
+    applied: int | None = None
+    errors: int | None = None
+
+
 class UploadLimitsIn(BaseModel):
     max_parallel_uploads: int | None = Field(default=None, ge=1, le=8)
     chunk_concurrency: int | None = Field(default=None, ge=1, le=8)

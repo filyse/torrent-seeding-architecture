@@ -3309,6 +3309,88 @@ function mountUploadLimitsPanel(): HTMLElement {
   return panel;
 }
 
+type WorkQueuesOut = {
+  migrate_per_engine: number;
+  hash_per_engine: number;
+  applied?: number;
+  errors?: number;
+};
+
+function mountWorkQueuesPanel(): HTMLElement {
+  const panel = el("section", { className: "panel" });
+  panel.append(el("div", { className: "panel__head" }, ["Очереди переноса и хеша"]));
+  const body = el("div", { className: "panel__body" });
+  const hint = el("p", { className: "field__hint" }, [
+    "Перенос: сколько раздач один движок одновременно отдаёт и сколько один принимает. Остальные ждут. Хеш: сколько проверок сразу на одном движке, включая хеш после переноса. Менять может только admin.",
+  ]);
+  const migrateInput = el("input", {
+    type: "number",
+    min: "1",
+    max: "16",
+    className: "input",
+  }) as HTMLInputElement;
+  const hashInput = el("input", {
+    type: "number",
+    min: "1",
+    max: "8",
+    className: "input",
+  }) as HTMLInputElement;
+  const saveBtn = el("button", { type: "button", className: "btn btn--sm btn--primary" }, ["Сохранить"]);
+  const result = el("p", { className: "field__hint" }, [""]);
+
+  const clamp = (raw: string, fallback: number, lo: number, hi: number) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(lo, Math.min(hi, Math.round(n)));
+  };
+
+  const setAll = (s: WorkQueuesOut) => {
+    migrateInput.value = String(s.migrate_per_engine);
+    hashInput.value = String(s.hash_per_engine);
+  };
+
+  saveBtn.addEventListener("click", async () => {
+    saveBtn.disabled = true;
+    result.textContent = "Сохраняю…";
+    try {
+      const s = await fetchJson<WorkQueuesOut>("/settings/work-queues", {
+        method: "POST",
+        body: JSON.stringify({
+          migrate_per_engine: clamp(migrateInput.value, 4, 1, 16),
+          hash_per_engine: clamp(hashInput.value, 2, 1, 8),
+        }),
+      });
+      setAll(s);
+      result.textContent = `Переносов на движок: ${s.migrate_per_engine}, хешей: ${s.hash_per_engine}.`;
+      showToast("Очереди сохранены");
+    } catch (e) {
+      result.textContent = e instanceof Error ? e.message : String(e);
+      showToast(result.textContent, true);
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  body.append(
+    hint,
+    el("div", { className: "limits-form" }, [
+      el("label", { className: "limits-form__field" }, ["Переносов с движка и на движок (1–16)", migrateInput]),
+      el("label", { className: "limits-form__field" }, ["Хешей на движке (1–8)", hashInput]),
+      saveBtn,
+    ]),
+    result,
+  );
+  panel.append(body);
+  void (async () => {
+    try {
+      setAll(await fetchJson<WorkQueuesOut>("/settings/work-queues"));
+    } catch {
+      /* ignore */
+    }
+  })();
+  return panel;
+}
+
 function mountPrivateMaintenancePanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
   panel.append(el("div", { className: "panel__head" }, ["Приватные трекеры"]));
@@ -10746,7 +10828,7 @@ function mountSettingsShell(root: HTMLElement): void {
           mountNetSettingsPanel(),
           mountUnchokeSettingsPanel(),
         );
-        if (isAdmin()) out.push(mountUploadLimitsPanel());
+        if (isAdmin()) out.push(mountUploadLimitsPanel(), mountWorkQueuesPanel());
         out.push(mountPrivateMaintenancePanel());
         return out;
       },
