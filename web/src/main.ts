@@ -1096,8 +1096,8 @@ function refreshIconBtn(onClick: () => void): HTMLButtonElement {
 // —— Кастомный выпадающий список для <select> ————————————————————————————————
 // Нативный <select> оставляем как есть (закрытый вид и вся логика/значение — его),
 // но перехватываем ОТКРЫТИЕ и вместо системного меню рисуем свой стилизованный список.
-// Опции читаются из select в момент открытия — динамические списки (метки/движки) и
-// программная смена value работают без синхронизации.
+// Опции читаются из select в момент открытия. Пока список открыт, событие
+// `cselect-sync` переписывает подписи (счётчики статусов, меток, движков).
 let closeActiveCselect: (() => void) | null = null;
 
 /** Ширина <select> по текущей подписи, а не по самому длинному option. */
@@ -1155,25 +1155,50 @@ function enhanceSelect(select: HTMLSelectElement): void {
     return below;
   };
 
+  const bindItem = (item: HTMLElement, i: number) => {
+    item.addEventListener("mousedown", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const opt = select.options[i];
+      if (!opt || opt.disabled) return;
+      if (select.selectedIndex !== i) {
+        select.selectedIndex = i;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      close();
+    });
+  };
   const build = () => {
     panel.replaceChildren();
     Array.from(select.options).forEach((opt, i) => {
       const item = el("div", { className: "cselect-option", role: "option" }, [opt.textContent ?? ""]);
       if (i === select.selectedIndex) item.classList.add("is-selected");
       if (opt.disabled) item.classList.add("is-disabled");
-      item.addEventListener("mousedown", (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        if (opt.disabled) return;
-        if (select.selectedIndex !== i) {
-          select.selectedIndex = i;
-          select.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-        close();
-      });
+      bindItem(item, i);
       panel.append(item);
     });
   };
+  // Счётчики в option меняются, пока список открыт. Системное меню этого не
+  // показывает, своё — переписываем на месте, не закрывая и не анимируя заново.
+  const syncOpen = () => {
+    if (!open) return;
+    const opts = Array.from(select.options);
+    const items = Array.from(panel.querySelectorAll<HTMLElement>(".cselect-option"));
+    if (items.length !== opts.length) {
+      const top = panel.scrollTop;
+      build();
+      panel.scrollTop = top;
+      return;
+    }
+    opts.forEach((opt, i) => {
+      const item = items[i];
+      const text = opt.textContent ?? "";
+      if (item.textContent !== text) item.textContent = text;
+      item.classList.toggle("is-selected", i === select.selectedIndex);
+      item.classList.toggle("is-disabled", opt.disabled);
+    });
+  };
+  select.addEventListener("cselect-sync", syncOpen);
 
   const onDocDown = (ev: Event) => {
     if (ev.target !== select && !select.contains(ev.target as Node) && !panel.contains(ev.target as Node)) close();
@@ -6494,6 +6519,13 @@ function mountListShell(root: HTMLElement): void {
     reloadFromFilters();
     syncReset();
   });
+  for (const sel of [statusSelect, labelSelect, stateSelect, engineSelect]) {
+    const pull = () => void refreshFacets(true);
+    sel.addEventListener("mousedown", pull);
+    sel.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " " || ev.key === "ArrowDown" || ev.key === "ArrowUp") pull();
+    });
+  }
 
   // Счётчики у вариантов фильтров: B1 (1 720 шт), есть трафик (40 шт), Раздача (8 000 шт)…
   type ListFacets = {
@@ -6517,6 +6549,7 @@ function mountListShell(root: HTMLElement): void {
       const c = o.value === "" ? facets?.total : (counts[o.value] ?? 0);
       o.textContent = c == null ? base : base + fmtCount(c);
     }
+    sel.dispatchEvent(new Event("cselect-sync"));
   }
   // К счётчику добавляем суммарный объём раздач: «b5 (1 659 шт · 12.3 TB)».
   // Вариант «все» (value="") показывает total_size (по всем раздачам).
@@ -6535,6 +6568,7 @@ function mountListShell(root: HTMLElement): void {
         o.textContent = c == null ? base : base + fmtCountSize(c, sizes[o.value] ?? 0);
       }
     }
+    sel.dispatchEvent(new Event("cselect-sync"));
   }
   function applyFacetCounts(): void {
     if (!facets) return;
@@ -6543,9 +6577,14 @@ function mountListShell(root: HTMLElement): void {
     applyCountsSizeTo(labelSelect, facets.labels, facets.label_sizes ?? {});
     applyCountsSizeTo(engineSelect, facets.engines, facets.engine_sizes ?? {});
   }
-  async function refreshFacets(): Promise<void> {
+  async function refreshFacets(force = false): Promise<void> {
     const now = Date.now();
-    if (now - lastFacetsAt < 5000) return; // не дёргаем чаще раза в 5с
+    // Пока меню фильтра открыто, счётчики идут вместе с опросом списка.
+    // Закрытое меню не чаще раза в 5 с.
+    const menuOpen = [statusSelect, labelSelect, stateSelect, engineSelect].some((s) =>
+      s.classList.contains("cselect-active"),
+    );
+    if (!force && now - lastFacetsAt < (menuOpen ? 0 : 5000)) return;
     lastFacetsAt = now;
     try {
       facets = await fetchJson<ListFacets>("/torrents/facets");
