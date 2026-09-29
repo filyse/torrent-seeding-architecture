@@ -109,7 +109,14 @@ class TorrentRepository:
                     func.lower(TorrentRecord.info_hash).like(like),
                 )
             )
-        if status:
+        if status == TorrentStatus.checking.value:
+            # «Проверка» в фильтре — и сам проход, и ожидание слота. Бейдж их различает.
+            conds.append(
+                TorrentRecord.status.in_(
+                    (TorrentStatus.checking.value, TorrentStatus.check_queued.value)
+                )
+            )
+        elif status:
             conds.append(TorrentRecord.status == status)
         if label:
             conds.append(TorrentRecord.label == label)
@@ -127,7 +134,11 @@ class TorrentRepository:
             conds.append(TorrentRecord.peers == 0)
         elif state == "incomplete":  # не докачано. Проверка — это хеш уже лежащих файлов.
             conds.append(TorrentRecord.progress < 1.0)
-            conds.append(TorrentRecord.status != TorrentStatus.checking.value)
+            conds.append(
+                TorrentRecord.status.notin_(
+                    (TorrentStatus.checking.value, TorrentStatus.check_queued.value)
+                )
+            )
         elif state == "error":
             conds.append(TorrentRecord.status == TorrentStatus.error.value)
         elif state == "migrating":
@@ -233,7 +244,9 @@ class TorrentRepository:
                     ),
                     func.count().filter(
                         TorrentRecord.progress < 1.0,
-                        TorrentRecord.status != TorrentStatus.checking.value,
+                        TorrentRecord.status.notin_(
+                            (TorrentStatus.checking.value, TorrentStatus.check_queued.value)
+                        ),
                     ),
                     func.count().filter(TorrentRecord.status == error),
                     func.count().filter(TorrentRecord.status == migrating),
@@ -284,6 +297,7 @@ class TorrentRepository:
         active = (
             TorrentStatus.downloading.value,
             TorrentStatus.checking.value,
+            TorrentStatus.check_queued.value,
             TorrentStatus.seeding.value,
             TorrentStatus.paused.value,
         )
@@ -305,6 +319,7 @@ class TorrentRepository:
         active = (
             TorrentStatus.downloading.value,
             TorrentStatus.checking.value,
+            TorrentStatus.check_queued.value,
             TorrentStatus.seeding.value,
             TorrentStatus.paused.value,
         )

@@ -18,7 +18,7 @@ def test_still_downloading_below_complete():
 def test_file_check_is_not_a_download():
     assert status_from_runtime("active", "checking_files", 0.02) == TorrentStatus.checking.value
     assert status_from_runtime("active", "checking_resume_data", 0.0) == TorrentStatus.checking.value
-    assert status_from_runtime("active", "queued_for_checking", 0.0) == TorrentStatus.checking.value
+    assert status_from_runtime("active", "queued_for_checking", 0.0) == TorrentStatus.check_queued.value
     # Доля прохода около 100% — это всё ещё проверка, не готовый сид.
     assert status_from_runtime("active", "checking_files", 0.999) == TorrentStatus.checking.value
 

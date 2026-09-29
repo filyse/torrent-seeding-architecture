@@ -3565,12 +3565,7 @@ function fmtSeeds(n: number | null | undefined): string {
   return n == null ? "—" : String(n);
 }
 
-const CHECK_LT = new Set([
-  "checking",
-  "checking_files",
-  "checking_resume_data",
-  "queued_for_checking",
-]);
+const CHECK_LT = new Set(["checking", "checking_files", "checking_resume_data"]);
 
 function effectiveStatus(t: TorrentOut | TorrentDetailOut): string {
   const rs = (t.runtime?.runtime_status || "").toLowerCase();
@@ -3578,6 +3573,7 @@ function effectiveStatus(t: TorrentOut | TorrentDetailOut): string {
   const progress = t.runtime?.progress;
   if (t.status === "migrating") return "migrating";
   if (rs === "paused" || t.status === "paused") return "paused";
+  if (lt === "queued_for_checking" || t.status === "check_queued") return "check_queued";
   if (CHECK_LT.has(lt)) return "checking";
   if (lt === "seeding" || lt === "finished") return "seeding";
   if (progress != null && progress >= 0.999 && lt !== "downloading" && lt !== "downloading_metadata") {
@@ -3592,6 +3588,7 @@ function statusLabel(status: string, ltState?: string | null): string {
   const map: Record<string, string> = {
     downloading: "Загрузка",
     checking: "Проверка",
+    check_queued: "Ждёт проверки",
     seeding: "Раздача",
     paused: "Пауза",
     queued: "В очереди",
@@ -3604,7 +3601,7 @@ function statusLabel(status: string, ltState?: string | null): string {
 function displayStatusLabel(t: TorrentOut | TorrentDetailOut): string {
   const st = effectiveStatus(t);
   if (t.runtime?.lt_state === "downloading_metadata") return "Метаданные";
-  if (t.runtime?.lt_state === "queued_for_checking") return "Ждёт проверки";
+  if (st === "check_queued") return "Ждёт проверки";
   return statusLabel(st, t.runtime?.lt_state);
 }
 
@@ -3613,6 +3610,7 @@ function badgeClass(status: string): string {
   if (status === "paused") return "badge badge--paused";
   if (status === "queued") return "badge badge--queued";
   if (status === "checking") return "badge badge--checking";
+  if (status === "check_queued") return "badge badge--queued";
   if (status === "migrating") return "badge badge--migrating";
   return "badge badge--downloading";
 }
@@ -5885,6 +5883,7 @@ function mountListShell(root: HTMLElement): void {
     seeding: "Раздача",
     downloading: "Загрузка",
     checking: "Проверка",
+    check_queued: "Ждёт проверки",
     paused: "Пауза",
   };
   const searchInput = el("input", {
@@ -6363,6 +6362,7 @@ function mountListShell(root: HTMLElement): void {
     ["seeding", "Раздача"],
     ["downloading", "Загрузка"],
     ["checking", "Проверка"],
+    ["check_queued", "Ждёт проверки"],
     ["paused", "Пауза"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
@@ -6523,7 +6523,9 @@ function mountListShell(root: HTMLElement): void {
   }
   function applyFacetCounts(): void {
     if (!facets) return;
-    applyCountsTo(statusSelect, facets.statuses);
+    const statusCounts = { ...facets.statuses };
+    statusCounts.checking = (statusCounts.checking ?? 0) + (statusCounts.check_queued ?? 0);
+    applyCountsTo(statusSelect, statusCounts);
     applyCountsTo(stateSelect, facets.states);
     applyCountsSizeTo(labelSelect, facets.labels, facets.label_sizes ?? {});
     applyCountsSizeTo(engineSelect, facets.engines, facets.engine_sizes ?? {});
@@ -6973,6 +6975,7 @@ function mountListShell(root: HTMLElement): void {
     seeding: "Раздача",
     downloading: "Загрузка",
     checking: "Проверка",
+    check_queued: "Ждёт проверки",
     paused: "Пауза",
   };
   const STATE_LABELS: Record<string, string> = {

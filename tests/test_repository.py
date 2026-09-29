@@ -104,6 +104,20 @@ async def test_incomplete_filter_skips_file_check(db_session: AsyncSession):
     assert [row.id for row in rows] == [partial.id]
     assert (await repo.facets())["states"]["incomplete"] == 1
 
+    waiting = await repo.create(
+        display_name="wait",
+        save_path="/p",
+        magnet_uri="magnet:?xt=urn:btih:3333333333333333333333333333333333333333",
+        status=TorrentStatus.check_queued.value,
+    )
+    await db_session.commit()
+    both, both_total = await repo.list_page(status=TorrentStatus.checking.value)
+    assert both_total == 2
+    assert {row.id for row in both} == {checking.id, waiting.id}
+    only, only_total = await repo.list_page(status=TorrentStatus.check_queued.value)
+    assert only_total == 1
+    assert [row.id for row in only] == [waiting.id]
+
 
 @pytest.mark.asyncio
 async def test_repository_delete(db_session: AsyncSession):

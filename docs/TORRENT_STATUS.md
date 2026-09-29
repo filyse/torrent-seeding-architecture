@@ -8,7 +8,8 @@
 |---|---|---|
 | `seeding`, `finished` | `seeding` | Раздача |
 | `downloading`, `downloading_metadata` | `downloading` | Загрузка / Метаданные |
-| `checking`, `checking_files`, `checking_resume_data`, `queued_for_checking` | `checking` | Проверка |
+| `checking`, `checking_files`, `checking_resume_data` | `checking` | Проверка |
+| `queued_for_checking` | `check_queued` | Ждёт проверки |
 | runtime `paused` | `paused` | Пауза |
 | runtime `error` | `error` | Ошибка |
 
@@ -23,5 +24,6 @@
 
 Сколько проверок читают диск сразу — лимит «Проверок на движке»
 (`hash_per_engine`, по умолчанию 2). Остальные в снимке
-`queued_for_checking`, бейдж «Ждёт проверки». Это пауза очереди, не
+`check_queued`, бейдж «Ждёт проверки» — и в таблице, и на карточке.
+Фильтр «Проверка» показывает оба: проход и ожидание. Это пауза очереди, не
 пользователя. Спека очереди: [`WORK_QUEUES.md`](WORK_QUEUES.md).
