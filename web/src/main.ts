@@ -3318,10 +3318,10 @@ type WorkQueuesOut = {
 
 function mountWorkQueuesPanel(): HTMLElement {
   const panel = el("section", { className: "panel" });
-  panel.append(el("div", { className: "panel__head" }, ["Очереди переноса и хеша"]));
+  panel.append(el("div", { className: "panel__head" }, ["Очереди переноса и проверки"]));
   const body = el("div", { className: "panel__body" });
   const hint = el("p", { className: "field__hint" }, [
-    "Перенос: сколько раздач один движок одновременно отдаёт и сколько один принимает. Остальные ждут. Хеш: сколько проверок сразу на одном движке, включая хеш после переноса. Менять может только admin.",
+    "Перенос: сколько раздач один движок одновременно отдаёт и сколько один принимает. Проверка: сколько раздач на одном движке одновременно читают диск — после рестарта, по кнопке «Перепроверить» и в конце переноса. Остальные ждут и подписаны «Ждёт проверки». Менять может только admin.",
   ]);
   const migrateInput = el("input", {
     type: "number",
@@ -3361,7 +3361,7 @@ function mountWorkQueuesPanel(): HTMLElement {
         }),
       });
       setAll(s);
-      result.textContent = `Переносов на движок: ${s.migrate_per_engine}, хешей: ${s.hash_per_engine}.`;
+      result.textContent = `Переносов на движок: ${s.migrate_per_engine}, проверок: ${s.hash_per_engine}.`;
       showToast("Очереди сохранены");
     } catch (e) {
       result.textContent = e instanceof Error ? e.message : String(e);
@@ -3375,7 +3375,7 @@ function mountWorkQueuesPanel(): HTMLElement {
     hint,
     el("div", { className: "limits-form" }, [
       el("label", { className: "limits-form__field" }, ["Переносов с движка и на движок (1–16)", migrateInput]),
-      el("label", { className: "limits-form__field" }, ["Хешей на движке (1–8)", hashInput]),
+      el("label", { className: "limits-form__field" }, ["Проверок на движке (1–8)", hashInput]),
       saveBtn,
     ]),
     result,
@@ -3604,6 +3604,7 @@ function statusLabel(status: string, ltState?: string | null): string {
 function displayStatusLabel(t: TorrentOut | TorrentDetailOut): string {
   const st = effectiveStatus(t);
   if (t.runtime?.lt_state === "downloading_metadata") return "Метаданные";
+  if (t.runtime?.lt_state === "queued_for_checking") return "Ждёт проверки";
   return statusLabel(st, t.runtime?.lt_state);
 }
 

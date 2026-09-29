@@ -527,6 +527,25 @@ bash scripts/deploy-ct400.sh up -d --build api web queue_worker
 Проверка: Ctrl+F5, в футере 1.53.85; фильтр статусов содержит «Проверка»;
 `GET /api/v1/health` — api 1.26.7.
 
+## 7ю. Очередь проверки после рестарта — 2026-09-29
+
+engine **1.6.8**, web **1.53.86**. API не менялся: лимит тот же
+`hash_per_engine`. Спека: [`WORK_QUEUES.md`](WORK_QUEUES.md).
+
+Без пересборки движков волна `checking_files` снова читает диск пачкой.
+CT400 — только `web`. Движки b1–b6 и a1–a3 — по §5, образ engine 1.6.8.
+
+```bash
+# CT400
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build web
+```
+
+Проверка: Ctrl+F5, в футере 1.53.86; на движке `/app` версия 1.6.8;
+сразу после рестарта одновременно не больше лимита проверок, остальные
+в снимке `queued_for_checking` («Ждёт проверки»).
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

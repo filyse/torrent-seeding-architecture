@@ -14,6 +14,7 @@ from pathlib import Path
 
 import httpx
 
+from seeding_engine.check_admit import CheckAdmit, UserPauseStore
 from seeding_engine.fastresume_io import (
     delete_fastresume,
     ensure_engine_dirs,
@@ -76,6 +77,31 @@ def _clear_auto_managed_params(lt, p) -> None:
         p.flags = flags
     except Exception as exc:  # noqa: BLE001
         log.warning("clear auto_managed on params failed: %s", exc)
+
+
+def _params_paused(lt, p) -> bool:
+    """Флаг paused в add_torrent_params. Это пауза из fastresume, до нашей очереди."""
+    flags = getattr(lt, "torrent_flags", None)
+    bit = getattr(flags, "paused", None) if flags is not None else None
+    if bit is not None and hasattr(p, "flags"):
+        try:
+            return bool(int(p.flags) & int(bit))
+        except (TypeError, ValueError):
+            return False
+    return bool(getattr(p, "paused", False))
+
+
+def _params_set_paused(lt, p) -> None:
+    flags = getattr(lt, "torrent_flags", None)
+    bit = getattr(flags, "paused", None) if flags is not None else None
+    if bit is not None and hasattr(p, "flags"):
+        try:
+            p.flags = int(p.flags) | int(bit)
+            return
+        except (TypeError, ValueError):
+            pass
+    if hasattr(p, "paused"):
+        p.paused = True
 
 
 def _set_seed_mode_param(lt, p) -> None:
@@ -681,6 +707,10 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         # Прогресс активного импорта (перенос с другого движка): db_id -> {phase, copied, total}.
         self._migrate_progress: dict[int, dict] = {}
         self._hash_queue = HashQueue(_env_int("SEEDING_HASH_PER_ENGINE", 2))
+        self._check_admit = CheckAdmit(self._hash_queue.limit)
+        root = Path(os.getenv("SEEDING_DATA_ROOT", "/data"))
+        self._user_pauses = UserPauseStore(root / ".state" / "user-paused.json")
+        self._admit_task: asyncio.Task | None = None
         # Метаданные сетевого импорта, ожидающего поток контента: db_id -> {save_path, torrent_data, ...}.
         self._staged_imports: dict[int, dict] = {}
         self._listen_low = int(os.getenv("LT_LISTEN_PORT_LOW", "51413"))
@@ -765,6 +795,12 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     log.info("engine self-restore: loaded %s torrent(s) from disk on start", n)
             except Exception as exc:  # noqa: BLE001
                 log.warning("engine self-restore failed: %s", exc)
+        # Печать файла до первого resume очереди: пауза из старого fastresume
+        # ещё точно пользовательская.
+        self._user_pauses.seal()
+        if self._admit_task is None:
+            self._admit_task = asyncio.create_task(self._check_admit_loop())
+            log.info("check queue limit=%s", self._check_admit.limit)
 
         if self._save_interval > 0 and self._save_task is None:
             self._save_task = asyncio.create_task(self._periodic_save_loop())
@@ -826,6 +862,15 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if self._scrape_task is not None:
             self._scrape_task.cancel()
             self._scrape_task = None
+        if self._admit_task is not None:
+            self._admit_task.cancel()
+            try:
+                await self._admit_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:  # noqa: BLE001
+                pass
+            self._admit_task = None
         if self._save_task is not None:
             self._save_task.cancel()
             try:
@@ -962,21 +1007,32 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             ses = self._ses
 
         blob = fr_path.read_bytes()
+        # Снимок до потока: note_legacy пишем уже на цикле, не из to_thread.
+        pauses_ready = self._user_pauses.ready
+        known_user = self._user_pauses.is_user(db_id)
 
         def _add():
             params = try_read_resume_params(lt, blob, save_path)
             if params is None:
                 raise ValueError("invalid fastresume data")
-            return ses.add_torrent(params)
+            user_paused = _params_paused(lt, params)
+            keep_paused = user_paused and (not pauses_ready or known_user)
+            if not keep_paused:
+                # Не resume() сразу: иначе весь диск уходит в checking_files.
+                _params_set_paused(lt, params)
+            return ses.add_torrent(params), keep_paused
 
-        h = await asyncio.to_thread(_add)
-
-        def _kickstart(handle):
-            if hasattr(handle, "resume"):
-                handle.resume()
-
-        await asyncio.to_thread(_kickstart, h)
-        log.info("restored db_id=%s from fastresume %s", db_id, fr_path)
+        h, keep_paused = await asyncio.to_thread(_add)
+        if keep_paused and not pauses_ready:
+            self._user_pauses.note_legacy(db_id)
+        elif not keep_paused:
+            self._check_admit.hold(db_id)
+        log.info(
+            "restored db_id=%s from fastresume %s%s",
+            db_id,
+            fr_path,
+            " (user pause)" if keep_paused else " (check queue)",
+        )
         return h
 
     def _torrent_files_dir(self) -> Path:
@@ -1752,6 +1808,11 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         done = _total_bytes_from_status(st, "total_wanted_done", "total_done")
         dl_rate = int(getattr(st, "download_payload_rate", 0) or 0)
         lt_state = _state_label(lt, st)
+        # Пауза очереди проверки — не пауза пользователя. Иначе бейдж «Пауза»,
+        # а после рестарта файл user-paused снял бы её как чужую.
+        if self._check_admit.is_waiting(db_id):
+            paused = False
+            lt_state = "queued_for_checking"
         self._check_holds.observe(self._upload_gate, self.disk_kind, db_id, lt_state)
 
         ratio: float | None = None
@@ -1820,6 +1881,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             h = self._handles.get(db_id)
         if h is None:
             return None
+        self._check_admit.drop(db_id)
+        self._user_pauses.mark(db_id)
         await asyncio.to_thread(self._manual_pause, h)
         await self._persist_resume({db_id: h})
         return await self._snapshot(db_id)
@@ -1829,6 +1892,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             h = self._handles.get(db_id)
         if h is None:
             return None
+        self._user_pauses.clear(db_id)
+        self._check_admit.drop(db_id)
         await asyncio.to_thread(self._manual_resume, h)
         return await self._snapshot(db_id)
 
@@ -2031,7 +2096,10 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if h is None or not hasattr(h, "force_recheck"):
             return False
 
+        self._check_admit.drop(db_id)
+
         async def job() -> None:
+            await asyncio.to_thread(self._manual_resume, h)
             await asyncio.to_thread(h.force_recheck)
             self._check_holds.note_recheck(self._upload_gate, self.disk_kind, db_id)
             await self._wait_hash_idle(db_id)
@@ -2041,7 +2109,66 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
 
     async def set_hash_limit(self, limit: int) -> dict[str, int]:
         applied = await self._hash_queue.set_limit(limit)
+        self._check_admit.set_limit(applied)
         return {"hash_per_engine": applied}
+
+    async def _check_admit_loop(self) -> None:
+        try:
+            while True:
+                try:
+                    await self._check_admit_once()
+                except Exception:  # noqa: BLE001
+                    log.exception("check admit tick")
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            raise
+
+    async def _check_admit_once(self) -> None:
+        ids = self._check_admit.watch_ids()
+        states: dict[int, str | None] = {}
+        for db_id in ids:
+            async with self._lock:
+                alive = db_id in self._handles
+            if not alive:
+                states[db_id] = None
+                continue
+            state = await self._hash_state(db_id)
+            states[db_id] = "" if state is None else state
+        actions = self._check_admit.tick(
+            states,
+            busy=self._hash_queue.running_count(),
+            now=time.monotonic(),
+        )
+        for db_id in actions.pause:
+            await self._queue_pause(db_id)
+        for db_id in actions.resume:
+            await self._queue_resume(db_id)
+        if actions.pause or actions.resume:
+            counts = self._check_admit.counts()
+            log.info(
+                "check queue resume=%s pause=%s held=%s queued=%s hashing=%s",
+                actions.resume,
+                actions.pause,
+                counts["held"],
+                counts["queued"],
+                counts["hashing"],
+            )
+
+    async def _queue_pause(self, db_id: int) -> None:
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None:
+            self._check_admit.drop(db_id)
+            return
+        await asyncio.to_thread(self._manual_pause, h)
+
+    async def _queue_resume(self, db_id: int) -> None:
+        async with self._lock:
+            h = self._handles.get(db_id)
+        if h is None:
+            self._check_admit.drop(db_id)
+            return
+        await asyncio.to_thread(self._manual_resume, h)
 
     async def _wait_hash_idle(self, db_id: int) -> None:
         """Слот хеша держим, пока libtorrent читает файлы, не только на время вызова."""
