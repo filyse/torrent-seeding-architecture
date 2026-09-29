@@ -2708,6 +2708,17 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 out.append(await self._snapshot(i))
             except KeyError:
                 continue
+            except RuntimeError as exc:
+                # Один снятый handle ронял весь GET /torrents, и снимок движка
+                # переставал писаться: новые раздачи вечно висели с нулём.
+                if "invalid torrent handle" not in str(exc):
+                    raise
+                log.warning("drop invalid handle db_id=%s", i)
+                async with self._lock:
+                    self._handles.pop(i, None)
+                    self._meta.pop(i, None)
+                self._check_admit.drop(i)
+                self._check_rate.drop(i)
         return out
 
     async def remove(
