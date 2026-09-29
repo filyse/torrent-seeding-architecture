@@ -69,7 +69,12 @@ def test_hash_slot_stays_for_a_long_check():
     assert admit.counts()["hashing"] == 1
 
 
-def test_drop_for_user_pause():
+def test_running_slot_is_not_waiting():
+    admit = CheckAdmit(1)
+    admit.hold(1)
+    admit.tick({}, busy=0, now=0)
+    assert admit.is_running(1)
+    assert not admit.is_waiting(1)
     admit = CheckAdmit(1)
     admit.hold(7)
     admit.drop(7)

@@ -6514,7 +6514,7 @@ function mountListShell(root: HTMLElement): void {
   function applyCountsTo(sel: HTMLSelectElement, counts: Record<string, number>): void {
     for (const o of Array.from(sel.options)) {
       const base = o.dataset.base ?? o.textContent ?? "";
-      const c = o.value === "" ? facets?.total : counts[o.value];
+      const c = o.value === "" ? facets?.total : (counts[o.value] ?? 0);
       o.textContent = c == null ? base : base + fmtCount(c);
     }
   }

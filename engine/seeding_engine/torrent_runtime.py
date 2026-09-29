@@ -1868,6 +1868,11 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if self._check_admit.is_waiting(db_id):
             paused = False
             lt_state = "queued_for_checking"
+        elif self._check_admit.is_running(db_id) and not is_full_hash_check_state(lt_state):
+            # Слот уже занят, а libtorrent часто успевает мигнуть в seeding.
+            # Без этой подписи фильтр «Проверка» пустой, пока идёт очередь.
+            paused = False
+            lt_state = "checking_files"
         if is_full_hash_check_state(lt_state):
             check_rate = self._check_rate.rate(db_id, time.monotonic())
         else:

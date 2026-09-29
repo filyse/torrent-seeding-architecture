@@ -71,6 +71,10 @@ class CheckAdmit:
         """На паузе очереди, ещё не читает диск. В UI это не «Пауза»."""
         return db_id in self._waiting
 
+    def is_running(self, db_id: int) -> bool:
+        """Слот проверки занят: короткий resume или полный проход."""
+        return db_id in self._probing or db_id in self._hashing
+
     def watch_ids(self) -> list[int]:
         return list(self._probing) + list(self._hashing)
 
