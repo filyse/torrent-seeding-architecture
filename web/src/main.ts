@@ -2671,9 +2671,9 @@ function fmtPercent(v: number | null | undefined): string {
   return `${Math.max(0, Math.min(100, v * 100)).toFixed(1)}%`;
 }
 
-function fmtCheckLabel(pctText: string, status: string, rate: number | null | undefined): string {
-  if (status === "checking" && rate && rate > 0) return `${pctText} · ${fmtRate(rate)}`;
-  return pctText;
+function checkRateText(status: string, rate: number | null | undefined): string {
+  if (status !== "checking" || !rate || rate <= 0) return "";
+  return fmtRate(rate);
 }
 
 function fmtRate(v: number | null | undefined): string {
@@ -4642,7 +4642,16 @@ function tableColumns(): TableColumn[] {
     {
       key: "status",
       label: "Статус",
-      cell: (t) => el("span", { className: badgeClass(effectiveStatus(t)) }, [displayStatusLabel(t)]),
+      cell: (t) => {
+        const st = effectiveStatus(t);
+        const badge = el("span", { className: badgeClass(st) }, [displayStatusLabel(t)]);
+        const rate = checkRateText(st, t.runtime?.check_rate);
+        if (!rate) return badge;
+        return el("span", { className: "ttable__status" }, [
+          badge,
+          el("span", { className: "ttable__check-rate", title: "Скорость проверки" }, [rate]),
+        ]);
+      },
     },
     { key: "size", label: "Размер", sort: "size", num: true, cell: (t) => fmtBytes(t.runtime?.size) },
     {
@@ -4651,11 +4660,6 @@ function tableColumns(): TableColumn[] {
       sort: "progress",
       cell: (t) => {
         const pct = Math.max(0, Math.min(100, (t.runtime?.progress ?? 0) * 100));
-        const label = fmtCheckLabel(
-          `${pct.toFixed(0)}%`,
-          effectiveStatus(t),
-          t.runtime?.check_rate,
-        );
         const wrap = el("div", { className: "ttable__progress" });
         const bar = el("div", { className: "progress" });
         bar.append(
@@ -4664,7 +4668,7 @@ function tableColumns(): TableColumn[] {
             style: `width:${pct}%`,
           }),
         );
-        wrap.append(bar, el("span", { className: "ttable__progress-val" }, [label]));
+        wrap.append(bar, el("span", { className: "ttable__progress-val" }, [`${pct.toFixed(0)}%`]));
         return wrap;
       },
     },
@@ -7306,7 +7310,12 @@ async function loadDetail(
     }
 
     const badgeEl = el("span", { className: badgeClass(st) }, [displayStatusLabel(data)]);
-    const head = el("div", { className: "detail-head" }, [badgeEl, titleWrap]);
+    const checkRateEl = el(
+      "span",
+      { className: "detail-check-rate", title: "Скорость проверки" },
+      [checkRateText(st, data.runtime?.check_rate)],
+    );
+    const head = el("div", { className: "detail-head" }, [badgeEl, checkRateEl, titleWrap]);
 
     // Статичные факты — компактной подстрокой, без отдельных боксов.
     const subParts = [`#${data.id}`, `движок ${data.engine_id}`, fmtBytes(data.runtime?.size)];
@@ -7317,9 +7326,7 @@ async function loadDetail(
     }
     const sub = el("div", { className: "detail-sub" }, [subParts.join("  ·  ")]);
 
-    const pctEl = el("span", { className: "detail-progress__pct" }, [
-      fmtCheckLabel(fmtPercent(progress), st, data.runtime?.check_rate),
-    ]);
+    const pctEl = el("span", { className: "detail-progress__pct" }, [fmtPercent(progress)]);
     const progressWrap = el("div", { className: "detail-progress" });
     progressWrap.append(bar, pctEl);
     if (st === "downloading") {
@@ -7530,7 +7537,8 @@ async function loadDetail(
       const pctNum = Math.round(prog * 1000) / 10;
       barFill.className = `progress__bar${pctNum >= 100 ? " progress__bar--complete" : ""}`;
       barFill.style.width = `${pctNum}%`;
-      pctEl.textContent = fmtCheckLabel(fmtPercent(prog), stLive, data.runtime?.check_rate);
+      pctEl.textContent = fmtPercent(prog);
+      checkRateEl.textContent = checkRateText(stLive, data.runtime?.check_rate);
       setChip(dlChip, `↓ ${fmtRate(data.runtime?.download_rate)}`);
       setChip(ulChip, `↑ ${fmtRate(data.runtime?.upload_rate)}`);
       setChip(peersChip, `${fmtSeeds(data.runtime?.num_seeds)} / ${fmtSeeds(data.runtime?.num_leechers)}`);

@@ -1138,6 +1138,18 @@ input.file-input::file-selector-button:hover {
   text-align: right;
   white-space: nowrap;
 }
+.ttable__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.ttable__check-rate,
+.detail-check-rate {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
 .ttable__actions {
   text-align: right;
   white-space: nowrap;
