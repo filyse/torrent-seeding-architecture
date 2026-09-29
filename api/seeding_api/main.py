@@ -95,7 +95,9 @@ async def startup() -> None:
             from seeding_db.repository import TorrentRepository
 
             _counts = await TorrentRepository(_s).count_by_status()
-        _restored = sum(v for k, v in _counts.items() if k in ("seeding", "downloading", "paused"))
+        _restored = sum(
+            v for k, v in _counts.items() if k in ("seeding", "downloading", "checking", "paused")
+        )
     except Exception:  # noqa: BLE001
         _restored = None
     app.state.restore_stats = {

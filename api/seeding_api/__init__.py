@@ -1,3 +1,3 @@
 """Torrent seeding HTTP API."""
 
-__version__ = "1.26.6"
+__version__ = "1.26.7"

@@ -12,6 +12,7 @@
 | API restore блокирует старт | Параллельный restore по `engine_id` |
 | Синхронный API→engine | Bulk через ARQ (`bulk_register`, `restore_engine`) |
 | Много копий и хешей на одном диске | Очереди переноса и хеша, см. [`WORK_QUEUES.md`](WORK_QUEUES.md) |
+| Проверка файлов выглядит как скачивание | Статус `checking`, см. [`TORRENT_STATUS.md`](TORRENT_STATUS.md) |
 
 ## Роли
 

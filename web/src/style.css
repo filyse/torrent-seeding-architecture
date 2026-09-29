@@ -1405,6 +1405,11 @@ input.file-input::file-selector-button:hover {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
+.badge--checking {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+}
+
 .badge--seeding {
   color: var(--success);
   background: color-mix(in srgb, var(--success) 15%, transparent);

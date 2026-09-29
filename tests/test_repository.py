@@ -47,9 +47,10 @@ async def test_repository_list_for_engine_restore(db_session: AsyncSession):
     await repo.create(display_name="q", save_path="/d", magnet_uri=m, status=TorrentStatus.queued.value)
     d = await repo.create(display_name="d", save_path="/d", magnet_uri=m, status=TorrentStatus.downloading.value)
     p = await repo.create(display_name="p", save_path="/d", magnet_uri=m, status=TorrentStatus.paused.value)
+    c = await repo.create(display_name="c", save_path="/d", magnet_uri=m, status=TorrentStatus.checking.value)
     await db_session.commit()
     got = await repo.list_for_engine_restore()
-    assert {r.id for r in got} == {d.id, p.id}
+    assert {r.id for r in got} == {d.id, p.id, c.id}
 
 
 @pytest.mark.asyncio
@@ -77,6 +78,31 @@ async def test_list_page_and_facets_migrating_state(db_session: AsyncSession):
     facets = await repo.facets()
     assert facets["states"]["migrating"] == 1
     assert facets["statuses"].get(TorrentStatus.migrating.value) == 1
+
+
+@pytest.mark.asyncio
+async def test_incomplete_filter_skips_file_check(db_session: AsyncSession):
+    repo = TorrentRepository(db_session)
+    checking = await repo.create(
+        display_name="hash",
+        save_path="/p",
+        magnet_uri="magnet:?xt=urn:btih:1111111111111111111111111111111111111111",
+        status=TorrentStatus.checking.value,
+    )
+    checking.progress = 0.02
+    partial = await repo.create(
+        display_name="partial",
+        save_path="/p",
+        magnet_uri="magnet:?xt=urn:btih:2222222222222222222222222222222222222222",
+        status=TorrentStatus.downloading.value,
+    )
+    partial.progress = 0.5
+    await db_session.commit()
+
+    rows, total = await repo.list_page(state="incomplete")
+    assert total == 1
+    assert [row.id for row in rows] == [partial.id]
+    assert (await repo.facets())["states"]["incomplete"] == 1
 
 
 @pytest.mark.asyncio

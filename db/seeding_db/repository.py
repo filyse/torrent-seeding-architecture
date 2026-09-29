@@ -125,8 +125,9 @@ class TorrentRepository:
             conds.append(TorrentRecord.status == TorrentStatus.seeding.value)
             conds.append(TorrentRecord.up_rate == 0)
             conds.append(TorrentRecord.peers == 0)
-        elif state == "incomplete":  # не докачано
+        elif state == "incomplete":  # не докачано. Проверка — это хеш уже лежащих файлов.
             conds.append(TorrentRecord.progress < 1.0)
+            conds.append(TorrentRecord.status != TorrentStatus.checking.value)
         elif state == "error":
             conds.append(TorrentRecord.status == TorrentStatus.error.value)
         elif state == "migrating":
@@ -230,7 +231,10 @@ class TorrentRepository:
                         TorrentRecord.up_rate == 0,
                         TorrentRecord.peers == 0,
                     ),
-                    func.count().filter(TorrentRecord.progress < 1.0),
+                    func.count().filter(
+                        TorrentRecord.progress < 1.0,
+                        TorrentRecord.status != TorrentStatus.checking.value,
+                    ),
                     func.count().filter(TorrentRecord.status == error),
                     func.count().filter(TorrentRecord.status == migrating),
                 )
@@ -279,6 +283,7 @@ class TorrentRepository:
         """Торренты, которые должны быть в рантайме движка после перезапуска."""
         active = (
             TorrentStatus.downloading.value,
+            TorrentStatus.checking.value,
             TorrentStatus.seeding.value,
             TorrentStatus.paused.value,
         )
@@ -299,6 +304,7 @@ class TorrentRepository:
         """Активные торренты, добавленные через .torrent (без magnet в БД)."""
         active = (
             TorrentStatus.downloading.value,
+            TorrentStatus.checking.value,
             TorrentStatus.seeding.value,
             TorrentStatus.paused.value,
         )

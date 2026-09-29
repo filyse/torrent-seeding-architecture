@@ -511,6 +511,22 @@ CT400: точечный `pct push` `web/src/{main.ts,style.css,version.ts}` +
 `deploy-ct400.sh up -d --build web`. Проверка: Ctrl+F5, в футере 1.49.6.3;
 в покое только «Обновлено», выезд влево, строки ↓/↑/отдано → WAN-карточки.
 
+## 7э. Статус «Проверка» — 2026-09-29
+
+web **1.53.85**, api **1.26.7**. Спека: [`TORRENT_STATUS.md`](TORRENT_STATUS.md).
+Движки не трогать: состояние `checking_files` уже отдаёт libtorrent, подпись
+пишет API и воркер. `queue_worker` тоже вызывает `status_from_runtime`, его
+пересобрать вместе с api, иначе он затрёт `checking` обратно в `downloading`.
+
+```bash
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build api web queue_worker
+```
+
+Проверка: Ctrl+F5, в футере 1.53.85; фильтр статусов содержит «Проверка»;
+`GET /api/v1/health` — api 1.26.7.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

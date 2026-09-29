@@ -18,7 +18,7 @@ API отдаёт метрики в текстовом формате экспо�
 |---|---|---|
 | `seeding_build_info{version}` | gauge | Версия API |
 | `seeding_database_up` | gauge | Доступность PostgreSQL (1/0) |
-| `seeding_torrents{status}` | gauge | Число раздач по статусу (из БД) |
+| `seeding_torrents{status}` | gauge | Число раздач по статусу (из БД). `checking` — проверка файлов, не скачивание; см. `docs/TORRENT_STATUS.md` |
 | `seeding_torrents_total_count` | gauge | Всего логических раздач |
 | `seeding_engine_up{engine}` | gauge | Движок доступен (1/0) |
 | `seeding_engine_torrents{engine}` / `_torrents_active{engine}` | gauge | Раздачи/активные на движке |

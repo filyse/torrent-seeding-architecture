@@ -13,6 +13,7 @@ class Base(DeclarativeBase):
 class TorrentStatus(str, Enum):
     queued = "queued"
     downloading = "downloading"
+    checking = "checking"
     seeding = "seeding"
     paused = "paused"
     migrating = "migrating"

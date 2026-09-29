@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from seeding_db.models import TorrentStatus
 
+# libtorrent считает файлы. progress в этом состоянии — доля прохода, не «сколько не докачано».
+_CHECK_STATES = frozenset(
+    {"checking", "checking_files", "checking_resume_data", "queued_for_checking"}
+)
+
 
 def status_from_runtime(
     runtime_status: str | None,
@@ -19,6 +24,8 @@ def status_from_runtime(
         return TorrentStatus.paused.value
     if rs == "error":
         return TorrentStatus.error.value
+    if st in _CHECK_STATES:
+        return TorrentStatus.checking.value
     if st in {"seeding", "finished"}:
         return TorrentStatus.seeding.value
     if progress is not None and progress >= 0.999 and st != "downloading_metadata":

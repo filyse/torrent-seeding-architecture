@@ -3565,12 +3565,20 @@ function fmtSeeds(n: number | null | undefined): string {
   return n == null ? "—" : String(n);
 }
 
+const CHECK_LT = new Set([
+  "checking",
+  "checking_files",
+  "checking_resume_data",
+  "queued_for_checking",
+]);
+
 function effectiveStatus(t: TorrentOut | TorrentDetailOut): string {
   const rs = (t.runtime?.runtime_status || "").toLowerCase();
   const lt = (t.runtime?.lt_state || "").toLowerCase();
   const progress = t.runtime?.progress;
   if (t.status === "migrating") return "migrating";
   if (rs === "paused" || t.status === "paused") return "paused";
+  if (CHECK_LT.has(lt)) return "checking";
   if (lt === "seeding" || lt === "finished") return "seeding";
   if (progress != null && progress >= 0.999 && lt !== "downloading" && lt !== "downloading_metadata") {
     return "seeding";
@@ -3583,6 +3591,7 @@ function statusLabel(status: string, ltState?: string | null): string {
   if (ltState === "downloading_metadata") return "Метаданные";
   const map: Record<string, string> = {
     downloading: "Загрузка",
+    checking: "Проверка",
     seeding: "Раздача",
     paused: "Пауза",
     queued: "В очереди",
@@ -3602,6 +3611,7 @@ function badgeClass(status: string): string {
   if (status === "seeding") return "badge badge--seeding";
   if (status === "paused") return "badge badge--paused";
   if (status === "queued") return "badge badge--queued";
+  if (status === "checking") return "badge badge--checking";
   if (status === "migrating") return "badge badge--migrating";
   return "badge badge--downloading";
 }
@@ -3616,10 +3626,14 @@ function isActivelyDownloading(t: TorrentOut): boolean {
   );
 }
 
+function isHashing(t: TorrentOut): boolean {
+  return effectiveStatus(t) === "checking";
+}
+
 function pickListPollMs(items: TorrentOut[]): number {
   if (document.hidden) return 0;
   if (items.length === 0) return POLL_MS.empty;
-  if (items.some(isActivelyDownloading)) return POLL_MS.active;
+  if (items.some((t) => isActivelyDownloading(t) || isHashing(t))) return POLL_MS.active;
   return POLL_MS.idle;
 }
 
@@ -3628,7 +3642,7 @@ function pickDetailPollMs(data: TorrentDetailOut): number {
   // При живом WS живые поля приходят пушем torrent:{id}; полную пересборку (пиры/файлы/трекеры)
   // оставляем редким бэкстопом — реже моргает и меньше нагрузка.
   if (wsAvailable()) return 10_000;
-  if (isActivelyDownloading(data)) return POLL_MS.active;
+  if (isActivelyDownloading(data) || isHashing(data)) return POLL_MS.active;
   return POLL_MS.idle;
 }
 
@@ -5869,6 +5883,7 @@ function mountListShell(root: HTMLElement): void {
   const SEARCH_STATUS: Record<string, string> = {
     seeding: "Раздача",
     downloading: "Загрузка",
+    checking: "Проверка",
     paused: "Пауза",
   };
   const searchInput = el("input", {
@@ -6346,6 +6361,7 @@ function mountListShell(root: HTMLElement): void {
     ["", "Все статусы"],
     ["seeding", "Раздача"],
     ["downloading", "Загрузка"],
+    ["checking", "Проверка"],
     ["paused", "Пауза"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
@@ -6955,6 +6971,7 @@ function mountListShell(root: HTMLElement): void {
   const STATUS_LABELS: Record<string, string> = {
     seeding: "Раздача",
     downloading: "Загрузка",
+    checking: "Проверка",
     paused: "Пауза",
   };
   const STATE_LABELS: Record<string, string> = {
