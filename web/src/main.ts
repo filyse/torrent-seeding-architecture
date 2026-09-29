@@ -310,6 +310,7 @@ type RuntimeOut = {
   download_limit?: number | null;
   upload_limit?: number | null;
   private?: boolean | null;
+  check_rate?: number | null;
 };
 
 type TorrentFileOut = {
@@ -2670,7 +2671,10 @@ function fmtPercent(v: number | null | undefined): string {
   return `${Math.max(0, Math.min(100, v * 100)).toFixed(1)}%`;
 }
 
-function fmtRate(v: number | null | undefined): string {
+function fmtCheckLabel(pctText: string, status: string, rate: number | null | undefined): string {
+  if (status === "checking" && rate && rate > 0) return `${pctText} · ${fmtRate(rate)}`;
+  return pctText;
+}
   if (!v || v <= 0) return "—";
   const kb = v / 1024;
   if (kb < 1024) return `${kb.toFixed(0)} KB/s`;
@@ -4645,6 +4649,11 @@ function tableColumns(): TableColumn[] {
       sort: "progress",
       cell: (t) => {
         const pct = Math.max(0, Math.min(100, (t.runtime?.progress ?? 0) * 100));
+        const label = fmtCheckLabel(
+          `${pct.toFixed(0)}%`,
+          effectiveStatus(t),
+          t.runtime?.check_rate,
+        );
         const wrap = el("div", { className: "ttable__progress" });
         const bar = el("div", { className: "progress" });
         bar.append(
@@ -4653,7 +4662,7 @@ function tableColumns(): TableColumn[] {
             style: `width:${pct}%`,
           }),
         );
-        wrap.append(bar, el("span", { className: "ttable__progress-val" }, [`${pct.toFixed(0)}%`]));
+        wrap.append(bar, el("span", { className: "ttable__progress-val" }, [label]));
         return wrap;
       },
     },
@@ -7306,7 +7315,9 @@ async function loadDetail(
     }
     const sub = el("div", { className: "detail-sub" }, [subParts.join("  ·  ")]);
 
-    const pctEl = el("span", { className: "detail-progress__pct" }, [fmtPercent(progress)]);
+    const pctEl = el("span", { className: "detail-progress__pct" }, [
+      fmtCheckLabel(fmtPercent(progress), st, data.runtime?.check_rate),
+    ]);
     const progressWrap = el("div", { className: "detail-progress" });
     progressWrap.append(bar, pctEl);
     if (st === "downloading") {
@@ -7517,7 +7528,7 @@ async function loadDetail(
       const pctNum = Math.round(prog * 1000) / 10;
       barFill.className = `progress__bar${pctNum >= 100 ? " progress__bar--complete" : ""}`;
       barFill.style.width = `${pctNum}%`;
-      pctEl.textContent = fmtPercent(prog);
+      pctEl.textContent = fmtCheckLabel(fmtPercent(prog), stLive, data.runtime?.check_rate);
       setChip(dlChip, `↓ ${fmtRate(data.runtime?.download_rate)}`);
       setChip(ulChip, `↑ ${fmtRate(data.runtime?.upload_rate)}`);
       setChip(peersChip, `${fmtSeeds(data.runtime?.num_seeds)} / ${fmtSeeds(data.runtime?.num_leechers)}`);

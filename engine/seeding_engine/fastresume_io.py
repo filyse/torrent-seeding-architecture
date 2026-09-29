@@ -79,17 +79,19 @@ def _ih_key(handle) -> str | None:
         return None
 
 
-def save_resume_data_blocking(lt, ses, handles: dict, timeout: float = 15.0) -> int:
+def save_resume_data_blocking(lt, ses, handles: dict, timeout: float = 15.0) -> tuple[int, list]:
     """Сохранить fastresume для набора раздач через async-механизм libtorrent 2.0.
 
     handle.save_resume_data() в 2.0 — асинхронный: данные приходят отдельным
     save_resume_data_alert с актуальными счётчиками (all_time_upload и т.д.).
     Без этого upload/download за всё время не переживают рестарт движка.
 
-    handles: {db_id -> torrent_handle}. Возвращает число сохранённых раздач.
+    handles: {db_id -> torrent_handle}. Возвращает (число сохранённых, прочие алерты).
+    Прочие алерты нельзя выбрасывать: pop_alerts забирает и piece_finished, из
+    которого считается скорость проверки.
     """
     if not handles:
-        return 0
+        return 0, []
     flags = _resume_save_flags(lt)
     pending: dict[str, int] = {}
     for db_id, h in handles.items():
@@ -107,11 +109,12 @@ def save_resume_data_blocking(lt, ses, handles: dict, timeout: float = 15.0) -> 
         except Exception as exc:  # noqa: BLE001
             log.warning("save_resume_data request db_id=%s failed: %s", db_id, exc)
     if not pending:
-        return 0
+        return 0, []
 
     rda = getattr(lt, "save_resume_data_alert", None)
     rdfa = getattr(lt, "save_resume_data_failed_alert", None)
     saved = 0
+    side: list = []
     deadline = time.monotonic() + timeout
     while pending and time.monotonic() < deadline:
         try:
@@ -123,6 +126,7 @@ def save_resume_data_blocking(lt, ses, handles: dict, timeout: float = 15.0) -> 
                 key = _ih_key(a.handle)
                 db_id = pending.pop(key, None) if key else None
                 if db_id is None:
+                    side.append(a)
                     continue
                 try:
                     blob = lt.write_resume_data_buf(a.params)
@@ -140,9 +144,11 @@ def save_resume_data_blocking(lt, ses, handles: dict, timeout: float = 15.0) -> 
                     "save_resume_data failed db_id=%s: %s",
                     db_id, getattr(a, "error", a),
                 )
+            else:
+                side.append(a)
     if pending:
         log.warning("fastresume save timed out for db_ids=%s", list(pending.values()))
-    return saved
+    return saved, side
 
 
 def delete_fastresume(db_id: int) -> None:

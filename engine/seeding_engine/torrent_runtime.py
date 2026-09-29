@@ -15,6 +15,7 @@ from pathlib import Path
 import httpx
 
 from seeding_engine.check_admit import CheckAdmit, UserPauseStore
+from seeding_engine.check_rate import CheckRate
 from seeding_engine.fastresume_io import (
     delete_fastresume,
     ensure_engine_dirs,
@@ -262,6 +263,11 @@ def _apply_libtorrent_session_settings(lt, ses) -> None:
     # Включаем storage/error-категории алертов — без них не приходит
     # save_resume_data_alert (libtorrent 2.0), и счётчики не сохраняются.
     mask = resume_alert_mask(lt)
+    # piece_finished_alert нужен для скорости проверки. Категория узкая:
+    # кусок закончен, не каждый блок скачивания.
+    piece_progress = getattr(getattr(lt, "alert_category", None), "piece_progress", None)
+    if mask is not None and piece_progress is not None:
+        mask |= int(piece_progress)
     if mask is not None:
         settings["alert_mask"] = mask
     if listen_ifs:
@@ -678,6 +684,29 @@ def _total_bytes_from_status(st, *names: str) -> int | None:
     return None
 
 
+def _match_handle(pairs: list, handle) -> int | None:
+    for db_id, candidate in pairs:
+        try:
+            if candidate == handle:
+                return int(db_id)
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
+def _piece_bytes(handle, piece: int) -> int:
+    ti = handle.torrent_file() if callable(getattr(handle, "torrent_file", None)) else None
+    if ti is None:
+        return 0
+    try:
+        return int(ti.piece_size(piece))
+    except Exception:  # noqa: BLE001
+        try:
+            return int(ti.piece_length())
+        except Exception:  # noqa: BLE001
+            return 0
+
+
 def _state_label(lt, st) -> str:
     s = st.state
     if hasattr(s, "name"):
@@ -708,6 +737,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self._migrate_progress: dict[int, dict] = {}
         self._hash_queue = HashQueue(_env_int("SEEDING_HASH_PER_ENGINE", 2))
         self._check_admit = CheckAdmit(self._hash_queue.limit)
+        self._check_rate = CheckRate()
+        self._alert_task: asyncio.Task | None = None
         root = Path(os.getenv("SEEDING_DATA_ROOT", "/data"))
         self._user_pauses = UserPauseStore(root / ".state" / "user-paused.json")
         self._admit_task: asyncio.Task | None = None
@@ -801,6 +832,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if self._admit_task is None:
             self._admit_task = asyncio.create_task(self._check_admit_loop())
             log.info("check queue limit=%s", self._check_admit.limit)
+        if self._alert_task is None:
+            self._alert_task = asyncio.create_task(self._check_alert_loop())
 
         if self._save_interval > 0 and self._save_task is None:
             self._save_task = asyncio.create_task(self._periodic_save_loop())
@@ -815,9 +848,11 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if ses is None or not handles_map:
             return 0
         async with self._resume_lock:
-            return await asyncio.to_thread(
+            saved, side = await asyncio.to_thread(
                 save_resume_data_blocking, self._lt, ses, handles_map
             )
+        self._account_piece_alerts(side)
+        return saved
 
     async def _save_all_to_disk(self) -> int:
         """Сохранить fastresume всех раздач + session.state. Reused периодикой и stop()."""
@@ -862,6 +897,15 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if self._scrape_task is not None:
             self._scrape_task.cancel()
             self._scrape_task = None
+        if self._alert_task is not None:
+            self._alert_task.cancel()
+            try:
+                await self._alert_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:  # noqa: BLE001
+                pass
+            self._alert_task = None
         if self._admit_task is not None:
             self._admit_task.cancel()
             try:
@@ -1813,6 +1857,11 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if self._check_admit.is_waiting(db_id):
             paused = False
             lt_state = "queued_for_checking"
+        if is_full_hash_check_state(lt_state):
+            check_rate = self._check_rate.rate(db_id, time.monotonic())
+        else:
+            self._check_rate.drop(db_id)
+            check_rate = 0
         self._check_holds.observe(self._upload_gate, self.disk_kind, db_id, lt_state)
 
         ratio: float | None = None
@@ -1857,6 +1906,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             download_limit=dl_limit,
             upload_limit=up_limit,
             private=private,
+            check_rate=check_rate,
         )
 
     def _unset_auto_managed(self, h) -> None:
@@ -2169,6 +2219,56 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             self._check_admit.drop(db_id)
             return
         await asyncio.to_thread(self._manual_resume, h)
+
+    async def _check_alert_loop(self) -> None:
+        try:
+            while True:
+                try:
+                    await self._drain_check_alerts()
+                except Exception:  # noqa: BLE001
+                    log.exception("check alert drain")
+                await asyncio.sleep(0.4)
+        except asyncio.CancelledError:
+            raise
+
+    async def _drain_check_alerts(self) -> None:
+        async with self._lock:
+            ses = self._ses
+            pairs = list(self._handles.items())
+        if ses is None:
+            return
+        async with self._resume_lock:
+            alerts = await asyncio.to_thread(lambda: list(ses.pop_alerts()))
+        self._account_piece_alerts(alerts, pairs)
+
+    def _account_piece_alerts(self, alerts: list, pairs: list | None = None) -> None:
+        if not alerts:
+            return
+        lt = self._lt
+        finished = getattr(lt, "piece_finished_alert", None)
+        if finished is None:
+            return
+        if pairs is None:
+            pairs = list(self._handles.items())
+        now = time.monotonic()
+        for alert in alerts:
+            if not isinstance(alert, finished):
+                continue
+            handle = getattr(alert, "handle", None)
+            if handle is None:
+                continue
+            db_id = _match_handle(pairs, handle)
+            if db_id is None:
+                continue
+            try:
+                st = handle.status() if callable(getattr(handle, "status", None)) else handle.status
+                if not is_full_hash_check_state(_state_label(lt, st)):
+                    continue
+                piece = int(getattr(alert, "piece_index"))
+                nbytes = _piece_bytes(handle, piece)
+            except Exception:  # noqa: BLE001
+                continue
+            self._check_rate.add(db_id, nbytes, now)
 
     async def _wait_hash_idle(self, db_id: int) -> None:
         """Слот хеша держим, пока libtorrent читает файлы, не только на время вызова."""

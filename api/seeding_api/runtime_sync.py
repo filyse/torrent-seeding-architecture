@@ -59,6 +59,7 @@ def runtime_from_snapshot(row: TorrentRecord) -> dict:
         "ratio": (uploaded / size) if size else None,
         "num_seeds": display_seed_count(getattr(row, "seeds", None)),
         "num_leechers": display_seed_count(getattr(row, "leechers", None)),
+        "check_rate": int(getattr(row, "check_rate", 0) or 0),
     }
 
 

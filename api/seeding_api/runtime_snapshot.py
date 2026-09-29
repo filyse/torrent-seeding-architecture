@@ -64,7 +64,7 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
             h = rt_map.get(r.id)
             if h is None:
                 # раздачи нет в рантайме движка — считаем активность нулевой
-                up = down = peers = 0
+                up = down = peers = check_rate = 0
                 prog = r.progress or 0.0
                 upl = r.uploaded_total
                 seen = r.uploaded_seen
@@ -82,6 +82,7 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                     r.uploaded_total, r.uploaded_seen, h.get("total_uploaded") or 0
                 )
                 sz = int(h.get("size") or 0) or r.size
+                check_rate = int(h.get("check_rate") or 0)
                 raw_seeds = h.get("num_seeds") if "num_seeds" in h else None
                 seeds = int(raw_seeds) if raw_seeds is not None else r.seeds
                 raw_leechers = h.get("num_leechers") if "num_leechers" in h else None
@@ -107,6 +108,7 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                 or sz != r.size
                 or seeds != r.seeds
                 or leechers != r.leechers
+                or check_rate != int(getattr(r, "check_rate", 0) or 0)
             )
             if changed:
                 updates.append(
@@ -121,6 +123,7 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                         "size": sz,
                         "seeds": seeds,
                         "leechers": leechers,
+                        "check_rate": check_rate,
                         "runtime_at": now,
                     }
                 )

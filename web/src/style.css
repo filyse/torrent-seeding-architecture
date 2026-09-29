@@ -1136,6 +1136,7 @@ input.file-input::file-selector-button:hover {
   color: var(--muted);
   min-width: 2.6rem;
   text-align: right;
+  white-space: nowrap;
 }
 .ttable__actions {
   text-align: right;

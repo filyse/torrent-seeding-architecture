@@ -546,6 +546,26 @@ bash scripts/deploy-ct400.sh up -d --build web
 сразу после рестарта одновременно не больше лимита проверок, остальные
 в снимке `queued_for_checking` («Ждёт проверки»).
 
+## 7я. Скорость проверки — 2026-09-29
+
+web **1.53.89**, api **1.26.10**, engine **1.6.9**. Спека: [`TORRENT_STATUS.md`](TORRENT_STATUS.md).
+Колонка `torrents.check_rate` (alembic 0019 при старте api).
+
+Движки пересобрать: скорость считается в процессе движка по
+`piece_finished_alert`. CT400 — `api` + `web`.
+
+```bash
+# CT400
+cd /opt/containerd
+git fetch origin && git reset --hard origin/main
+bash scripts/deploy-ct400.sh up -d --build api web
+
+# b-host и a-host — как в §5
+```
+
+Проверка: Ctrl+F5, футер 1.53.89; у раздачи в статусе «Проверка» рядом с
+процентом есть `MB/s`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

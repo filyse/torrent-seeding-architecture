@@ -54,6 +54,8 @@ class TorrentRecord(Base):
     # uploaded_total - uploaded_seen = отдано на ПРЕДЫДУЩИХ движках.
     uploaded_seen: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     size: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    # Байт/с проверки файлов (куски piece_finished за окно). 0 — проверки нет.
+    check_rate: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     runtime_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

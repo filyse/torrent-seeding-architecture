@@ -97,6 +97,7 @@ class RuntimeHandleOut(BaseModel):
     download_limit: int | None = None
     upload_limit: int | None = None
     private: bool | None = None
+    check_rate: int | None = None
 
 
 class TorrentFileOut(BaseModel):
