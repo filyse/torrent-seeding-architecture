@@ -2675,6 +2675,8 @@ function fmtCheckLabel(pctText: string, status: string, rate: number | null | un
   if (status === "checking" && rate && rate > 0) return `${pctText} · ${fmtRate(rate)}`;
   return pctText;
 }
+
+function fmtRate(v: number | null | undefined): string {
   if (!v || v <= 0) return "—";
   const kb = v / 1024;
   if (kb < 1024) return `${kb.toFixed(0)} KB/s`;
