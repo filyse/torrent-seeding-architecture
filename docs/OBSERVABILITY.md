@@ -27,7 +27,7 @@ API отдаёт метрики в текстовом формате экспо�
 | `seeding_engine_peers{engine}` | gauge | Подключённые пиры (коннекты libtorrent) |
 | `seeding_engine_seeds{engine}` / `_leechers{engine}` | gauge | Рой по скрейпу: сумма `complete` / `incomplete`. Скрейп фоновый, `/session/stats` его не ждёт |
 | `seeding_engine_dht_nodes{engine}` | gauge | Узлы DHT |
-| `seeding_engine_torrent_errors{engine}` | gauge | Раздачи в ошибке на движке |
+| `seeding_engine_torrent_errors{engine}` | gauge | Раздачи с ненулевым `errc.value()`. На образе engine 1.6.14 метод `value` ещё не вызывается, поэтому ряд равен числу раздач |
 | `seeding_engine_uploaded_bytes_total{engine}` / `_downloaded_bytes_total{engine}` | counter | Накопленный объём |
 | `seeding_queue_up` | gauge | Очередь ARQ доступна |
 | `seeding_queue_report_age_seconds` | gauge | Возраст последнего отчёта воркера |

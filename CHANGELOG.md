@@ -27,8 +27,10 @@
 - **libtorrent 2.1.2.** Образ движка больше не ставит Debian `python3-libtorrent`
   2.0.11. Колеса 2.1.2 на PyPI нет, берётся релиз GitHub под Python 3.13.
   Выключателя WebTorrent в колесе нет: STUN пустой, `max_webtorrent_offers=0`.
-  `GET /health` показывает `libtorrent_version`. На движки ещё не выкатывалось.
+  `GET /health` показывает `libtorrent_version`. На a1–a3 и b1–b6 с 2026-09-30.
   План: `docs/LIBTORRENT_21.md`.
+  Счётчик `errors` в этом образе равен числу раздач: `errc.value` — метод, и его
+  принимали за ошибку. Вызов `value()` уже в main и попадёт в следующий образ.
 
 ## web 1.53.92 · engine 1.6.13 — 2026-09-29
 

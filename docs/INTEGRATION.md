@@ -32,7 +32,7 @@
   |-------|------|------------|
   | POST | `/api/v1/jobs/noop` | Задача-заглушка `noop_report` |
   | POST | `/api/v1/jobs/engine-health-check` | Задача `check_engine_health` → `GET ENGINE_URL/health` |
-  | POST | `/api/v1/jobs/sync-runtime` | Задача `sync_runtime_to_db` → сверка `engine /internal/v1/torrents` с БД |
+  | POST | `/api/v1/jobs/sync-runtime` | Задача `sync_runtime_to_db` → сверка `engine /internal/v1/torrents` с БД. Чужой info-hash не перезаписывается (queue 1.0.1) |
 
 - **`queue` workers** ↔ **`db`**: по текущему коду воркер может вызывать **`engine`** по HTTP (`check_engine_health`); запись в БД из воркера — по мере появления задач, через те же модели `seeding_db`.
 

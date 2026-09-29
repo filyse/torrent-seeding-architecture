@@ -9,6 +9,8 @@ ARQ + Redis: фоновые задачи.
 - `sync_runtime_to_db` — сверка runtime движка с БД (`POST /api/v1/jobs/sync-runtime`):
   - читает `GET ENGINE_URL/internal/v1/torrents`
   - обновляет в БД `status` и `info_hash` по `db_id`
+  - если info-hash уже записан у другой строки, эту запись пропускает
+    (уникальный ключ иначе роняет весь проход; queue 1.0.1)
   - возвращает счетчики обновлений и расхождений
 
 ## Запуск воркера локально
