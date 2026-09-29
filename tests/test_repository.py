@@ -112,8 +112,8 @@ async def test_incomplete_filter_skips_file_check(db_session: AsyncSession):
     )
     await db_session.commit()
     both, both_total = await repo.list_page(status=TorrentStatus.checking.value)
-    assert both_total == 2
-    assert {row.id for row in both} == {checking.id, waiting.id}
+    assert both_total == 1
+    assert [row.id for row in both] == [checking.id]
     only, only_total = await repo.list_page(status=TorrentStatus.check_queued.value)
     assert only_total == 1
     assert [row.id for row in only] == [waiting.id]

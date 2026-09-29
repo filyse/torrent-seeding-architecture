@@ -6523,9 +6523,7 @@ function mountListShell(root: HTMLElement): void {
   }
   function applyFacetCounts(): void {
     if (!facets) return;
-    const statusCounts = { ...facets.statuses };
-    statusCounts.checking = (statusCounts.checking ?? 0) + (statusCounts.check_queued ?? 0);
-    applyCountsTo(statusSelect, statusCounts);
+    applyCountsTo(statusSelect, facets.statuses);
     applyCountsTo(stateSelect, facets.states);
     applyCountsSizeTo(labelSelect, facets.labels, facets.label_sizes ?? {});
     applyCountsSizeTo(engineSelect, facets.engines, facets.engine_sizes ?? {});

@@ -109,14 +109,7 @@ class TorrentRepository:
                     func.lower(TorrentRecord.info_hash).like(like),
                 )
             )
-        if status == TorrentStatus.checking.value:
-            # «Проверка» в фильтре — и сам проход, и ожидание слота. Бейдж их различает.
-            conds.append(
-                TorrentRecord.status.in_(
-                    (TorrentStatus.checking.value, TorrentStatus.check_queued.value)
-                )
-            )
-        elif status:
+        if status:
             conds.append(TorrentRecord.status == status)
         if label:
             conds.append(TorrentRecord.label == label)
