@@ -24,6 +24,7 @@ from seeding_engine.fastresume_io import (
     session_state_path,
     try_read_resume_params,
 )
+from seeding_engine.hash_queue import HashQueue
 from seeding_engine.seed_count import fetch_scrape
 from seeding_engine.store import RuntimeHandle, RuntimeStore
 from seeding_engine.sysinfo import storage_kind
@@ -679,6 +680,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self._meta: dict[int, tuple[str | None, str]] = {}
         # Прогресс активного импорта (перенос с другого движка): db_id -> {phase, copied, total}.
         self._migrate_progress: dict[int, dict] = {}
+        self._hash_queue = HashQueue(_env_int("SEEDING_HASH_PER_ENGINE", 2))
         # Метаданные сетевого импорта, ожидающего поток контента: db_id -> {save_path, torrent_data, ...}.
         self._staged_imports: dict[int, dict] = {}
         self._listen_low = int(os.getenv("LT_LISTEN_PORT_LOW", "51413"))
@@ -2028,9 +2030,49 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             h = self._handles.get(db_id)
         if h is None or not hasattr(h, "force_recheck"):
             return False
-        await asyncio.to_thread(h.force_recheck)
-        self._check_holds.note_recheck(self._upload_gate, self.disk_kind, db_id)
+
+        async def job() -> None:
+            await asyncio.to_thread(h.force_recheck)
+            self._check_holds.note_recheck(self._upload_gate, self.disk_kind, db_id)
+            await self._wait_hash_idle(db_id)
+
+        await self._hash_queue.submit(db_id, job)
         return True
+
+    async def set_hash_limit(self, limit: int) -> dict[str, int]:
+        applied = await self._hash_queue.set_limit(limit)
+        return {"hash_per_engine": applied}
+
+    async def _wait_hash_idle(self, db_id: int) -> None:
+        """Слот хеша держим, пока libtorrent читает файлы, не только на время вызова."""
+        deadline = time.monotonic() + 6 * 3600
+        grace_until = time.monotonic() + 8
+        saw = False
+        while time.monotonic() < deadline:
+            state = await self._hash_state(db_id)
+            if state is None:
+                return
+            if is_full_hash_check_state(state):
+                saw = True
+            elif saw or time.monotonic() >= grace_until:
+                return
+            await asyncio.sleep(1)
+
+    async def _hash_state(self, db_id: int) -> str | None:
+        async with self._lock:
+            h = self._handles.get(db_id)
+            lt = self._lt
+        if h is None:
+            return None
+
+        def _read() -> str:
+            st = h.status() if callable(getattr(h, "status", None)) else h.status
+            return _state_label(lt, st)
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception:  # noqa: BLE001
+            return None
 
     async def reannounce(self, db_id: int) -> bool:
         async with self._lock:

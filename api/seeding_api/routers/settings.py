@@ -11,9 +11,12 @@ from seeding_api.schemas import (
     UnchokeSettingsOut,
     UploadLimitsIn,
     UploadLimitsOut,
+    WorkQueuesIn,
+    WorkQueuesOut,
 )
 from seeding_api.unchoke_policy import load_unchoke_policy, save_unchoke_policy
 from seeding_api.upload_limits import load_upload_limits, save_upload_limits
+from seeding_api.work_limits import load_work_limits, save_work_limits
 
 router = APIRouter()
 
@@ -118,3 +121,43 @@ async def set_upload_limits(
     saved = await save_upload_limits(session, merged)
     await session.commit()
     return UploadLimitsOut(**saved)
+
+
+@router.get("/settings/work-queues", response_model=WorkQueuesOut)
+async def get_work_queues(session: DbSession):
+    return WorkQueuesOut(**(await load_work_limits(session)))
+
+
+@router.post("/settings/work-queues", response_model=WorkQueuesOut)
+async def set_work_queues(
+    body: WorkQueuesIn,
+    session: DbSession,
+    pool: EnginePoolDep,
+    _: Principal = Depends(require_admin),
+):
+    """Очереди переноса и хеша. Перенос живёт в API, хеш рассылается на движки."""
+    current = await load_work_limits(session)
+    merged = {
+        "migrate_per_engine": (
+            body.migrate_per_engine
+            if body.migrate_per_engine is not None
+            else current["migrate_per_engine"]
+        ),
+        "hash_per_engine": (
+            body.hash_per_engine
+            if body.hash_per_engine is not None
+            else current["hash_per_engine"]
+        ),
+    }
+    saved = await save_work_limits(session, merged)
+    await session.commit()
+
+    applied = 0
+    errors = 0
+    for spec in pool.specs:
+        try:
+            await pool.client_for(spec.id).set_hash_limit(saved["hash_per_engine"])
+            applied += 1
+        except (KeyError, httpx.HTTPError):
+            errors += 1
+    return WorkQueuesOut(**saved, applied=applied, errors=errors)

@@ -457,6 +457,16 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def set_hash_limit(self, hash_per_engine: int) -> dict | None:
+        r = await self._client.post(
+            "/internal/v1/session/hash-limit",
+            json={"hash_per_engine": int(hash_per_engine)},
+        )
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
     async def set_net_settings(
         self, dht: bool | None, pex: bool | None, lsd: bool | None
     ) -> dict | None:

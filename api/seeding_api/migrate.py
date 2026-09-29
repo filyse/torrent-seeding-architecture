@@ -454,6 +454,28 @@ async def cancel_migration(
     return True
 
 
+async def _migrate_limit(app) -> int:
+    from seeding_api.work_limits import load_work_limits
+
+    async with app.state.session_factory() as session:
+        limits = await load_work_limits(session)
+    return int(limits["migrate_per_engine"])
+
+
+async def _run_migration_when_slot(app, pool, **kwargs) -> None:
+    """Ждать свободный слот источника и приёмника, потом копировать."""
+    from seeding_api.work_queue import transfer_slots
+
+    source = str(kwargs["source_engine_id"])
+    target = str(kwargs["target_engine_id"])
+
+    async def limit_of() -> int:
+        return await _migrate_limit(app)
+
+    async with transfer_slots(source, target, limit_of):
+        await run_migration(app.state.session_factory, pool, **kwargs)
+
+
 def launch_migration(
     app,
     pool,
@@ -476,12 +498,12 @@ def launch_migration(
         app.state.migrate_progress = progress_store
     progress_store["__hub__"] = getattr(app.state, "ws_hub", None)
     set_progress(
-        progress_store, torrent_id, "preparing",
-        message=f"{'resume' if resume else 'start'} → {target_engine_id}",
+        progress_store, torrent_id, "queued",
+        message=f"очередь {source_engine_id} → {target_engine_id}",
     )
     task = asyncio.create_task(
-        run_migration(
-            app.state.session_factory,
+        _run_migration_when_slot(
+            app,
             pool,
             torrent_id=torrent_id,
             source_engine_id=source_engine_id,

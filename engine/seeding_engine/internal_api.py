@@ -821,6 +821,19 @@ async def session_stats(request: Request):
     return stats
 
 
+class HashLimitIn(BaseModel):
+    hash_per_engine: int = Field(..., ge=1, le=8)
+
+
+@router.post("/session/hash-limit")
+async def set_hash_limit(request: Request, body: HashLimitIn):
+    rt = get_runtime(request)
+    fn = getattr(rt, "set_hash_limit", None)
+    if fn is None:
+        return {"hash_per_engine": body.hash_per_engine}
+    return await fn(body.hash_per_engine)
+
+
 @router.post("/session/limits")
 async def set_session_limits(request: Request, body: SessionLimitsIn):
     rt = get_runtime(request)
