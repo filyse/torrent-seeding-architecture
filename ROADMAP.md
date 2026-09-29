@@ -522,14 +522,16 @@
   `task_key` (`a1:0`). Вкладка MPW снимает строку, готовую очередь не опрашивает.
   Контракт: [`docs/CREATOR.md`](docs/CREATOR.md).
 
-### Фаза 10 — libtorrent 2.1.2 ⬜
+### Фаза 10 — libtorrent 2.1.2 🟡
 Переход библиотеки в образе движка с Debian `python3-libtorrent` 2.0.11 на 2.1.2.
 Клиент не меняется. Точка отката — релиз `v2026.09.29` (`079398c`): web 1.53.92,
 api 1.26.10, engine 1.6.13. План и порядок выката: [`docs/LIBTORRENT_21.md`](docs/LIBTORRENT_21.md).
 
-- ⬜ Образ: колесо PyPI `libtorrent==2.1.2` вместо пакета Debian. Оба сразу не ставить.
-- ⬜ Проверка API, которым движок уже пользуется: сессия, fastresume, creator `v1_only`,
-  алерты `piece_finished`, флаги пиров. WebTorrent на закрытом трекере выключить.
+- ✅ Образ engine 1.6.14: колесо 2.1.2 с релиза GitHub (на PyPI версии нет), пакет
+  Debian убран. WebTorrent: пустой STUN и `max_webtorrent_offers=0`.
+- ✅ API на колесе 2.1.2: сессия `save_state`/`load_state`, creator `v1_only`,
+  алерты `piece_finished`. `utp_socket`/`ssl_socket` в 2.1.2 нет, остальные флаги
+  пиров на месте. Resume с живого 2.0.11 ещё не читался.
 - ⬜ Канарейка на одном движке. До неё — архив `.fastresume`: после записи 2.1.2
   образ 2.0.11 эти файлы не читает.
 - ⬜ Остальные движки по одному диску. api и web не пересобирать.

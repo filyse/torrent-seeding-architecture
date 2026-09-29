@@ -290,6 +290,7 @@ async def internal_health(request: Request):
         "service": "engine",
         "backend": rt.backend_name,
         "version": _sysinfo.engine_version(),
+        "libtorrent_version": _sysinfo.libtorrent_version(),
         "built_at": _sysinfo.build_time(),
         "disk_kind": getattr(rt, "disk_kind", None),
         **(

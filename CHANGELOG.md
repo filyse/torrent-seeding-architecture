@@ -9,6 +9,14 @@
 
 ---
 
+## engine 1.6.14 — 2026-09-30
+
+- **libtorrent 2.1.2.** Образ движка больше не ставит Debian `python3-libtorrent`
+  2.0.11. Колеса 2.1.2 на PyPI нет, берётся релиз GitHub под Python 3.13.
+  Выключателя WebTorrent в колесе нет: STUN пустой, `max_webtorrent_offers=0`.
+  `GET /health` показывает `libtorrent_version`. На движки ещё не выкатывалось.
+  План: `docs/LIBTORRENT_21.md`.
+
 ## web 1.53.92 · engine 1.6.13 — 2026-09-29
 
 - **Проверка.** Пока раздача занимает слот очереди, в снимке она «Проверка»,

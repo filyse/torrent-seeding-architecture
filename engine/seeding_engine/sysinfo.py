@@ -187,6 +187,21 @@ def storage_kind(path: str | None = None) -> str:
     return classify_storage_path(path or storage_path())
 
 
+def libtorrent_version() -> str | None:
+    """Версия модуля libtorrent, если он импортируется. Иначе None (mock-образ)."""
+    try:
+        import libtorrent as lt  # noqa: PLC0415
+    except ImportError:
+        return None
+    raw = getattr(lt, "version", None)
+    if raw is None:
+        return None
+    try:
+        return str(raw() if callable(raw) else raw)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def engine_version() -> str:
     try:
         from seeding_engine import __version__  # noqa: PLC0415

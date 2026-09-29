@@ -153,6 +153,7 @@ async def health(request: Request):
         "data_root": os.getenv("SEEDING_DATA_ROOT", ""),
         "disk_kind": getattr(request.app.state, "storage_kind", None),
         "version": _sysinfo.engine_version(),
+        "libtorrent_version": _sysinfo.libtorrent_version(),
         "built_at": _sysinfo.build_time(),
     }
 

@@ -32,42 +32,45 @@ Debian Trixie `python3-libtorrent` **2.0.11** (`engine/Dockerfile`). В sid то
 проверку. Откат кода без архива `.fastresume`, снятого до первой записи на 2.1.2,
 эту волну не отменяет.
 
-`session.state` (`save_state` / `load_state`) на 2.1 надо проверить отдельно: эти
-вызовы устарели ещё в 2.0 и в коде движка живы (`torrent_runtime.py`). Убирать их
-заранее не нужно. Перенос на `session_params` — только если 2.1.2 их уже не отдаёт.
+`session.state` (`save_state` / `load_state`) на 2.1.2 по-прежнему работает.
+Вызовы устарели ещё в 2.0, в коде движка они живы (`torrent_runtime.py`).
+Перенос на `session_params` не нужен, пока эти методы отдаются.
 
 ## Образ
 
-В `engine/Dockerfile` убрать `python3-libtorrent` и поставить колесо:
+`engine/Dockerfile` (engine 1.6.14) ставит колесо с релиза GitHub, не с PyPI:
+индекс PyPI на 2.1.2 пустой, `pip install libtorrent==2.1.2` не находит версию.
 
 ```
-pip install --no-cache-dir libtorrent==2.1.2
+pip3 install --break-system-packages \
+  https://github.com/arvidn/libtorrent/releases/download/v2.1.2/libtorrent-2.1.2-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 ```
 
-Пакет Debian рядом не оставлять: `import libtorrent` возьмёт тот модуль, который
-раньше окажется в пути. В контейнере версия модуля должна быть 2.1.2.
-`GET /health` по-прежнему показывает версию движка (`engine_version`), не библиотеки.
-Версию библиотеки смотреть отдельным `import libtorrent`.
+Пакет Debian рядом не оставлять. `GET /health` отдаёт `version` движка и
+`libtorrent_version` модуля. На канарейке во втором поле должно быть `2.1.2.0`.
 
-WebTorrent в 2.1 включён при сборке официального колеса, STUN по умолчанию
-`stun.l.google.com:19302`. На закрытом трекере найти настройку с `webtorrent`
-в `settings` и выключить её до `listen`. Если такого ключа в колесе нет, поддержка
-выключается только сборкой с `webtorrent=off`. До фермы выбрать одно: официальное
-колесо, если приватная раздача не открывает STUN, или своя сборка без WebTorrent.
+WebTorrent в колесе собран внутрь, ключа `enable_webtorrent` нет. Сессия при
+старте ставит `webtorrent_stun_server=""` и `max_webtorrent_offers=0`. Чужое
+имя в `apply_settings` отменяет весь пакет настроек, поэтому на 2.0.11 эти
+ключи не передаются.
 
 ## Что прогнать до канарейки
 
-На образе 2.1.2, без боевого тома:
+На колесе 2.1.2 (проверка с Windows-колеса cp312, тот же релиз; Docker на этой
+машине нет, linux-образ ещё не собирался):
 
-1. `lt.session()`, `load_state`, `save_state` на копии `session.state`.
-2. `read_resume_data` / `write_resume_data_buf` на копии одного `.fastresume`
-   с 2.0.11. После чтения раздача не должна требовать полного прохода.
-3. Creator: `file_storage` + `create_torrent(..., v1_only)` + `set_piece_hashes`
-   с колбэком прогресса. В 2.1 у создания торрента есть новый вход через список
-   файлов; старый путь трогать только если колбэк на 2.1.2 уже не вызывается.
-   Итог по-прежнему v1, не гибрид.
-4. Категория `alert_category.piece_progress` и `save_resume_data_alert` на месте.
-5. Константы `peer_info` для флагов пиров те же.
+1. `lt.session()`, `save_state`, `load_state` — проходят. `listen_on` жив, помечен
+   устаревшим.
+2. `read_resume_data` / `write_resume_data_buf` в модуле есть. Файл resume,
+   записанный живым 2.0.11, здесь не читался: колесо 2.0.11 на этой машине не
+   загружается (нет DLL). Это остаётся проверкой канарейки: после старта смотреть,
+   ушло ли в `checking_files`.
+3. Creator: старый `file_storage` + `create_torrent(..., v1_only)` + `set_piece_hashes`
+   с колбэком отрабатывает и пишет v1 (`pieces`, без `meta version`). Вызовы
+   помечены устаревшими, путь не менялся.
+4. `alert_category.piece_progress` и `save_resume_data_alert` на месте.
+5. Флаги `peer_info` те же, кроме `utp_socket` и `ssl_socket`: констант больше нет,
+   подпись пира их просто пропускает.
 
 ## Выкат
 
@@ -83,8 +86,8 @@ WebTorrent в 2.1 включён при сборке официального к
    и вернуть архив.
 4. Остальные движки по одному диску. Следующий — после того, как канарейка
    отсеялась и сохранила resume уже на 2.1.2.
-5. Тогда бамп `engine`, запись в `CHANGELOG.md`, `engine/README.md` и
-   `docs/DEPLOYMENT_STATE.md`.
+5. После канарейки дописать `docs/DEPLOYMENT_STATE.md`. Версия движка уже
+   **1.6.14**: `CHANGELOG.md` и `engine/README.md` описывают образ, не выкат.
 
 ## Откат
 

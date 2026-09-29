@@ -20,6 +20,7 @@ def test_engine_health_reports_mock_backend(engine_app_mock):
         body = r.json()
         assert body["service"] == "engine"
         assert body["backend"] == "mock"
+        assert "libtorrent_version" in body
 
 
 def test_engine_internal_register_mock(engine_app_mock):

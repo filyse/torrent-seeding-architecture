@@ -245,6 +245,23 @@ def _apply_private_to_params(lt, p, net: dict | None = None) -> bool:
     return True
 
 
+# В колесе 2.1 нет enable_webtorrent. Пустой STUN и ноль offers — то, что
+# settings_pack принимает: сессия не ходит на stun.l.google.com и не делает
+# WebRTC-offer. Чужое имя роняет весь apply_settings, поэтому на 2.0.11,
+# где этих ключей нет, словарь пустой.
+_WEBTORRENT_OFF: dict[str, object] = {
+    "webtorrent_stun_server": "",
+    "max_webtorrent_offers": 0,
+}
+
+
+def webtorrent_off_settings(known: set[str] | None) -> dict[str, object]:
+    """Настройки, глушащие WebTorrent, только из имён, которые сессия уже знает."""
+    if not known:
+        return {}
+    return {key: value for key, value in _WEBTORRENT_OFF.items() if key in known}
+
+
 def _apply_libtorrent_session_settings(lt, ses) -> None:
     """DHT/LSD/UPnP/NAT-PMP и лимиты из env (разные версии биндингов — best effort)."""
     listen_ifs = os.getenv("LT_LISTEN_INTERFACES", "0.0.0.0:51413,[::]:51413").strip()
@@ -260,6 +277,18 @@ def _apply_libtorrent_session_settings(lt, ses) -> None:
         "active_limit": _env_int("LT_ACTIVE_LIMIT", -1),
         "dont_count_slow_torrents": _env_bool("LT_DONT_COUNT_SLOW", True),
     }
+    known: set[str] = set()
+    if hasattr(ses, "get_settings"):
+        try:
+            got = ses.get_settings()
+            if isinstance(got, dict):
+                known = set(got)
+        except Exception:  # noqa: BLE001
+            known = set()
+    off = webtorrent_off_settings(known)
+    if off:
+        settings.update(off)
+        log.info("webtorrent disabled (empty stun, offers=0)")
     # Включаем storage/error-категории алертов — без них не приходит
     # save_resume_data_alert (libtorrent 2.0), и счётчики не сохраняются.
     mask = resume_alert_mask(lt)
@@ -567,6 +596,8 @@ _PEER_FLAG_NAMES = (
     "upload_only",
     "endgame_mode",
     "holepunched",
+    # 2.1.2 больше не отдаёт константы utp_socket и ssl_socket. Пропуск
+    # отсутствующего имени в _format_peer_flags оставляет остальные флаги.
     "utp_socket",
     "ssl_socket",
     "rc4_encrypted",

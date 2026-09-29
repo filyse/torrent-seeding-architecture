@@ -1,14 +1,20 @@
 FROM debian:trixie-slim
 WORKDIR /app
+# 2.1.2 нет на PyPI (индекс кончается на 2.1.1). Колесо — релиз GitHub под
+# Python 3.13 из Trixie, amd64. python3-libtorrent 2.0.11 рядом не ставить:
+# import возьмёт тот модуль, который раньше в sys.path.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python-is-python3 \
-    python3-libtorrent \
+    python3-pip \
+    libssl3 \
     python3-fastapi \
     python3-uvicorn \
     python3-httpx \
     python3-pytest \
     ca-certificates \
+    && pip3 install --no-cache-dir --break-system-packages \
+        https://github.com/arvidn/libtorrent/releases/download/v2.1.2/libtorrent-2.1.2-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl \
     && rm -rf /var/lib/apt/lists/*
 # context = корень репозитория (нужен пакет upload/seeding_upload).
 COPY engine /app/engine

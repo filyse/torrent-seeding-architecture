@@ -50,7 +50,7 @@ uvicorn seeding_engine.main:app --host 0.0.0.0 --port 8081
 
 ## Docker
 
-Образ ставит **`python3-libtorrent`** через apt; по умолчанию **`SEEDING_ENGINE_BACKEND=libtorrent`**. Entrypoint создаёт `/data/.state`, `/data/.fastresume`, `/data/.torrents` и `ENGINE_STORAGE_SUBDIR`.
+Образ ставит **libtorrent 2.1.2** колесом с релиза GitHub (на PyPI этой версии нет; пакет Debian `python3-libtorrent` — это 2.0.11, рядом его не ставить). По умолчанию **`SEEDING_ENGINE_BACKEND=libtorrent`**. `GET /health` отдаёт `libtorrent_version` рядом с версией движка. Entrypoint создаёт `/data/.state`, `/data/.fastresume`, `/data/.torrents` и `ENGINE_STORAGE_SUBDIR`.
 
 ## Внутренний API
 
