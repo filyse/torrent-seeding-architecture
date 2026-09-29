@@ -1809,7 +1809,14 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         magnet_uri, save_path = meta
 
         def _read():
-            st = h.status() if callable(getattr(h, "status", None)) else h.status
+            if hasattr(h, "is_valid") and not h.is_valid():
+                return None
+            try:
+                st = h.status() if callable(getattr(h, "status", None)) else h.status
+            except RuntimeError as exc:
+                if "invalid torrent handle" in str(exc):
+                    return None
+                raise
             ih_raw = h.info_hash() if callable(getattr(h, "info_hash", None)) else h.info_hash
             ih = str(ih_raw)
             paused = bool(getattr(st, "paused", False))
@@ -1838,7 +1845,11 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     private = None
             return st, str(ih), paused, dl_limit, up_limit, private
 
-        st, ih_hex, paused, dl_limit, up_limit, private = await asyncio.to_thread(_read)
+        read = await asyncio.to_thread(_read)
+        if read is None:
+            await self._forget_handle(db_id, reason="invalid handle")
+            raise KeyError(db_id)
+        st, ih_hex, paused, dl_limit, up_limit, private = read
         zero = "0" * 40
         if not ih_hex or ih_hex == zero:
             ih_hex = None
@@ -2699,6 +2710,15 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         await asyncio.to_thread(_apply)
         return await self.session_stats()
 
+    async def _forget_handle(self, db_id: int, *, reason: str) -> None:
+        """Снять ссылку, которой у libtorrent уже нет. Иначе один вызов status() роняет весь список."""
+        log.warning("drop torrent handle db_id=%s (%s)", db_id, reason)
+        async with self._lock:
+            self._handles.pop(db_id, None)
+            self._meta.pop(db_id, None)
+        self._check_admit.drop(db_id)
+        self._check_rate.drop(db_id)
+
     async def list_all(self) -> list[RuntimeHandle]:
         async with self._lock:
             ids = sorted(self._handles.keys())
@@ -2708,17 +2728,6 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 out.append(await self._snapshot(i))
             except KeyError:
                 continue
-            except RuntimeError as exc:
-                # Один снятый handle ронял весь GET /torrents, и снимок движка
-                # переставал писаться: новые раздачи вечно висели с нулём.
-                if "invalid torrent handle" not in str(exc):
-                    raise
-                log.warning("drop invalid handle db_id=%s", i)
-                async with self._lock:
-                    self._handles.pop(i, None)
-                    self._meta.pop(i, None)
-                self._check_admit.drop(i)
-                self._check_rate.drop(i)
         return out
 
     async def remove(
