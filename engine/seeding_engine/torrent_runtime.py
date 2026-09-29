@@ -262,6 +262,26 @@ def webtorrent_off_settings(known: set[str] | None) -> dict[str, object]:
     return {key: value for key, value in _WEBTORRENT_OFF.items() if key in known}
 
 
+def _error_code_value(errc) -> int:
+    """Числовой код ошибки libtorrent.
+
+    В биндинге `errc.value` — метод. Без вызова объект метода всегда истинный,
+    и счётчик ошибок равен числу раздач.
+    """
+    if errc is None:
+        return 0
+    raw = getattr(errc, "value", 0)
+    if callable(raw):
+        try:
+            raw = raw()
+        except Exception:  # noqa: BLE001
+            return 0
+    try:
+        return int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _apply_libtorrent_session_settings(lt, ses) -> None:
     """DHT/LSD/UPnP/NAT-PMP и лимиты из env (разные версии биндингов — best effort)."""
     listen_ifs = os.getenv("LT_LISTEN_INTERFACES", "0.0.0.0:51413,[::]:51413").strip()
@@ -2645,7 +2665,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     if swarm_l is not None:
                         leechers += swarm_l
                     errc = getattr(st, "errc", None)
-                    if errc is not None and getattr(errc, "value", 0):
+                    if _error_code_value(errc):
                         errors += 1
                     elif str(getattr(st, "error", "") or ""):
                         errors += 1

@@ -67,6 +67,74 @@ async def test_sync_runtime_to_db_updates_status_and_infohash(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_sync_skips_info_hash_owned_by_another_row(monkeypatch, tmp_path):
+    db_path = tmp_path / "sync-dup.sqlite3"
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+    engine_url = "http://engine.sync.test:8081"
+    info_hash = "c" * 40
+
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("ENGINE_URL", engine_url)
+
+    eng = create_engine(db_url)
+    sf = create_session_factory(eng)
+    try:
+        async with eng.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async with sf() as session:
+            repo = TorrentRepository(session)
+            owner = await repo.create(
+                display_name="show",
+                save_path="/data/a",
+                magnet_uri="magnet:?xt=urn:btih:" + info_hash,
+                status=TorrentStatus.seeding.value,
+            )
+            owner.info_hash = info_hash
+            other = await repo.create(
+                display_name="show",
+                save_path="/data/b",
+                magnet_uri="magnet:?xt=urn:btih:" + info_hash,
+                status=TorrentStatus.seeding.value,
+            )
+            await session.commit()
+            owner_id, other_id = owner.id, other.id
+
+        with respx.mock(assert_all_called=True) as mock:
+            mock.get(f"{engine_url}/internal/v1/torrents").mock(
+                return_value=httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "db_id": owner_id,
+                            "runtime_status": "active",
+                            "lt_state": "seeding",
+                            "info_hash": info_hash,
+                        },
+                        {
+                            "db_id": other_id,
+                            "runtime_status": "active",
+                            "lt_state": "seeding",
+                            "info_hash": info_hash,
+                        },
+                    ],
+                )
+            )
+            result = await sync_runtime_to_db({})
+
+        assert result["ok"] is True
+        assert result["updated_info_hash"] == 0
+        async with sf() as session:
+            repo = TorrentRepository(session)
+            kept = await repo.get_by_id(owner_id)
+            skipped = await repo.get_by_id(other_id)
+            assert kept is not None and kept.info_hash == info_hash
+            assert skipped is not None and skipped.info_hash is None
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.asyncio
 async def test_sync_runtime_to_db_detects_db_missing_runtime(monkeypatch, tmp_path):
     db_path = tmp_path / "sync-missing.sqlite3"
     db_url = f"sqlite+aiosqlite:///{db_path}"

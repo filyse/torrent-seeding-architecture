@@ -163,8 +163,19 @@ async def sync_runtime_to_db(ctx):
 
                 rt_info_hash = rt.get("info_hash")
                 if isinstance(rt_info_hash, str) and rt_info_hash and row.info_hash != rt_info_hash:
-                    await repo.update_info_hash(db_id, rt_info_hash)
-                    updated_info_hash += 1
+                    # Тот же hash уже у другой строки (две записи одного контента).
+                    # Писать нельзя: unique на info_hash роняет весь проход до commit.
+                    owner = await repo.get_by_info_hash(rt_info_hash)
+                    if owner is not None and owner.id != db_id:
+                        log.warning(
+                            "info_hash %s уже у раздачи id=%s — не пишу для id=%s",
+                            rt_info_hash,
+                            owner.id,
+                            db_id,
+                        )
+                    else:
+                        await repo.update_info_hash(db_id, rt_info_hash)
+                        updated_info_hash += 1
 
             for row in db_rows:
                 if row.id not in runtime_ids_seen and row.status in (
