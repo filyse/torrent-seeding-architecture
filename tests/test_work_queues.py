@@ -11,7 +11,7 @@ from seeding_api.work_limits import (
     normalize_work_limits,
     save_work_limits,
 )
-from seeding_api.work_queue import EngineSlots, transfer_slots
+from seeding_api.work_queue import EngineSlots
 from seeding_db.models import Base
 from seeding_engine.hash_queue import HashQueue
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine

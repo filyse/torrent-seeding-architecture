@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
-
 from seeding_api.upload_ticket import upload_relay_base_urls, upload_relay_enabled
 
 

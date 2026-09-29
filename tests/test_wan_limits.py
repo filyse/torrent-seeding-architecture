@@ -2,7 +2,6 @@ import importlib
 import json
 
 import pytest
-
 from seeding_api.audit import summarize
 
 B1 = "http://192.168.1.171:8081"

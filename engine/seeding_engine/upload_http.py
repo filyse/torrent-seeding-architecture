@@ -9,7 +9,6 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from seeding_upload.router import build_upload_router
 from seeding_upload.storage import UploadStorage
 

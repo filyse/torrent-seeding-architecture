@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from seeding_api.seed_count import display_seed_count
 from seeding_db.models import TorrentRecord, TorrentStatus
 from seeding_db.repository import TorrentRepository
 from seeding_db.status_from_runtime import status_from_runtime
+
+from seeding_api.seed_count import display_seed_count
 
 
 def accumulate_uploaded(total: int, seen: int, current: int) -> tuple[int, int]:

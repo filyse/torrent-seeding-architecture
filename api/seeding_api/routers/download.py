@@ -7,7 +7,6 @@ from pathlib import PurePosixPath
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-
 from seeding_db.repository import TorrentRepository
 
 from seeding_api.auth import Principal, require_auth

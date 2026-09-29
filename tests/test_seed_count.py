@@ -3,7 +3,8 @@
 from seeding_api.engine_pool import EnginePool
 from seeding_api.runtime_sync import runtime_from_snapshot
 from seeding_api.seed_count import display_seed_count as api_display
-from seeding_engine.seed_count import bdecode_complete, display_seed_count as engine_display, scrape_url
+from seeding_engine.seed_count import bdecode_complete, scrape_url
+from seeding_engine.seed_count import display_seed_count as engine_display
 
 
 def test_unknown_scrape_is_not_zero():

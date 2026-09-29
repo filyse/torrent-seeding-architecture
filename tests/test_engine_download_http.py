@@ -84,7 +84,6 @@ def test_download_rejects_other_engine(tmp_path: Path):
 
 def test_download_rejects_path_escape(tmp_path: Path):
     client, _ = _app(tmp_path)
-    secret = "sec"
     # ticket с нормальным путём, query пытается выйти
     res = client.get(
         "/download/v1/file",

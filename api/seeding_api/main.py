@@ -26,6 +26,7 @@ from seeding_api.routers import auth as auth_router
 from seeding_api.routers import backups as backups_router
 from seeding_api.routers import components as components_router
 from seeding_api.routers import creator as creator_router
+from seeding_api.routers import download as download_router
 from seeding_api.routers import engines as engines_router
 from seeding_api.routers import health as health_router
 from seeding_api.routers import jobs as jobs_router
@@ -35,7 +36,6 @@ from seeding_api.routers import session as session_router
 from seeding_api.routers import settings as settings_router
 from seeding_api.routers import stream as stream_router
 from seeding_api.routers import torrents as torrents_router
-from seeding_api.routers import download as download_router
 from seeding_api.routers import upload as upload_router
 from seeding_api.routers import ws as ws_router
 from seeding_api.runtime_snapshot import runtime_snapshot_loop

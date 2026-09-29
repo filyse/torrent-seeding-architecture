@@ -9,14 +9,14 @@ from seeding_db.repository import EngineRepository
 
 from seeding_api.deps import DbSession, EnginePoolDep
 from seeding_api.net_policy import load_net_policy
-from seeding_api.unchoke_policy import load_unchoke_policy
-from seeding_api.work_limits import load_work_limits
 from seeding_api.schemas import (
     EngineLimitsIn,
     EngineOut,
     EngineRegisterIn,
     EngineRegistryItem,
 )
+from seeding_api.unchoke_policy import load_unchoke_policy
+from seeding_api.work_limits import load_work_limits
 
 router = APIRouter()
 # Публичный роутер для саморегистрации движков: защищён отдельным X-Register-Key,

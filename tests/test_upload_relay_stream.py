@@ -5,7 +5,6 @@ from __future__ import annotations
 import httpx
 import respx
 from fastapi.testclient import TestClient
-
 from seeding_upload_relay.main import app, uses_stream
 
 

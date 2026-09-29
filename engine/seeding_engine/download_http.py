@@ -10,7 +10,6 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
-
 from seeding_upload.ticket import TicketError, verify_download_ticket
 
 log = logging.getLogger(__name__)
