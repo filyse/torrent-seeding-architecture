@@ -135,6 +135,55 @@ async def test_sync_skips_info_hash_owned_by_another_row(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_sync_keeps_migrating_while_source_is_paused(monkeypatch, tmp_path):
+    db_path = tmp_path / "sync-migrating.sqlite3"
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+    engine_url = "http://engine.sync.test:8081"
+
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("ENGINE_URL", engine_url)
+
+    eng = create_engine(db_url)
+    sf = create_session_factory(eng)
+    try:
+        async with eng.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async with sf() as session:
+            repo = TorrentRepository(session)
+            row = await repo.create(
+                display_name="moving",
+                save_path="/data",
+                magnet_uri="magnet:?xt=urn:btih:dddddddddddddddddddddddddddddddddddddddd",
+                status=TorrentStatus.migrating.value,
+            )
+            await session.commit()
+            row_id = row.id
+
+        with respx.mock(assert_all_called=True) as mock:
+            mock.get(f"{engine_url}/internal/v1/torrents").mock(
+                return_value=httpx.Response(
+                    200,
+                    json=[{
+                        "db_id": row_id,
+                        "runtime_status": "paused",
+                        "lt_state": "seeding",
+                        "progress": 1,
+                    }],
+                )
+            )
+            result = await sync_runtime_to_db({})
+
+        assert result["updated_status"] == 0
+        async with sf() as session:
+            got = await TorrentRepository(session).get_by_id(row_id)
+            assert got is not None
+            assert got.status == TorrentStatus.migrating.value
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.asyncio
 async def test_sync_runtime_to_db_detects_db_missing_runtime(monkeypatch, tmp_path):
     db_path = tmp_path / "sync-missing.sqlite3"
     db_url = f"sqlite+aiosqlite:///{db_path}"

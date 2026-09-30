@@ -1919,6 +1919,11 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if self._check_admit.is_waiting(db_id):
             paused = False
             lt_state = "queued_for_checking"
+        elif self._hash_queue.is_queued(db_id):
+            # recheck переноса снял раздачу с очереди проверки и ждёт слот хеша.
+            # Без этой подписи она выглядит просто на паузе, и перенос обрывается.
+            paused = False
+            lt_state = "queued_for_checking"
         elif self._check_admit.is_running(db_id) and not is_full_hash_check_state(lt_state):
             # Слот уже занят, а libtorrent часто успевает мигнуть в seeding.
             # Без этой подписи фильтр «Проверка» пустой, пока идёт очередь.

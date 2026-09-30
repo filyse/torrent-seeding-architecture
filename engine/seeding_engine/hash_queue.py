@@ -25,6 +25,10 @@ class HashQueue:
     def waiting(self) -> list[int]:
         return list(self._order)
 
+    def is_queued(self, db_id: int) -> bool:
+        """Ждёт слот хеша: в очереди, но проверка ещё не запущена."""
+        return db_id in self._jobs and db_id not in self._running
+
     def running_count(self) -> int:
         return len(self._running)
 
