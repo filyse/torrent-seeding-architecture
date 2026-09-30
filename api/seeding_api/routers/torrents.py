@@ -1018,6 +1018,8 @@ async def pause_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDep
     row = await repo.get_by_id(torrent_id)
     if row is None:
         raise HTTPException(status_code=404, detail="torrent not found")
+    if row.status == TorrentStatus.migrating.value:
+        raise HTTPException(status_code=409, detail="torrent is migrating")
     try:
         await pool.client_for_row(row).pause(torrent_id)
     except httpx.HTTPStatusError as exc:
@@ -1037,6 +1039,8 @@ async def resume_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDe
     row = await repo.get_by_id(torrent_id)
     if row is None:
         raise HTTPException(status_code=404, detail="torrent not found")
+    if row.status == TorrentStatus.migrating.value:
+        raise HTTPException(status_code=409, detail="torrent is migrating")
     try:
         await pool.client_for_row(row).resume(torrent_id)
     except httpx.HTTPStatusError as exc:

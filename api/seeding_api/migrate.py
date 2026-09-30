@@ -161,8 +161,7 @@ async def _wait_until_checked(
     seen_checking = False
     stable_prog: float | None = None
     stable_n = 0
-    settle_polls = 9  # ~9с стабильного не-checking прежде чем поверить в «неполную» копию (9×1с)
-    start_grace = 21  # ждём появления checking хотя бы столько (сек), прежде чем доверять не-checking
+    settle_polls = 9  # ~9с стабильного не-checking после прохода, прежде чем поверить в «неполную» копию
     while waited <= timeout:
         try:
             snap = await client.runtime_snapshot(db_id)
@@ -181,13 +180,17 @@ async def _wait_until_checked(
             else:
                 if prog >= 0.999:
                     return snap
-                if stable_prog is not None and abs(prog - stable_prog) < 1e-6:
+                # Речек ещё не начался: слот хеша занят очередью, раздача стоит
+                # на паузе и это не «копия неполная». Ждём сам проход.
+                if not seen_checking:
+                    stable_prog = None
+                    stable_n = 0
+                elif stable_prog is not None and abs(prog - stable_prog) < 1e-6:
                     stable_n += 1
                 else:
                     stable_prog = prog
                     stable_n = 1
-                ready = (seen_checking or waited >= start_grace) and stable_n >= settle_polls
-                if ready:
+                if seen_checking and stable_n >= settle_polls:
                     return snap
         await asyncio.sleep(interval)
         waited += interval

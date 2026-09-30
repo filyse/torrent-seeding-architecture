@@ -152,14 +152,17 @@ async def sync_runtime_to_db(ctx):
                     runtime_missing_db += 1
                     continue
 
-                target_status = status_from_runtime(
-                    rt.get("runtime_status"),
-                    rt.get("lt_state"),
-                    rt.get("progress"),
-                )
-                if row.status != target_status:
-                    await repo.update_status(db_id, target_status)
-                    updated_status += 1
+                # Источник на время копии стоит на паузе специально. Запись
+                # «paused» поверх «migrating» снимает перенос в интерфейсе.
+                if row.status != TorrentStatus.migrating.value:
+                    target_status = status_from_runtime(
+                        rt.get("runtime_status"),
+                        rt.get("lt_state"),
+                        rt.get("progress"),
+                    )
+                    if row.status != target_status:
+                        await repo.update_status(db_id, target_status)
+                        updated_status += 1
 
                 rt_info_hash = rt.get("info_hash")
                 if isinstance(rt_info_hash, str) and rt_info_hash and row.info_hash != rt_info_hash:

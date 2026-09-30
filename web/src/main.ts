@@ -4559,7 +4559,10 @@ function renderTorrentCard(
   delBtn.addEventListener("click", () => {
     void deleteTorrentWithDialog({ id: t.id, display_name: t.display_name }, onChange);
   });
-  if (t.status === "paused") pauseBtn.disabled = true;
+  if (t.status === "migrating") {
+    pauseBtn.disabled = true;
+    resumeBtn.disabled = true;
+  } else if (t.status === "paused") pauseBtn.disabled = true;
   else resumeBtn.disabled = true;
   actions.append(pauseBtn, resumeBtn, delBtn);
   const badges = el("div", { className: "torrent-card__badges" }, [badge]);
@@ -4750,11 +4753,14 @@ function renderTorrentTable(
     }
     if (writable) {
       const isPaused = t.status === "paused";
-      const toggle = el("button", {
+      const isMigrating = t.status === "migrating";
+      const toggleProps: Record<string, string> = {
         type: "button",
         className: "btn btn--ghost btn--xs",
-        title: isPaused ? "Старт" : "Пауза",
-      }, [isPaused ? "▶" : "⏸"]);
+        title: isMigrating ? "Идёт перенос" : isPaused ? "Старт" : "Пауза",
+      };
+      if (isMigrating) toggleProps.disabled = "";
+      const toggle = el("button", toggleProps, [isPaused ? "▶" : "⏸"]);
       toggle.addEventListener("click", async () => {
         try {
           await fetchJson(`/torrents/${t.id}/${isPaused ? "resume" : "pause"}`, { method: "POST" });
