@@ -856,18 +856,20 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             if self._ses is not None:
                 return
             self._ses = await asyncio.to_thread(_mk)
+        # load_state мог вернуть временный hold-кап (1 МБ/с) как upload_rate_limit.
+        # Не копируем его в desired: постоянный лимит — из БД/API (register → set_session_limits).
+        # Сразу перезаписываем сессию текущим desired (по умолчанию 0 = без лимита).
         try:
-            ses = self._ses
-            if ses is not None and hasattr(ses, "upload_rate_limit"):
-                self._upload_gate.desired = max(0, int(ses.upload_rate_limit() or 0))
+            self._upload_gate.set_desired(self._upload_gate.desired)
         except Exception:  # noqa: BLE001
             pass
         log.info(
-            "libtorrent session started listen %s-%s storage=%s hold_cap=%s",
+            "libtorrent session started listen %s-%s storage=%s hold_cap=%s desired_ul=%s",
             self._listen_low,
             self._listen_high,
             self.disk_kind,
             self._upload_gate.hold.cap_bps,
+            self._upload_gate.desired,
         )
 
         if _env_bool("SEEDING_ENGINE_SELF_RESTORE", True):
@@ -905,9 +907,31 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self._account_piece_alerts(side)
         return saved
 
+    def _write_session_state(self, ses, state_path: str) -> None:
+        """session.state без временного hold-капа: иначе после рестарта 1 МБ/с залипает."""
+        lt = self._lt
+        desired = int(self._upload_gate.desired)
+        held = bool(self._upload_gate.hold.active)
+        cleared = False
+        if held and hasattr(ses, "set_upload_rate_limit"):
+            try:
+                ses.set_upload_rate_limit(max(0, desired))
+                cleared = True
+            except Exception:  # noqa: BLE001
+                cleared = False
+        try:
+            blob = lt.bencode(ses.save_state())
+            Path(state_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(state_path).write_bytes(blob)
+        finally:
+            if cleared:
+                try:
+                    self._upload_gate.set_desired(desired)
+                except Exception:  # noqa: BLE001
+                    pass
+
     async def _save_all_to_disk(self) -> int:
         """Сохранить fastresume всех раздач + session.state. Reused периодикой и stop()."""
-        lt = self._lt
         async with self._lock:
             ses = self._ses
             handles = dict(self._handles)
@@ -919,9 +943,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
 
             def _save_state(ses_inner=ses):
                 try:
-                    blob = lt.bencode(ses_inner.save_state())
-                    Path(state_path).parent.mkdir(parents=True, exist_ok=True)
-                    Path(state_path).write_bytes(blob)
+                    self._write_session_state(ses_inner, state_path)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("save_state: %s", exc)
 
@@ -989,9 +1011,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         def _shutdown(ses_inner=ses):
             if state_path:
                 try:
-                    blob = lt.bencode(ses_inner.save_state())
-                    Path(state_path).parent.mkdir(parents=True, exist_ok=True)
-                    Path(state_path).write_bytes(blob)
+                    self._write_session_state(ses_inner, state_path)
                     log.info("libtorrent session state written to %s", state_path)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("libtorrent save_state: %s", exc)

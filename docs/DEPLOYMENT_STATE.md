@@ -2,7 +2,7 @@
 
 > **Исторический снимок 2026-07-18.** Не читать как текущий прод.
 > С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
-> Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-09-30: web 1.54.1 / api 1.26.11 / queue 1.0.2 / engine 1.6.15, libtorrent 2.1.2 на всех девяти движках).
+> Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-10-06: web 1.54.2 / api 1.26.11 / queue 1.0.2 / engine 1.6.16, libtorrent 2.1.2 на всех девяти движках).
 > Источник истины кода — `main` (web-шапка — после коммита этой спеки).
 
 Документ фиксирует **фактическую топологию продакшена**, расхождение рабочих
@@ -565,6 +565,44 @@ bash scripts/deploy-ct400.sh up -d --build api web
 
 Проверка: Ctrl+F5, футер 1.53.89; у раздачи в статусе «Проверка» рядом с
 процентом. У раздачи в статусе «Проверка» скорость рядом с бейджем.
+
+## 7э. Hold не залипает в session.state — 2026-10-06
+
+engine **1.6.16**, web **1.54.2** (модалка удаления: перенос длинных имён).
+Спека: [`CREATOR_UPLOAD_HOLD.md`](CREATOR_UPLOAD_HOLD.md) § session.state.
+Также: сеть `seeding-upload` вшита в `docker-compose.engine.yml` /
+`deploy-engine.sh` (скачивание без 502 после recreate).
+
+Симптом до фикса: b1/b4/b6 `upload_limit=1048576`, `creator_upload_hold=false`,
+БД `upload_limit NULL`. Снято live `POST …/session/limits` → 0; чтобы не
+повторилось после рестарта во время хеша — выкат 1.6.16.
+
+Порядок: **push → 171 → 243 → CT400 web** (api/queue не трогаем).
+
+```bash
+# b-host rudub@192.168.1.171:24
+cd ~/seeding-engine
+git fetch origin && git pull --ff-only origin main
+docker network create seeding-upload >/dev/null 2>&1 || true
+docker compose -p seeding-engine --env-file .env.engine \
+  -f docker-compose.engine.yml -f docker-compose.b1-content.yml up -d --build
+for n in 2 3 4 5 6; do
+  docker compose -p seeding-engine-b$n --env-file .env.engine.b$n \
+    -f docker-compose.engine.yml -f docker-compose.b$n-content.yml up -d --build
+done
+# проверка: version 1.6.16, upload_limit_desired 0 (если в БД нет лимита)
+
+# a-host rudub2@192.168.2.243 через -J root@192.168.1.10
+cd ~/torrent-seeding-architecture
+git fetch origin && git pull --ff-only origin main
+docker network create seeding-upload >/dev/null 2>&1 || true
+docker compose -p seeding-engines-a -f docker-compose.a-host.yml up -d --build
+
+# CT400 — только web (модалка)
+cd /opt/containerd
+git fetch origin && git pull --ff-only origin main
+bash scripts/deploy-ct400.sh up -d --no-deps --build web
+```
 
 ## 7. Откат
 

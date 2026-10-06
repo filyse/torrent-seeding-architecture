@@ -40,7 +40,8 @@ web (модал «Создать торрент» / «Очередь созда�
   во время хеша запоминает новое «куда вернуть» и оставляет кап. SSD — без
   лимита. Override: `SEEDING_STORAGE_KIND=hdd|ssd`; cap `0` — hold выкл.
   `checking_resume_data` кап не держит. В статусе задачи и `session/stats`:
-  `upload_hold` / `creator_upload_hold`.
+  `upload_hold` / `creator_upload_hold`. С engine **1.6.16** hold-кап не
+  залипает в `session.state` / `desired` после рестарта.
   Полная спека: [`CREATOR_UPLOAD_HOLD.md`](CREATOR_UPLOAD_HOLD.md).
 - **api** (`api/seeding_api/routers/creator.py`): проксирование к движку + два режима:
   - «только создать» — эфемерный `.torrent` стримится в браузер (не хранится);

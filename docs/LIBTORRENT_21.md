@@ -35,6 +35,9 @@ Debian Trixie `python3-libtorrent` **2.0.11** (`engine/Dockerfile`). В sid то
 `session.state` (`save_state` / `load_state`) на 2.1.2 по-прежнему работает.
 Вызовы устарели ещё в 2.0, в коде движка они живы (`torrent_runtime.py`).
 Перенос на `session_params` не нужен, пока эти методы отдаются.
+С engine **1.6.16** перед `save_state` снимается временный hold-кап отдачи
+HDD — иначе `upload_rate_limit=1 МБ/с` залипал после рестарта
+([`CREATOR_UPLOAD_HOLD.md`](CREATOR_UPLOAD_HOLD.md)).
 
 ## Образ
 

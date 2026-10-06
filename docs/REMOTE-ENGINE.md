@@ -61,6 +61,7 @@ TTL задач creator (по умолчанию 24 ч) чистит RAM на д�
 
 На время хеша `.torrent` и полной проверки файлов (recheck после переноса)
 HDD-движок сам режет отдачу до 1 МБ/с (hold в RAM, не в БД). SSD не трогает.
+С engine **1.6.16** кап не попадает в постоянный лимит через `session.state`.
 Дефолтов достаточно; override —
 `SEEDING_CREATOR_UPLOAD_LIMIT_BPS` / `SEEDING_STORAGE_KIND`. Спека:
 [`CREATOR_UPLOAD_HOLD.md`](CREATOR_UPLOAD_HOLD.md).

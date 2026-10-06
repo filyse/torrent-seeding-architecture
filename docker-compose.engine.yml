@@ -10,7 +10,7 @@
 #   cp .env.engine.example .env.engine && nano .env.engine   # заполнить значения
 #   ./scripts/deploy-engine.sh
 #
-# Либо напрямую:
+# Либо напрямую (сеть seeding-upload должна уже существовать — её создаёт deploy-engine.sh):
 #   docker compose --env-file .env.engine -f docker-compose.engine.yml up -d --build
 
 # Отдельное имя проекта — чтобы движок не «цеплял» соседние стеки на той же машине
@@ -78,6 +78,11 @@ services:
     volumes:
       - engine_data:/data
       - ./certs:/certs:ro
+    # Имя {id}-seeding в этой сети нужно upload-edge (:8090). Без неё скачивание
+    # и заливка дают 502. Сеть внешняя: переживает recreate, если файл compose тот же.
+    networks:
+      - default
+      - seeding-upload
     healthcheck:
       test:
         [
@@ -93,3 +98,8 @@ services:
 
 volumes:
   engine_data:
+
+networks:
+  seeding-upload:
+    external: true
+    name: seeding-upload

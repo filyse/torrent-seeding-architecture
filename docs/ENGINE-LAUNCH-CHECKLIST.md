@@ -125,10 +125,13 @@
 - [ ] Тип диска (`disk_kind`) считается по `/data/<ENG>`, не по `/data`. На 171
       корень — NVMe, контент — HDD: b* должны быть `hdd`, иначе hold хеша не
       включится. a* — `ssd`. Спека: `docs/CREATOR_UPLOAD_HOLD.md`.
+      После рестарта (engine ≥ 1.6.16): если в БД нет лимита, `session/stats`
+      не должен показывать постоянные `upload_limit`/`desired` = 1048576 при
+      `creator_upload_hold=false`.
 
   ```bash
   docker exec <ENG>-seeding wget -qO- http://127.0.0.1:8081/health
-  # disk_kind=hdd|ssd
+  # disk_kind=hdd|ssd, version≥1.6.16
   ```
 
 - [ ] `sysinfo`/UI («Диск раздачи»/«Путь раздачи») показывают том `/data/<ENG>` и его размер,

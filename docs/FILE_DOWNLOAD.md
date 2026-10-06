@@ -146,9 +146,10 @@ NPM-локации не трогаем.
 1. **Спека** — этот файл.
 2. **Движок** — `/download/v1` + тесты ticket / path-escape / Range.
    Пересборка b1–b6 и a1–a3 (как unchoke: точечно, без `git reset --hard`).
-   После recreate обязательно сеть `seeding-upload`: оверлей
-   `docker-compose.engine.upload.yml` на b* и `scripts/upload-edge-attach.sh`
-   на a* (иначе edge даёт 502 на upload и download).
+   Сеть `seeding-upload` задана в `docker-compose.engine.yml` и в
+   `docker-compose.a-host.yml`: новый контейнер входит в неё сам.
+   Если edge всё же отвечает 502 — контейнера нет в сети, поможет
+   `scripts/upload-edge-attach.sh`.
 3. **Edge** — location download на 171 и 243. `:8090` тот же.
 4. **RU релей** — GET-стрим на `185.185.143.207`. Смоук: Range 0–1 с дома и
    через sslip.io.

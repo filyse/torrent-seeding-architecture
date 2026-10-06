@@ -1994,6 +1994,7 @@ input.file-input::file-selector-button:hover {
   width: 100%;
   max-width: 22rem;
   max-height: calc(100dvh - 2rem);
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 1.25rem;
@@ -2282,6 +2283,8 @@ input.file-input::file-selector-button:hover {
   font-size: 0.875rem;
   color: var(--muted);
   line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .modal-actions {

@@ -10,7 +10,7 @@
 SSD (a1–a3) не режем: там хеш и отдача не дерутся за головку.
 
 Версии: engine **1.6.1** (recheck). Создание hold — с 1.6.0. UI «хеш» на «Сети» уже с 1.44.4.
-Спека очереди создания: [`CREATOR.md`](CREATOR.md).
+Фикс залипания капа после рестарта — **1.6.16**. Спека очереди: [`CREATOR.md`](CREATOR.md).
 
 ## Правила
 
@@ -23,6 +23,7 @@ SSD (a1–a3) не режем: там хеш и отдача не дерутся
 | Heartbeat | `set_session_limits` запоминает новое desired, кап не снимает |
 | Уже строже | не поднимаем лимит пользователя |
 | Снятие | `finally`: успех, ошибка, отмена. Crash → следующий register вернёт лимит из БД |
+| session.state | hold-кап **не** пишем и после `load_state` **не** копируем в `desired` (engine ≥ 1.6.16) |
 | Образ | один на все 9 движков, compose руками не размечаем |
 
 На 171 корень контейнера `/data` сидит на OS NVMe. Контент — в `/data/bN` на
@@ -63,6 +64,23 @@ recheck / migrate
 `upload_limit_desired` — куда вернуть (лимит из БД / UI).
 `creator_upload_hold` / `creator_upload_hold_bps` — флаг для панели.
 
+### session.state и рестарт (engine ≥ 1.6.16)
+
+Hold пишет кап в живую сессию libtorrent. Раньше `save_state` сохранял его в
+`session.state`, а при старте `upload_rate_limit` копировали в постоянный
+`desired` — отдача оставалась ~1 МБ/с при `creator_upload_hold=false`
+(наблюдалось на b1/b4/b6). С 1.6.16:
+
+1. после `load_state` в сессию применяется только `desired` (дефолт `0`);
+2. перед `save_state` hold-кап временно снимается, в файл пишется `desired`;
+3. постоянный лимит по-прежнему приходит из БД/API (`register` →
+   `set_session_limits`), не из файла состояния.
+
+Симптом залипания: `upload_limit == upload_limit_desired == 1048576`,
+`creator_upload_hold == false`, в БД `engines.upload_limit IS NULL`.
+Снятие без рестарта: `POST /internal/v1/session/limits` с
+`{"download_limit":0,"upload_limit":0}` (токен движка).
+
 ## API / UI
 
 - Задача creator: `upload_hold` в `CreateTaskOut` / `CreatorTaskOut`.
@@ -84,7 +102,7 @@ recheck / migrate
 # b1 — HDD
 docker exec b1-seeding python3 -c "from seeding_engine import __version__; print(__version__)"
 docker exec b1-seeding wget -qO- http://127.0.0.1:8081/health
-# disk_kind=hdd, version=1.6.0
+# disk_kind=hdd, version≥1.6.16
 
 # a1 — SSD
 docker exec a1-seeding wget -qO- http://127.0.0.1:8081/health
@@ -93,6 +111,9 @@ docker exec a1-seeding wget -qO- http://127.0.0.1:8081/health
 
 Создать торрент на b*: в очереди чип, на «Сети» подпись, отдача этого
 движка ~1 МБ/с, остальные b* не режутся. На a* чипа нет.
+
+После рестарта b* во время/после хеша: `session/stats` — `upload_limit_desired`
+не должен остаться `1048576`, если в БД лимита нет.
 
 ## Откат
 
