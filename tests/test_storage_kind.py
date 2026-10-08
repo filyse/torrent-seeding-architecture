@@ -82,6 +82,23 @@ def test_upload_hold_refcount_nested():
     assert applied[-1] == 0
 
 
+def test_hold_cap_must_not_become_desired():
+    """Регресс: кап из session.state/hold не должен стать постоянным desired."""
+    applied: list[int] = []
+    gate = SessionUploadGate(apply=applied.append, desired=0, cap_bps=1024 * 1024)
+    assert gate.begin_create("hdd") is True
+    poisoned = applied[-1]
+    assert poisoned == 1024 * 1024
+    gate.end_create()
+    assert gate.desired == 0
+    gate.set_desired(gate.desired)
+    assert gate.desired == 0
+    assert applied[-1] == 0
+    gate.desired = poisoned
+    gate.set_desired(gate.desired)
+    assert applied[-1] == poisoned
+
+
 def test_full_hash_check_states_skip_resume_and_seed():
     assert is_full_hash_check_state("checking") is True
     assert is_full_hash_check_state("checking_files") is True
