@@ -566,6 +566,36 @@ bash scripts/deploy-ct400.sh up -d --build api web
 Проверка: Ctrl+F5, футер 1.53.89; у раздачи в статусе «Проверка» рядом с
 процентом. У раздачи в статусе «Проверка» скорость рядом с бейджем.
 
+## 7ё. Hold-stick hotfix 1.6.13.1 + откат 2.0.11 — 2026-10-08
+
+web **1.53.92**, api **1.26.10**, engine **1.6.13.1**, libtorrent **2.0.11**.
+Спека hold: [`CREATOR_UPLOAD_HOLD.md`](CREATOR_UPLOAD_HOLD.md).
+Ветка: `hotfix/1.6.13-hold-stick` (`b04f11b`).
+
+Контекст: на 2.1.2 / engine ~1.6.16 a2 падал SIGSEGV в Boost.Python
+`polymorphic_id_generator<alert>`. Откат образов `rollback-20260929`
+(1.6.13 / 2.0.11) + текущие FR-бэкапы; после отката на b* снова всплыл
+залипший 1 МБ/с → бэкапорт фикса hold→session.state→desired как **1.6.13.1**.
+
+Порядок: **171 → 243**. CT400 web/api не трогали (уже 1.53.92 / 1.26.10).
+
+```bash
+# b-host rudub@192.168.1.171:24
+cd ~/seeding-engine
+git fetch origin hotfix/1.6.13-hold-stick && git checkout -f hotfix/1.6.13-hold-stick
+# per-engine compose up -d --build (см. scripts / deploy_hold_hotfix_b.sh)
+
+# a-host rudub2@192.168.2.243
+cd ~/torrent-seeding-architecture
+git fetch origin hotfix/1.6.13-hold-stick && git checkout -f hotfix/1.6.13-hold-stick
+docker compose -p seeding-engines-a -f docker-compose.a-host.yml up -d --build
+```
+
+Проверка (внутри контейнера, `X-Engine-Token`):
+`GET /internal/v1/session/stats` → `version` 1.6.13.1, `upload_limit=0`,
+`upload_limit_desired=0`, `creator_upload_hold=false`; отдача ≫ 1 МБ/с
+на нагруженных движках. CT400: web 1.53.92, api 1.26.10.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

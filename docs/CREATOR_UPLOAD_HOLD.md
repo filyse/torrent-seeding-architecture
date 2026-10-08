@@ -102,3 +102,19 @@ docker exec a1-seeding wget -qO- http://127.0.0.1:8081/health
 Откат кода: `git revert` коммита hold на `main`, push; пересобрать engine
 на 171/243 и api+web на CT400. На прод-хостах **не** `git reset --hard`
 целиком — деревья длиннее `origin/main`.
+
+## Залипание капа (session.state → desired)
+
+До **1.6.13.1** / **1.6.16** временный hold 1 МБ/с мог попасть в
+`session.state` и после рестарта стать постоянным `desired`. Симптом: отдача
+движка ≤ ~1 МБ/с при `upload_limit_desired=1048576`, hold уже снят.
+
+Фикс: hold-кап не пишется в `save_state`; после `load_state` `desired`
+восстанавливается из явного лимита, не из отравленного state.
+Снятие залипшего лимита без рестарта: `POST /internal/v1/session/limits`
+с `upload_limit: 0` (и `download_limit: 0` при необходимости).
+
+Откатная линия libtorrent **2.0.11** (engine 1.6.13.x) несёт бэкапорт
+**1.6.13.1** (`hotfix/1.6.13-hold-stick`). Ветка 2.1.2 / 1.6.16+ — тот же
+фикс в основном релизном потоке; на 2.1.2 был SIGSEGV (Boost.Python alert
+id) — на проде откат к 2.0.11 до отдельного lock вокруг `to_thread`→lt.
