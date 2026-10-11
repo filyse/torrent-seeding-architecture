@@ -596,6 +596,18 @@ docker compose -p seeding-engines-a -f docker-compose.a-host.yml up -d --build
 `upload_limit_desired=0`, `creator_upload_hold=false`; отдача ≫ 1 МБ/с
 на нагруженных движках. CT400: web 1.53.92, api 1.26.10.
 
+## 7ю. Фикс SIGSEGV алертов — engine 1.6.13.2 — 2026-10-11
+
+Ветка `hotfix/1.6.13-hold-stick`, libtorrent 2.0.11. Причина и фикс — CHANGELOG engine 1.6.13.2,
+спека — [`TORRENT_STATUS.md`](TORRENT_STATUS.md) «Алерты не хранить».
+Бэкапы до выката: `~/backups/20261011-pre-segfix/` на 171 и 243 (образы,
+inspect, тома состояния без медиа, код), CT400 `/root/backups/20261011-pre-segfix/`
++ vzdump CT400; образы a-host помечены `seeding-engine-a:pre-segfix-aN`.
+
+Порядок: a2 (канарейка) → наблюдение → a1, a3 → b1–b6. CT400 не трогаем.
+Проверка: `version` 1.6.13.2 в `/internal/v1/session/stats`, `RestartCount`
+не растёт, в `journalctl -k` нет `segfault ... libtorrent`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
