@@ -515,3 +515,51 @@ def test_list_torrents_uses_db_snapshot_without_engine_runtime(api_module):
             live = client.get("/api/v1/torrents?q=Snapshot&live=1")
             assert live.status_code == 200
             assert called["n"] == 1
+
+
+def test_migrate_status_queued_position_and_stale_failed(api_module):
+    """migrate-status отдаёт место в очереди; старая ошибка переноса на цели скрыта."""
+
+    from seeding_db.repository import MigrationRepository, TorrentRepository
+
+    with respx.mock(assert_all_called=False) as mock:
+        _wire_engine_mocks(mock)
+        with TestClient(api_module.app) as client:
+            ids = []
+            for i in range(3):
+                r = client.post(
+                    "/api/v1/torrents",
+                    json={
+                        "display_name": f"N{i}", "save_path": "/data",
+                        "magnet_uri": "magnet:?xt=urn:btih:" + str(i) * 40,
+                    },
+                )
+                ids.append(r.json()["id"])
+            sf = api_module.app.state.session_factory
+            base = dict(source_save_path="/data", target_save_path="/data",
+                        src_content_path="", display_name="N", transport="http")
+
+            async def seed():
+                async with sf() as s:
+                    repo, mrepo = TorrentRepository(s), MigrationRepository(s)
+                    eng = (await repo.get_by_id(ids[0])).engine_id
+                    for tid in ids[:2]:
+                        await mrepo.upsert(tid, source_engine_id=eng, target_engine_id="b9",
+                                           state="queued", phase="queued", **base)
+                        await repo.update_status(tid, "migrate_queued")
+                        await s.commit()
+                    await mrepo.upsert(ids[2], source_engine_id="old", target_engine_id=eng,
+                                       state="failed", phase="error", last_error="x", **base)
+                    await s.commit()
+
+            client.portal.call(seed)
+            s0 = client.get(f"/api/v1/torrents/{ids[0]}/migrate-status").json()
+            s1 = client.get(f"/api/v1/torrents/{ids[1]}/migrate-status").json()
+            assert s0["queued"] and s0["queue_position"] == 1 and s0["target_engine_id"] == "b9"
+            assert s1["queue_position"] == 2 and s1["active"] is True
+            s2 = client.get(f"/api/v1/torrents/{ids[2]}/migrate-status").json()
+            assert s2["resumable"] is False and s2["phase"] != "error"
+            # пауза запрещена, пока ждёт слот
+            assert client.post(f"/api/v1/torrents/{ids[0]}/pause").status_code == 409
+            facets = client.get("/api/v1/torrents/facets").json()
+            assert facets["statuses"]["migrate_queued"] == 2

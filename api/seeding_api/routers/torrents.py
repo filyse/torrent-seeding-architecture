@@ -7,7 +7,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 from seeding_db.engine_registry import normalize_save_path
-from seeding_db.models import TorrentStatus
+from seeding_db.models import MIGRATION_STATUSES, TorrentStatus
 from seeding_db.repository import MigrationRepository, TorrentRepository
 
 from seeding_api.deps import DbSession, EnginePoolDep
@@ -568,7 +568,7 @@ async def migrate_torrent(
         raise HTTPException(status_code=422, detail=f"unknown engine_id: {target_id}")
     if target_id == row.engine_id:
         raise HTTPException(status_code=422, detail="target engine equals source engine")
-    if row.status == TorrentStatus.migrating.value:
+    if row.status in MIGRATION_STATUSES:
         raise HTTPException(status_code=409, detail="torrent is already migrating")
 
     source_spec = pool.spec(row.engine_id)
@@ -634,7 +634,7 @@ async def migrate_torrent(
     source_save_path = source_spec.normalized_prefix()
     target_save_path = target_spec.normalized_prefix()
 
-    await repo.update_status(torrent_id, TorrentStatus.migrating.value)
+    await repo.update_status(torrent_id, TorrentStatus.migrate_queued.value)
     await session.commit()
 
     launch_migration(
@@ -652,7 +652,7 @@ async def migrate_torrent(
     )
     return {
         "id": torrent_id,
-        "status": TorrentStatus.migrating.value,
+        "status": TorrentStatus.migrate_queued.value,
         "source_engine_id": row.engine_id,
         "engine_id": target_id,
         "transport": mode,
@@ -666,14 +666,14 @@ async def resume_migration(torrent_id: int, request: Request, session: DbSession
     job = await mrepo.get(torrent_id)
     if job is None:
         raise HTTPException(status_code=404, detail="no migration job to resume")
-    if job.state == "running":
+    if job.state in ("running", "queued"):
         raise HTTPException(status_code=409, detail="migration already running")
     src_spec = pool.spec(job.source_engine_id)
     if pool.spec(job.target_engine_id) is None or src_spec is None:
         raise HTTPException(status_code=422, detail="engine of this migration is no longer known")
 
     repo = TorrentRepository(session)
-    await repo.update_status(torrent_id, TorrentStatus.migrating.value)
+    await repo.update_status(torrent_id, TorrentStatus.migrate_queued.value)
     await session.commit()
 
     launch_migration(
@@ -689,7 +689,7 @@ async def resume_migration(torrent_id: int, request: Request, session: DbSession
         source_url=src_spec.url,
         resume=True,
     )
-    return {"id": torrent_id, "status": TorrentStatus.migrating.value, "resumed": True}
+    return {"id": torrent_id, "status": TorrentStatus.migrate_queued.value, "resumed": True}
 
 
 @router.post("/{torrent_id}/migrate/cancel")
@@ -713,6 +713,25 @@ async def migrate_status(torrent_id: int, request: Request, session: DbSession):
     """Текущий прогресс переноса для опроса из UI (фаза + проценты + возобновляемость)."""
     mrepo = MigrationRepository(session)
     job = await mrepo.get(torrent_id)
+    repo = TorrentRepository(session)
+    row = await repo.get_by_id(torrent_id)
+    if (
+        job is not None
+        and job.state == "failed"
+        and row is not None
+        and row.engine_id == job.target_engine_id
+        and row.status not in MIGRATION_STATUSES
+    ):
+        # Раздача уже на целевом движке — старая ошибка переноса неактуальна.
+        job = None
+    queue: dict = {}
+    if job is not None and job.state == "queued":
+        queue = {
+            "queued": True,
+            "queue_position": await mrepo.queue_position(job),
+            "source_engine_id": job.source_engine_id,
+            "target_engine_id": job.target_engine_id,
+        }
     store = getattr(request.app.state, "migrate_progress", None)
     snap = store.get(torrent_id) if store else None
     if snap is not None:
@@ -721,11 +740,11 @@ async def migrate_status(torrent_id: int, request: Request, session: DbSession):
         return {
             "id": torrent_id, "active": active, "resumable": resumable,
             "attempts": job.attempts if job else 0,
-            "transport": job.transport if job else None, **snap,
+            "transport": job.transport if job else None, **snap, **queue,
         }
     # Прогресса в памяти нет (например, после перезапуска оркестратора) — берём из БД-джоба.
     if job is not None:
-        active = job.state == "running"
+        active = job.state in ("running", "queued")
         pct = (job.copied / job.total) if job.total else None
         return {
             "id": torrent_id,
@@ -738,10 +757,9 @@ async def migrate_status(torrent_id: int, request: Request, session: DbSession):
             "attempts": job.attempts,
             "transport": job.transport,
             "message": job.last_error or None,
+            **queue,
         }
-    repo = TorrentRepository(session)
-    row = await repo.get_by_id(torrent_id)
-    migrating = bool(row and row.status == TorrentStatus.migrating.value)
+    migrating = bool(row and row.status in MIGRATION_STATUSES)
     return {
         "id": torrent_id,
         "active": migrating,
@@ -896,6 +914,9 @@ async def recheck_torrent(torrent_id: int, session: DbSession, pool: EnginePoolD
     row = await repo.get_by_id(torrent_id)
     if row is None:
         raise HTTPException(status_code=404, detail="torrent not found")
+    if row.status in MIGRATION_STATUSES:
+        # recheck снимает источник с паузы и путает проверку копии переносом
+        raise HTTPException(status_code=409, detail="torrent is migrating")
     try:
         ok = await pool.client_for_row(row).recheck(torrent_id)
     except httpx.HTTPError as exc:
@@ -1018,7 +1039,7 @@ async def pause_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDep
     row = await repo.get_by_id(torrent_id)
     if row is None:
         raise HTTPException(status_code=404, detail="torrent not found")
-    if row.status == TorrentStatus.migrating.value:
+    if row.status in MIGRATION_STATUSES:
         raise HTTPException(status_code=409, detail="torrent is migrating")
     try:
         await pool.client_for_row(row).pause(torrent_id)
@@ -1039,7 +1060,7 @@ async def resume_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDe
     row = await repo.get_by_id(torrent_id)
     if row is None:
         raise HTTPException(status_code=404, detail="torrent not found")
-    if row.status == TorrentStatus.migrating.value:
+    if row.status in MIGRATION_STATUSES:
         raise HTTPException(status_code=409, detail="torrent is migrating")
     try:
         await pool.client_for_row(row).resume(torrent_id)
@@ -1068,6 +1089,12 @@ async def delete_torrent(
     row = await repo.get_by_id(torrent_id)
     if row is None:
         raise HTTPException(status_code=404, detail="torrent not found")
+    if row.status == TorrentStatus.migrating.value:
+        # Идёт копия: удаление оставит частичную копию на цели. Сначала отмена переноса.
+        raise HTTPException(status_code=409, detail="torrent is migrating; cancel the transfer first")
+    if row.status == TorrentStatus.migrate_queued.value:
+        # Ждёт слот: снимаем задачу, ожидающая корутина увидит это и не начнёт копию.
+        await MigrationRepository(session).delete(torrent_id)
     try:
         await pool.client_for_row(row).remove_from_runtime(
             torrent_id,

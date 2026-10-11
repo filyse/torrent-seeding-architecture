@@ -18,7 +18,13 @@ class TorrentStatus(str, Enum):
     seeding = "seeding"
     paused = "paused"
     migrating = "migrating"
+    # Перенос запрошен и ждёт слот (лимит «переносов на движок»). Копия ещё не идёт.
+    migrate_queued = "migrate_queued"
     error = "error"
+
+
+# Оба статуса переноса: рантайм их не перетирает, пауза/старт запрещены.
+MIGRATION_STATUSES = (TorrentStatus.migrating.value, TorrentStatus.migrate_queued.value)
 
 
 class TorrentRecord(Base):

@@ -16,7 +16,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from seeding_db.models import TorrentStatus
+from seeding_db.models import MIGRATION_STATUSES
 from seeding_db.repository import TorrentRepository
 from seeding_db.status_from_runtime import status_from_runtime
 
@@ -91,7 +91,7 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                 # Согласуем статус по рантайму для ВСЕХ раздач (а не только для открытой страницы
                 # списка). Иначе импортированные сиды навсегда висят в «downloading» с импорта и
                 # счётчики статусов врут. «migrating» не трогаем — он держится до конца переноса.
-                if r.status != TorrentStatus.migrating.value:
+                if r.status not in MIGRATION_STATUSES:
                     target = status_from_runtime(
                         h.get("runtime_status"), h.get("lt_state"), prog
                     )

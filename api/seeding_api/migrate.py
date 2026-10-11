@@ -327,6 +327,7 @@ async def run_migration(
             await repo.update_status(torrent_id, TorrentStatus.seeding.value)
             await session.commit()
 
+    await _set_status(TorrentStatus.migrating.value)
     await _job(
         source_engine_id=str(source_engine_id),
         target_engine_id=target_engine_id,
@@ -438,6 +439,18 @@ async def cancel_migration(
         target_save_path = job.target_save_path
         source_engine_id = job.source_engine_id
         display_name = job.display_name
+        was_queued = job.state == "queued"
+
+    if was_queued:
+        # Копия не начиналась: на цели чистить нечего, источник не ставили на паузу.
+        # Удаление задачи из БД снимает её и с ожидания слота (_still_queued).
+        async with session_factory() as session:
+            await TorrentRepository(session).update_status(
+                torrent_id, TorrentStatus.seeding.value
+            )
+            await MigrationRepository(session).delete(torrent_id)
+            await session.commit()
+        return True
 
     target = pool.client_for(target_engine_id)
     try:
@@ -465,18 +478,64 @@ async def _migrate_limit(app) -> int:
     return int(limits["migrate_per_engine"])
 
 
+# Записи queued идут в порядке запуска (asyncio.Lock — FIFO), иначе параллельные
+# записи в БД перемешали бы «№» в UI. Слот выдаётся примерно в том же порядке.
+_QUEUE_ORDER = asyncio.Lock()
+
+
+async def _persist_queued(session_factory, **kw) -> None:
+    """Записать ждущий перенос в БД до ожидания слота: переживает рестарт API,
+    и UI видит «В очереди на перенос», а не «Перенос»."""
+    torrent_id = kw["torrent_id"]
+    async with session_factory() as session:
+        mrepo = MigrationRepository(session)
+        prev = await mrepo.get(torrent_id)
+        await mrepo.upsert(
+            torrent_id,
+            source_engine_id=str(kw["source_engine_id"]),
+            target_engine_id=str(kw["target_engine_id"]),
+            source_save_path=kw["source_save_path"],
+            target_save_path=kw["target_save_path"],
+            src_content_path=kw["src_content_path"],
+            display_name=kw["display_name"],
+            transport=kw["transport"],
+            state="queued",
+            phase="queued",
+            # Ошибка прошлой попытки остаётся видна до старта копии.
+            last_error=(prev.last_error if prev is not None else ""),
+        )
+        await TorrentRepository(session).update_status(
+            torrent_id, TorrentStatus.migrate_queued.value
+        )
+        await session.commit()
+
+
+async def _still_queued(session_factory, torrent_id: int) -> bool:
+    """Задачу могли отменить, пока она ждала слот."""
+    async with session_factory() as session:
+        job = await MigrationRepository(session).get(torrent_id)
+        return job is not None and job.state == "queued"
+
+
 async def _run_migration_when_slot(app, pool, **kwargs) -> None:
-    """Ждать свободный слот источника и приёмника, потом копировать."""
+    """Записать задачу как queued, ждать слот источника и приёмника, потом копировать."""
     from seeding_api.work_queue import transfer_slots
 
+    sf = app.state.session_factory
     source = str(kwargs["source_engine_id"])
     target = str(kwargs["target_engine_id"])
+    torrent_id = kwargs["torrent_id"]
+    async with _QUEUE_ORDER:
+        await _persist_queued(sf, **kwargs)
 
     async def limit_of() -> int:
         return await _migrate_limit(app)
 
     async with transfer_slots(source, target, limit_of):
-        await run_migration(app.state.session_factory, pool, **kwargs)
+        if not await _still_queued(sf, torrent_id):
+            log.info("migrate %s: cancelled while queued", torrent_id)
+            return
+        await run_migration(sf, pool, **kwargs)
 
 
 def launch_migration(
@@ -502,7 +561,7 @@ def launch_migration(
     progress_store["__hub__"] = getattr(app.state, "ws_hub", None)
     set_progress(
         progress_store, torrent_id, "queued",
-        message=f"очередь {source_engine_id} → {target_engine_id}",
+        message=f"{source_engine_id} → {target_engine_id}",
     )
     task = asyncio.create_task(
         _run_migration_when_slot(
@@ -530,11 +589,22 @@ def launch_migration(
 
 
 async def recover_orphaned_migrations(app, pool) -> int:
-    """После рестарта API задачи в памяти мертвы, а в БД state=running — UI висит
-    и /migrate/resume отвечает 409. Помечаем orphan как failed и сразу возобновляем."""
+    """После рестарта API задачи в памяти мертвы, а в БД state=running/queued — UI висит
+    и /migrate/resume отвечает 409. running помечаем failed и возобновляем; queued
+    ставим в очередь заново в прежнем порядке. Заодно снимаем failed-задачи, чья
+    раздача уже раздаётся на целевом движке (их карточка зря предлагала «возобновить»)."""
     async with app.state.session_factory() as session:
-        jobs = await MigrationRepository(session).list_active()
-        orphans = [j for j in jobs if j.state == "running"]
+        mrepo = MigrationRepository(session)
+        stale = await mrepo.delete_stale_failed()
+        await session.commit()
+        if stale:
+            log.info("migrate: dropped stale failed jobs already on target: %s", stale)
+        jobs = await mrepo.list_active()
+        orphans = sorted(
+            (j for j in jobs if j.state in ("running", "queued")),
+            # running первыми (держали слот), затем queued по времени постановки
+            key=lambda j: (j.state != "running", j.updated_at or j.created_at, j.torrent_id),
+        )
     if not orphans:
         return 0
     n = 0
@@ -546,16 +616,15 @@ async def recover_orphaned_migrations(app, pool) -> int:
                 job.torrent_id, job.source_engine_id, job.target_engine_id,
             )
             continue
-        async with app.state.session_factory() as session:
-            await MigrationRepository(session).set_state(
-                job.torrent_id,
-                "failed",
-                phase=job.phase,
-                error="оркестратор перезапущен — перенос возобновлён",
-            )
-            repo = TorrentRepository(session)
-            await repo.update_status(job.torrent_id, TorrentStatus.migrating.value)
-            await session.commit()
+        if job.state == "running":
+            async with app.state.session_factory() as session:
+                await MigrationRepository(session).set_state(
+                    job.torrent_id,
+                    "failed",
+                    phase=job.phase,
+                    error="оркестратор перезапущен — перенос возобновлён",
+                )
+                await session.commit()
         launch_migration(
             app,
             pool,
@@ -568,7 +637,7 @@ async def recover_orphaned_migrations(app, pool) -> int:
             display_name=job.display_name,
             transport=job.transport,
             source_url=src_spec.url,
-            resume=True,
+            resume=job.state == "running" or int(job.copied or 0) > 0,
         )
         n += 1
         log.info(

@@ -67,7 +67,6 @@ async def test_sync_runtime_to_db_updates_status_and_infohash(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
 async def test_sync_keeps_migrating_while_source_is_paused(monkeypatch, tmp_path):
     db_path = tmp_path / "sync-migrating.sqlite3"
     db_url = f"sqlite+aiosqlite:///{db_path}"

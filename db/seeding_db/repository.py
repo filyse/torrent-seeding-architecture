@@ -6,6 +6,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seeding_db.models import (
+    MIGRATION_STATUSES,
     ApiKeyRecord,
     AppSetting,
     AuditRecord,
@@ -134,8 +135,10 @@ class TorrentRepository:
             )
         elif state == "error":
             conds.append(TorrentRecord.status == TorrentStatus.error.value)
-        elif state == "migrating":
-            conds.append(TorrentRecord.status == TorrentStatus.migrating.value)
+        elif state == "migrating":  # идёт копия или ждёт слот переноса
+            conds.append(TorrentRecord.status.in_(MIGRATION_STATUSES))
+        elif state == "migrate_queued":
+            conds.append(TorrentRecord.status == TorrentStatus.migrate_queued.value)
 
         count_stmt = select(func.count()).select_from(TorrentRecord)
         page_stmt = select(TorrentRecord)
@@ -197,7 +200,7 @@ class TorrentRepository:
         Состояния считаются по тем же условиям, что и фильтр в list_page (по снимку рантайма)."""
         seeding = TorrentStatus.seeding.value
         error = TorrentStatus.error.value
-        migrating = TorrentStatus.migrating.value
+        migrate_queued = TorrentStatus.migrate_queued.value
 
         status_rows = (
             await self._session.execute(
@@ -223,7 +226,7 @@ class TorrentRepository:
             )
         ).all()
         # Все состояния одним запросом через агрегаты с FILTER.
-        total, total_size, active, peers, idle, incomplete, err, moving = (
+        total, total_size, active, peers, idle, incomplete, err, moving, moving_queued = (
             await self._session.execute(
                 select(
                     func.count(),
@@ -242,7 +245,8 @@ class TorrentRepository:
                         ),
                     ),
                     func.count().filter(TorrentRecord.status == error),
-                    func.count().filter(TorrentRecord.status == migrating),
+                    func.count().filter(TorrentRecord.status.in_(MIGRATION_STATUSES)),
+                    func.count().filter(TorrentRecord.status == migrate_queued),
                 )
             )
         ).one()
@@ -261,6 +265,7 @@ class TorrentRepository:
                 "incomplete": int(incomplete),
                 "error": int(err),
                 "migrating": int(moving),
+                "migrate_queued": int(moving_queued),
             },
         }
 
@@ -672,9 +677,53 @@ class MigrationRepository:
 
     async def list_active(self) -> list[MigrationJob]:
         result = await self._session.execute(
-            select(MigrationJob).where(MigrationJob.state.in_(["running", "failed"]))
+            select(MigrationJob).where(MigrationJob.state.in_(["queued", "running", "failed"]))
         )
         return list(result.scalars())
+
+    async def queue_position(self, job: MigrationJob) -> int:
+        """Место в очереди переноса: 1 + ждущие раньше на тех же движках.
+
+        Слот занимается по источнику и по приёмнику, поэтому впереди — любая ждущая
+        задача, у которой совпадает источник или приёмник. Порядок — время постановки
+        (updated_at не меняется, пока задача ждёт)."""
+        ahead = await self._session.execute(
+            select(func.count()).select_from(MigrationJob).where(
+                MigrationJob.state == "queued",
+                MigrationJob.torrent_id != job.torrent_id,
+                or_(
+                    MigrationJob.source_engine_id == job.source_engine_id,
+                    MigrationJob.target_engine_id == job.target_engine_id,
+                ),
+                or_(
+                    MigrationJob.updated_at < job.updated_at,
+                    (MigrationJob.updated_at == job.updated_at)
+                    & (MigrationJob.torrent_id < job.torrent_id),
+                ),
+            )
+        )
+        return 1 + int(ahead.scalar() or 0)
+
+    async def delete_stale_failed(self) -> list[int]:
+        """Снять failed-задачи, чья раздача уже раздаётся на целевом движке."""
+        rows = (
+            await self._session.execute(
+                select(MigrationJob.torrent_id)
+                .join(TorrentRecord, TorrentRecord.id == MigrationJob.torrent_id)
+                .where(
+                    MigrationJob.state == "failed",
+                    TorrentRecord.engine_id == MigrationJob.target_engine_id,
+                    TorrentRecord.status.notin_(MIGRATION_STATUSES),
+                )
+            )
+        ).scalars().all()
+        ids = [int(i) for i in rows]
+        if ids:
+            await self._session.execute(
+                sa_delete(MigrationJob).where(MigrationJob.torrent_id.in_(ids))
+            )
+            await self._session.flush()
+        return ids
 
     async def upsert(self, torrent_id: int, **fields) -> MigrationJob:
         row = await self._session.get(MigrationJob, torrent_id)
