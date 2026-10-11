@@ -323,6 +323,9 @@ class UpdateMatchResult(BaseModel):
 
 class TorrentDetailOut(TorrentOut):
     runtime: TorrentRuntimeOut | None = None
+    # False — движок раздачи не отвечает (снимок рантайма / запрос карточки):
+    # UI показывает «Движок недоступен» вместо последнего статуса из БД.
+    engine_online: bool = True
     peer_list: list[TorrentPeerOut] = Field(default_factory=list)
 
 
