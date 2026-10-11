@@ -21,6 +21,7 @@ from seeding_engine.fastresume_io import (
     ensure_engine_dirs,
     fastresume_dir,
     fastresume_path,
+    pop_alert_events,
     resume_alert_mask,
     save_resume_data_blocking,
     session_state_path,
@@ -2330,34 +2331,34 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if ses is None:
             return
         async with self._resume_lock:
-            alerts = await asyncio.to_thread(lambda: list(ses.pop_alerts()))
-        self._account_piece_alerts(alerts, pairs)
+            events = await asyncio.to_thread(pop_alert_events, self._lt, ses)
+        self._account_piece_alerts(events, pairs)
 
-    def _account_piece_alerts(self, alerts: list, pairs: list | None = None) -> None:
-        if not alerts:
-            return
-        lt = self._lt
-        finished = getattr(lt, "piece_finished_alert", None)
-        if finished is None:
+    def _account_piece_alerts(self, events: list, pairs: list | None = None) -> None:
+        """Учесть снимки PieceDone в скорости проверки.
+
+        Принимает только снимки из fastresume_io.pop_alert_events /
+        save_resume_data_blocking, никогда сами алерты libtorrent."""
+        if not events:
             return
         if pairs is None:
             pairs = list(self._handles.items())
+        lt = self._lt
         now = time.monotonic()
-        for alert in alerts:
-            if not isinstance(alert, finished):
-                continue
-            handle = getattr(alert, "handle", None)
+        for ev in events:
+            handle = getattr(ev, "handle", None)
             if handle is None:
                 continue
             db_id = _match_handle(pairs, handle)
             if db_id is None:
                 continue
             try:
+                if hasattr(handle, "is_valid") and not handle.is_valid():
+                    continue
                 st = handle.status() if callable(getattr(handle, "status", None)) else handle.status
                 if not is_full_hash_check_state(_state_label(lt, st)):
                     continue
-                piece = int(getattr(alert, "piece_index"))
-                nbytes = _piece_bytes(handle, piece)
+                nbytes = _piece_bytes(handle, int(ev.piece))
             except Exception:  # noqa: BLE001
                 continue
             self._check_rate.add(db_id, nbytes, now)

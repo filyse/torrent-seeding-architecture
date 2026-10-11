@@ -604,6 +604,18 @@ git fetch origin && git pull --ff-only origin main
 bash scripts/deploy-ct400.sh up -d --no-deps --build web
 ```
 
+## 7ю. Фикс SIGSEGV алертов — engine 1.6.17 — 2026-10-11
+
+Ветка `main`, libtorrent 2.1.2. Причина и фикс — CHANGELOG engine 1.6.17,
+спека — [`TORRENT_STATUS.md`](TORRENT_STATUS.md) «Алерты не хранить».
+Бэкапы до выката: `~/backups/20261011-pre-segfix/` на 171 и 243 (образы,
+inspect, тома состояния без медиа, код), CT400 `/root/backups/20261011-pre-segfix/`
++ vzdump CT400; образы a-host помечены `seeding-engine-a:pre-segfix-aN`.
+
+Порядок: a2 (канарейка) → наблюдение → a1, a3 → b1–b6. CT400 не трогаем.
+Проверка: `version` 1.6.17 в `/internal/v1/session/stats`, `RestartCount`
+не растёт, в `journalctl -k` нет `segfault ... libtorrent`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

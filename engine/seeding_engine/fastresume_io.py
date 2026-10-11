@@ -4,10 +4,53 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+# Алерты libtorrent живут только до следующего pop_alerts() на этой сессии:
+# память под них переиспользуется, а Python-обёртка остаётся висячей. Любое
+# обращение к старому алерту (isinstance, .handle, .piece_index) читает
+# освобождённую память и роняет процесс SIGSEGV в
+# polymorphic_id_generator<libtorrent::alert>::execute. Поэтому:
+#   1. pop_alerts() вызывается только под ALERT_LOCK;
+#   2. каждый алерт разбирается сразу, под тем же замком, в обычные данные;
+#   3. сами объекты алертов никогда не покидают этот модуль.
+ALERT_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True)
+class PieceDone:
+    """Снимок piece_finished_alert: копия torrent_handle и номер куска."""
+
+    handle: object
+    piece: int
+
+
+def snapshot_alert(lt, alert) -> PieceDone | None:
+    """Скопировать из живого алерта то, что нужно позже. Вызывать под ALERT_LOCK."""
+    finished = getattr(lt, "piece_finished_alert", None)
+    if finished is None or not isinstance(alert, finished):
+        return None
+    try:
+        # .handle отдаёт копию torrent_handle (weak_ptr), она переживает алерт.
+        return PieceDone(alert.handle, int(alert.piece_index))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def pop_alert_events(lt, ses) -> list[PieceDone]:
+    """Забрать алерты сессии и сразу превратить их в безопасные снимки."""
+    out: list[PieceDone] = []
+    with ALERT_LOCK:
+        for a in ses.pop_alerts():
+            ev = snapshot_alert(lt, a)
+            if ev is not None:
+                out.append(ev)
+    return out
 
 
 def fastresume_dir() -> Path:
@@ -86,9 +129,9 @@ def save_resume_data_blocking(lt, ses, handles: dict, timeout: float = 15.0) -> 
     save_resume_data_alert с актуальными счётчиками (all_time_upload и т.д.).
     Без этого upload/download за всё время не переживают рестарт движка.
 
-    handles: {db_id -> torrent_handle}. Возвращает (число сохранённых, прочие алерты).
-    Прочие алерты нельзя выбрасывать: pop_alerts забирает и piece_finished, из
-    которого считается скорость проверки.
+    handles: {db_id -> torrent_handle}. Возвращает (число сохранённых, снимки PieceDone).
+    piece_finished нельзя выбрасывать (из них считается скорость проверки), но
+    и держать сами алерты нельзя: отдаём только снимки, см. ALERT_LOCK.
     """
     if not handles:
         return 0, []
@@ -114,38 +157,45 @@ def save_resume_data_blocking(lt, ses, handles: dict, timeout: float = 15.0) -> 
     rda = getattr(lt, "save_resume_data_alert", None)
     rdfa = getattr(lt, "save_resume_data_failed_alert", None)
     saved = 0
-    side: list = []
+    side: list[PieceDone] = []
     deadline = time.monotonic() + timeout
     while pending and time.monotonic() < deadline:
         try:
+            # Возвращённый указатель на алерт не используем: он тоже временный.
             ses.wait_for_alert(500)
         except Exception:  # noqa: BLE001
             pass
-        for a in ses.pop_alerts():
-            if rda is not None and isinstance(a, rda):
-                key = _ih_key(a.handle)
-                db_id = pending.pop(key, None) if key else None
-                if db_id is None:
-                    side.append(a)
-                    continue
-                try:
-                    blob = lt.write_resume_data_buf(a.params)
-                    path = fastresume_path(db_id)
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(blob)
-                    saved += 1
-                    log.debug("fastresume saved db_id=%s path=%s", db_id, path)
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("fastresume write db_id=%s failed: %s", db_id, exc)
-            elif rdfa is not None and isinstance(a, rdfa):
-                key = _ih_key(a.handle)
-                db_id = pending.pop(key, None) if key else None
-                log.warning(
-                    "save_resume_data failed db_id=%s: %s",
-                    db_id, getattr(a, "error", a),
-                )
-            else:
-                side.append(a)
+        with ALERT_LOCK:
+            for a in ses.pop_alerts():
+                if rda is not None and isinstance(a, rda):
+                    key = _ih_key(a.handle)
+                    db_id = pending.pop(key, None) if key else None
+                    if db_id is None:
+                        continue
+                    try:
+                        blob = lt.write_resume_data_buf(a.params)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("fastresume encode db_id=%s failed: %s", db_id, exc)
+                        continue
+                    try:
+                        path = fastresume_path(db_id)
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(blob)
+                        saved += 1
+                        log.debug("fastresume saved db_id=%s path=%s", db_id, path)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("fastresume write db_id=%s failed: %s", db_id, exc)
+                elif rdfa is not None and isinstance(a, rdfa):
+                    key = _ih_key(a.handle)
+                    db_id = pending.pop(key, None) if key else None
+                    log.warning(
+                        "save_resume_data failed db_id=%s: %s",
+                        db_id, str(getattr(a, "error", "")),
+                    )
+                else:
+                    ev = snapshot_alert(lt, a)
+                    if ev is not None:
+                        side.append(ev)
     if pending:
         log.warning("fastresume save timed out for db_ids=%s", list(pending.values()))
     return saved, side
