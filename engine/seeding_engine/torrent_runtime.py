@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import tarfile
+import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
@@ -733,6 +734,11 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self._ses = None
         self._lock = asyncio.Lock()
         self._handles: dict[int, object] = {}
+        # Мутации раздачи (pause/resume/force_recheck) и remove_torrent идут под
+        # одним замком, а мутация — только если handle ещё наш (_call_live).
+        # force_recheck по раздаче, у которой уже вызван remove_torrent, роняет
+        # libtorrent 2.0.11 SIGSEGV (tests/test_alert_lifetime.py).
+        self._lt_lock = threading.RLock()
         self._meta: dict[int, tuple[str | None, str]] = {}
         # Прогресс активного импорта (перенос с другого движка): db_id -> {phase, copied, total}.
         self._migrate_progress: dict[int, dict] = {}
@@ -1963,6 +1969,18 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self._unset_auto_managed(h)
         h.resume()
 
+    def _call_live(self, db_id: int, h, fn) -> bool:
+        """fn(h), только если h всё ещё handle раздачи db_id. Вызывать из потока."""
+        with self._lt_lock:
+            if self._handles.get(db_id) is not h:
+                return False
+            fn(h)
+            return True
+
+    def _recheck_live(self, h) -> None:
+        self._manual_resume(h)
+        h.force_recheck()
+
     async def pause(self, db_id: int) -> RuntimeHandle | None:
         async with self._lock:
             h = self._handles.get(db_id)
@@ -1970,7 +1988,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             return None
         self._check_admit.drop(db_id)
         self._user_pauses.mark(db_id)
-        await asyncio.to_thread(self._manual_pause, h)
+        if not await asyncio.to_thread(self._call_live, db_id, h, self._manual_pause):
+            return None
         await self._persist_resume({db_id: h})
         return await self._snapshot(db_id)
 
@@ -1981,7 +2000,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             return None
         self._user_pauses.clear(db_id)
         self._check_admit.drop(db_id)
-        await asyncio.to_thread(self._manual_resume, h)
+        if not await asyncio.to_thread(self._call_live, db_id, h, self._manual_resume):
+            return None
         return await self._snapshot(db_id)
 
     async def get(self, db_id: int) -> RuntimeHandle | None:
@@ -2186,8 +2206,14 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         self._check_admit.drop(db_id)
 
         async def job() -> None:
-            await asyncio.to_thread(self._manual_resume, h)
-            await asyncio.to_thread(h.force_recheck)
+            # Задача может ждать слот долго: берём handle заново и проверяем,
+            # что раздачу за это время не удалили.
+            async with self._lock:
+                cur = self._handles.get(db_id)
+            if cur is None:
+                return
+            if not await asyncio.to_thread(self._call_live, db_id, cur, self._recheck_live):
+                return
             self._check_holds.note_recheck(self._upload_gate, self.disk_kind, db_id)
             await self._wait_hash_idle(db_id)
 
@@ -2247,7 +2273,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if h is None:
             self._check_admit.drop(db_id)
             return
-        await asyncio.to_thread(self._manual_pause, h)
+        await asyncio.to_thread(self._call_live, db_id, h, self._manual_pause)
 
     async def _queue_resume(self, db_id: int) -> None:
         async with self._lock:
@@ -2255,7 +2281,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if h is None:
             self._check_admit.drop(db_id)
             return
-        await asyncio.to_thread(self._manual_resume, h)
+        await asyncio.to_thread(self._call_live, db_id, h, self._manual_resume)
 
     async def _check_alert_loop(self) -> None:
         try:
@@ -2785,13 +2811,16 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             flags = self._libtorrent_delete_flags(lt, delete_files)
 
             def _rm():
-                try:
-                    if flags:
-                        ses.remove_torrent(h, flags)
-                    else:
-                        ses.remove_torrent(h)
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("remove_torrent db_id=%s: %s", db_id, exc)
+                # Под _lt_lock: идущая мутация (_call_live) доработает до remove,
+                # а следующая увидит, что db_id уже нет в _handles, и не тронет h.
+                with self._lt_lock:
+                    try:
+                        if flags:
+                            ses.remove_torrent(h, flags)
+                        else:
+                            ses.remove_torrent(h)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("remove_torrent db_id=%s: %s", db_id, exc)
 
             await asyncio.to_thread(_rm)
         elif delete_files:

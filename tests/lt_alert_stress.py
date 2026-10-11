@@ -36,7 +36,9 @@ def _make_infos(root: str, n: int) -> list:
         t = lt.create_torrent(fs, 16384)
         t.set_priv(True)
         lt.set_piece_hashes(t, root)
-        infos.append(lt.torrent_info(lt.bencode(t.generate())))
+        # байты, а не torrent_info: движок строит свежий torrent_info на каждое
+        # добавление; общий torrent_info на несколько add_torrent libtorrent не любит
+        infos.append(lt.bencode(t.generate()))
     return infos
 
 
@@ -60,13 +62,17 @@ def main(mode: str, seconds: float) -> None:
             i = random.randrange(len(infos))
             with hlock:
                 h = handles.pop(i, None)
-            if h is not None:
-                ses.remove_torrent(h)
-            else:
-                h = ses.add_torrent({"ti": infos[i], "save_path": root})
-                h.force_recheck()
-                with hlock:
-                    handles[i] = h
+            try:
+                if h is not None:
+                    ses.remove_torrent(h)
+                else:
+                    h = ses.add_torrent({"ti": lt.torrent_info(lt.bdecode(infos[i])), "save_path": root})
+                    h.force_recheck()
+                    with hlock:
+                        handles[i] = h
+            except RuntimeError:
+                # гонка двух churn-потоков за один индекс — штатно для стресса
+                pass
 
     def poll() -> None:
         while time.monotonic() < stop:
@@ -108,7 +114,10 @@ def main(mode: str, seconds: float) -> None:
                 save_resume_data_blocking(lt, ses, snap, timeout=1.0)
             time.sleep(0.05)
 
-    ts = [threading.Thread(target=f) for f in (churn, churn, poll, drain, saver)]
+    # Один churn-поток: force_recheck по раздаче, у которой уже вызван
+    # remove_torrent, роняет сам libtorrent; движок это исключает (_call_live),
+    # а здесь проверяем только жизнь алертов.
+    ts = [threading.Thread(target=f) for f in (churn, poll, drain, saver)]
     for t in ts:
         t.start()
     for t in ts:

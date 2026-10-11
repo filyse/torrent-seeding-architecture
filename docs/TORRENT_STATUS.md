@@ -36,7 +36,13 @@
 `PieceDone(handle, piece)` (копия `torrent_handle` + номер куска). Дальше по
 коду ходят только снимки. Нарушение этого правила роняло движок SIGSEGV в
 `polymorphic_id_generator<libtorrent::alert>::execute` (см. CHANGELOG
-engine 1.6.13.2 / 1.6.17). Тест: `tests/test_alert_lifetime.py`. Полоска «Готово» — только процент.
+engine 1.6.13.2 / 1.6.17). Тест: `tests/test_alert_lifetime.py`.
+
+**Удалённую раздачу не трогать.** `pause`/`resume`/`force_recheck` идут через
+`_call_live(db_id, h, fn)`: под `_lt_lock` и только если `h` всё ещё
+`_handles[db_id]`. `remove_torrent` — под тем же замком. Задача очереди
+проверки берёт handle заново, когда получила слот. Стресс:
+`tests/lt_engine_stress.py`. Полоска «Готово» — только процент.
 Пока раздача держит слот очереди, статус остаётся «Проверка», даже если
 libtorrent уже показал seeding: иначе фильтр пустой, пока очередь идёт.
 «Ждёт проверки» — пауза очереди, не пользователя. Спека очереди: [`WORK_QUEUES.md`](WORK_QUEUES.md).

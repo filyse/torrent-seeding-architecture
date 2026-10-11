@@ -596,7 +596,7 @@ docker compose -p seeding-engines-a -f docker-compose.a-host.yml up -d --build
 `upload_limit_desired=0`, `creator_upload_hold=false`; отдача ≫ 1 МБ/с
 на нагруженных движках. CT400: web 1.53.92, api 1.26.10.
 
-## 7ю. Фикс SIGSEGV алертов — engine 1.6.13.2 — 2026-10-11
+## 7ю. Фикс SIGSEGV алертов — engine 1.6.13.2 / 1.6.13.3 — 2026-10-11
 
 Ветка `hotfix/1.6.13-hold-stick`, libtorrent 2.0.11. Причина и фикс — CHANGELOG engine 1.6.13.2,
 спека — [`TORRENT_STATUS.md`](TORRENT_STATUS.md) «Алерты не хранить».
