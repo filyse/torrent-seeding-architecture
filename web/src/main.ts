@@ -87,6 +87,8 @@ type TorrentOut = {
   status: string;
   created_at: string;
   runtime?: RuntimeOut | null;
+  // false — движок раздачи не отвечает: показываем «Движок недоступен».
+  engine_online?: boolean;
 };
 
 // Посессионная статистика одного движка — то, из чего складывается агрегат.
@@ -582,7 +584,9 @@ const SORT_VALUES = [
   "progress",
 ] as const;
 type ListSort = (typeof SORT_VALUES)[number];
-const STATE_VALUES = ["", "active", "peers", "idle", "incomplete", "migrating", "error"] as const;
+const STATE_VALUES = [
+  "", "active", "peers", "idle", "incomplete", "migrating", "error", "engine_offline",
+] as const;
 type ListState = (typeof STATE_VALUES)[number];
 type ListDensity = "comfortable" | "compact" | "mini";
 type ListView = "cards" | "table";
@@ -3598,7 +3602,44 @@ function fmtSeeds(n: number | null | undefined): string {
 
 const CHECK_LT = new Set(["checking", "checking_files", "checking_resume_data"]);
 
+// Команда отправлена, движок ещё не подтвердил: бейдж «Пауза…»/«Запуск…»/«Проверка…».
+// Снимается, как только статус стал ожидаемым, или по таймауту (тогда — реальный статус).
+type PendingKind = "pause" | "resume" | "recheck";
+const PENDING_TIMEOUT_MS = 30_000;
+const pendingOps = new Map<number, { kind: PendingKind; until: number }>();
+
+function markPending(ids: number | number[], kind: PendingKind): void {
+  const until = Date.now() + PENDING_TIMEOUT_MS;
+  for (const id of Array.isArray(ids) ? ids : [ids]) pendingOps.set(id, { kind, until });
+}
+
+function clearPending(ids: number | number[]): void {
+  for (const id of Array.isArray(ids) ? ids : [ids]) pendingOps.delete(id);
+}
+
+function pendingConfirmed(kind: PendingKind, st: string): boolean {
+  if (kind === "pause") return st === "paused";
+  if (kind === "resume") return st !== "paused";
+  return st === "checking" || st === "check_queued";
+}
+
+function isPendingStatus(st: string): boolean {
+  return st.startsWith("pending_");
+}
+
 function effectiveStatus(t: TorrentOut | TorrentDetailOut): string {
+  if (t.engine_online === false) return "engine_offline";
+  const base = runtimeStatus(t);
+  const p = pendingOps.get(t.id);
+  if (!p) return base;
+  if (Date.now() > p.until || pendingConfirmed(p.kind, base) || isMigrationStatus(base)) {
+    pendingOps.delete(t.id);
+    return base;
+  }
+  return `pending_${p.kind}`;
+}
+
+function runtimeStatus(t: TorrentOut | TorrentDetailOut): string {
   const rs = (t.runtime?.runtime_status || "").toLowerCase();
   const lt = (t.runtime?.lt_state || "").toLowerCase();
   const progress = t.runtime?.progress;
@@ -3628,6 +3669,10 @@ function statusLabel(status: string, ltState?: string | null): string {
     migrating: "Перенос",
     migrate_queued: "В очереди на перенос",
     error: "Ошибка",
+    engine_offline: "Движок недоступен",
+    pending_pause: "Пауза…",
+    pending_resume: "Запуск…",
+    pending_recheck: "Проверка…",
   };
   return map[status] ?? status;
 }
@@ -3652,6 +3697,8 @@ function badgeClass(status: string): string {
   if (status === "check_queued") return "badge badge--queued";
   if (status === "migrating") return "badge badge--migrating";
   if (status === "migrate_queued") return "badge badge--queued";
+  if (status === "engine_offline") return "badge badge--offline";
+  if (status.startsWith("pending_")) return "badge badge--pending";
   return "badge badge--downloading";
 }
 
@@ -4586,17 +4633,21 @@ function renderTorrentCard(
   const delBtn = act("trash", "Удалить", " torrent-card__act--danger");
   pauseBtn.addEventListener("click", async () => {
     try {
+      markPending(t.id, "pause");
       await fetchJson(`/torrents/${t.id}/pause`, { method: "POST" });
       await onChange();
     } catch (e) {
+      clearPending(t.id);
       showToast(e instanceof Error ? e.message : String(e), true);
     }
   });
   resumeBtn.addEventListener("click", async () => {
     try {
+      markPending(t.id, "resume");
       await fetchJson(`/torrents/${t.id}/resume`, { method: "POST" });
       await onChange();
     } catch (e) {
+      clearPending(t.id);
       showToast(e instanceof Error ? e.message : String(e), true);
     }
   });
@@ -4808,9 +4859,11 @@ function renderTorrentTable(
       const toggle = el("button", toggleProps, [isPaused ? "▶" : "⏸"]);
       toggle.addEventListener("click", async () => {
         try {
+          markPending(t.id, isPaused ? "resume" : "pause");
           await fetchJson(`/torrents/${t.id}/${isPaused ? "resume" : "pause"}`, { method: "POST" });
           await onChange();
         } catch (e) {
+          clearPending(t.id);
           showToast(e instanceof Error ? e.message : String(e), true);
         }
       });
@@ -6535,6 +6588,7 @@ function mountListShell(root: HTMLElement): void {
     ["incomplete", "Незавершённые"],
     ["migrating", "Переносящиеся"],
     ["error", "С ошибкой"],
+    ["engine_offline", "Движок недоступен"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
     o.dataset.base = label;
@@ -6684,6 +6738,8 @@ function mountListShell(root: HTMLElement): void {
       showToast("Ничего не выбрано", true);
       return;
     }
+    const kind: PendingKind | null = path.endsWith("/pause") ? "pause" : path.endsWith("/resume") ? "resume" : null;
+    if (kind) markPending(ids, kind);
     try {
       await fetchJson(path, { method: "POST", body: JSON.stringify({ ids }) });
       selectedIds.clear();
@@ -6691,6 +6747,7 @@ function mountListShell(root: HTMLElement): void {
       showToast("Готово");
       void refresh();
     } catch (e) {
+      clearPending(ids);
       showToast(e instanceof Error ? e.message : String(e), true);
     }
   };
@@ -7066,6 +7123,7 @@ function mountListShell(root: HTMLElement): void {
     incomplete: "Незавершённые",
     migrating: "Переносящиеся",
     error: "С ошибкой",
+    engine_offline: "Движок недоступен",
   };
   const makeChip = (text: string, onRemove: () => void): HTMLElement => {
     const chip = el("span", { className: "filter-chip" }, [text]);
@@ -7431,9 +7489,11 @@ async function loadDetail(
     toggleBtn.addEventListener("click", async () => {
       toggleBtn.disabled = true;
       try {
+        markPending(id, st === "paused" ? "resume" : "pause");
         await fetchJson(`/torrents/${id}/${st === "paused" ? "resume" : "pause"}`, { method: "POST" });
         await backRefresh();
       } catch (e) {
+        clearPending(id);
         showToast(e instanceof Error ? e.message : String(e), true);
         toggleBtn.disabled = false;
       }
@@ -7441,10 +7501,12 @@ async function loadDetail(
     recheckBtn.addEventListener("click", async () => {
       recheckBtn.disabled = true;
       try {
+        markPending(id, "recheck");
         await postAction(`/torrents/${id}/recheck`);
         showToast("Запущена проверка хеша");
         await backRefresh();
       } catch (e) {
+        clearPending(id);
         showToast(e instanceof Error ? e.message : String(e), true);
         recheckBtn.disabled = false;
       }
@@ -7476,6 +7538,14 @@ async function loadDetail(
         window.dispatchEvent(new HashChangeEvent("hashchange"));
       });
     });
+    if (isPendingStatus(st)) {
+      // Команда уже отправлена — ждём подтверждения движка, повторный клик не нужен.
+      toggleBtn.disabled = true;
+      recheckBtn.disabled = true;
+    }
+    if (st === "engine_offline") {
+      for (const b of [toggleBtn, recheckBtn, reannounceBtn]) b.disabled = true;
+    }
     if (migrating) {
       for (const b of [toggleBtn, recheckBtn, reannounceBtn]) b.disabled = true;
       // Ждущий слот перенос можно снять удалением; идущий — только через «Отменить перенос».

@@ -563,3 +563,29 @@ def test_migrate_status_queued_position_and_stale_failed(api_module):
             assert client.post(f"/api/v1/torrents/{ids[0]}/pause").status_code == 409
             facets = client.get("/api/v1/torrents/facets").json()
             assert facets["statuses"]["migrate_queued"] == 2
+
+
+def test_list_marks_torrents_of_offline_engine(api_module):
+    from seeding_api import engine_health
+
+    with respx.mock(assert_all_called=False) as mock:
+        _wire_engine_mocks(mock)
+        with TestClient(api_module.app) as client:
+            r = client.post("/api/v1/torrents", json={
+                "display_name": "N", "save_path": "/data",
+                "magnet_uri": "magnet:?xt=urn:btih:" + "e" * 40,
+            })
+            eid = r.json()["engine_id"]
+            engine_health.reset()
+            item = client.get("/api/v1/torrents").json()["items"][0]
+            assert item["engine_online"] is True
+            engine_health.mark(eid, False)
+            engine_health.mark(eid, False)
+            try:
+                item = client.get("/api/v1/torrents").json()["items"][0]
+                assert item["engine_online"] is False
+                page = client.get("/api/v1/torrents?state=engine_offline").json()
+                assert page["total"] == 1
+                assert client.get("/api/v1/torrents/facets").json()["states"]["engine_offline"] == 1
+            finally:
+                engine_health.reset()

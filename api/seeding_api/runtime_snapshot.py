@@ -20,6 +20,7 @@ from seeding_db.models import MIGRATION_STATUSES
 from seeding_db.repository import TorrentRepository
 from seeding_db.status_from_runtime import status_from_runtime
 
+from seeding_api import engine_health
 from seeding_api.runtime_sync import accumulate_uploaded
 
 log = logging.getLogger(__name__)
@@ -52,6 +53,8 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
                 return eid, None
 
         results = dict(await asyncio.gather(*(_fetch(e) for e in engine_ids)))
+        for eid, rt in results.items():
+            engine_health.mark(eid, rt is not None)
 
         now = datetime.now(timezone.utc)
         updates: list[dict] = []

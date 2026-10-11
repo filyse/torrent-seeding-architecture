@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete as sa_delete
@@ -93,6 +94,7 @@ class TorrentRepository:
         sort: str = "name",
         limit: int = 50,
         offset: int = 0,
+        offline_engines: Collection[str] = (),
     ) -> tuple[list[TorrentRecord], int]:
         """Страница раздач с фильтрами/сортировкой на стороне БД (масштабируется на 10k+).
 
@@ -139,6 +141,8 @@ class TorrentRepository:
             conds.append(TorrentRecord.status.in_(MIGRATION_STATUSES))
         elif state == "migrate_queued":
             conds.append(TorrentRecord.status == TorrentStatus.migrate_queued.value)
+        elif state == "engine_offline":  # движок раздачи не отвечает снимку рантайма
+            conds.append(TorrentRecord.engine_id.in_(list(offline_engines) or [""]))
 
         count_stmt = select(func.count()).select_from(TorrentRecord)
         page_stmt = select(TorrentRecord)
@@ -195,7 +199,7 @@ class TorrentRepository:
         )
         return {str(status): int(count) for status, count in result.all()}
 
-    async def facets(self) -> dict:
+    async def facets(self, offline_engines: Collection[str] = ()) -> dict:
         """Счётчики для фильтров: сколько раздач под каждый статус/метку/движок/состояние.
         Состояния считаются по тем же условиям, что и фильтр в list_page (по снимку рантайма)."""
         seeding = TorrentStatus.seeding.value
@@ -266,6 +270,9 @@ class TorrentRepository:
                 "error": int(err),
                 "migrating": int(moving),
                 "migrate_queued": int(moving_queued),
+                "engine_offline": sum(
+                    int(c) for e, c, _s in engine_rows if e and e in set(offline_engines)
+                ),
             },
         }
 

@@ -616,6 +616,24 @@ inspect, тома состояния без медиа, код), CT400 `/root/ba
 Проверка: `version` 1.6.17 в `/internal/v1/session/stats`, `RestartCount`
 не растёт, в `journalctl -k` нет `segfault ... libtorrent`.
 
+## 7я. Прод на ветке hotfix 11.10 — что из неё уже есть в main
+
+Прод 11.10 живёт на `hotfix/1.6.13-hold-stick` (libtorrent 2.0.11). Всё, что
+выкачено туда за 11.10, есть в main как отдельные коммиты:
+
+| hotfix | main | что |
+|---|---|---|
+| `b04f11b` engine 1.6.13.1 | `3938b84` engine 1.6.16 | hold не залипает на 1 MB/s |
+| `9fc01a2` engine 1.6.13.2 | `f4188f9` engine 1.6.17 | алерты не живут после `pop_alerts` (SIGSEGV) |
+| `9adf3cd` engine 1.6.13.3 | `6df03dd` engine 1.6.17 | recheck/pause не трогают удалённую раздачу |
+| `4dc622d` api/queue | `296d88c` (был в main) | queue_worker не затирает `migrating` |
+| `e68502d` api 1.26.10.1 / web 1.53.93 | `dbf5d98` api 1.26.12 / web 1.54.3 | очередь переноса `migrate_queued` |
+| `bb606d6` api 1.26.10.2 / web 1.53.94 | этот коммит, api 1.26.13 / web 1.54.4 | «Движок недоступен», «Пауза…/Запуск…/Проверка…» |
+
+Записи выката (время по движкам, бэкапы, откат CT400) — в `DEPLOYMENT_STATE.md`
+ветки hotfix, §7ю–7я2. При переходе прода на main: движки → engine 1.6.17 на
+libtorrent 2.1.2, CT400 → main (api 1.26.13 / web 1.54.4 / queue 1.0.3).
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

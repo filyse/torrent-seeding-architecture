@@ -6842,3 +6842,16 @@ body:has(.login-overlay) {
   margin: 0;
 }
 
+
+/* Движок раздачи не отвечает: последний статус из БД не показываем. */
+.badge--offline {
+  color: var(--danger, #c0392b);
+  background: color-mix(in srgb, var(--danger, #c0392b) 14%, transparent);
+}
+
+/* Команда отправлена, ждём подтверждения движка («Пауза…», «Запуск…», «Проверка…»). */
+.badge--pending {
+  color: var(--muted, #888);
+  background: color-mix(in srgb, var(--muted, #888) 16%, transparent);
+  animation: badge-pulse 1.4s ease-in-out infinite;
+}

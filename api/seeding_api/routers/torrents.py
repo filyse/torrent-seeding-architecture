@@ -10,6 +10,7 @@ from seeding_db.engine_registry import normalize_save_path
 from seeding_db.models import MIGRATION_STATUSES, TorrentStatus
 from seeding_db.repository import MigrationRepository, TorrentRepository
 
+from seeding_api import engine_health
 from seeding_api.deps import DbSession, EnginePoolDep
 from seeding_api.migrate import cancel_migration, launch_migration
 from seeding_api.runtime_sync import apply_uploaded_carry, merge_runtime_into_row, runtime_from_snapshot
@@ -108,7 +109,8 @@ async def list_torrents(
     label: str | None = Query(None, description="Фильтр по метке"),
     engine_id: str | None = Query(None, description="Фильтр по движку"),
     state: str | None = Query(
-        None, description="active|peers|idle|incomplete|error|migrating (по активности)"
+        None,
+        description="active|peers|idle|incomplete|error|migrating|migrate_queued|engine_offline",
     ),
     sort: str = Query("name", description="name|added|up|down|peers|uploaded|ratio|size|progress"),
     limit: int = Query(50, ge=1, le=200),
@@ -124,7 +126,9 @@ async def list_torrents(
     на каждый запрос (иначе поиск и поллинг тянут полный /internal/v1/torrents с каждого
     движка страницы). ``live=1`` — прежний путь, если нужны секундные значения."""
     repo = TorrentRepository(session)
+    offline = engine_health.offline_engines()
     rows, total = await repo.list_page(
+        offline_engines=offline,
         q=q,
         status=status,
         label=label,
@@ -162,6 +166,7 @@ async def list_torrents(
         data = TorrentOut.model_validate(row).model_dump()
         data["status"] = status
         data["runtime"] = runtime
+        data["engine_online"] = row.engine_id not in offline
         items.append(TorrentDetailOut.model_validate(data))
         runtimes.append(runtime)
 
@@ -191,7 +196,9 @@ async def list_torrents(
 async def torrents_facets(session: DbSession):
     """Счётчики для подписи количества у вариантов фильтров (статус/метка/движок/состояние).
     Считаются по БД (снимок рантайма пишет фоновый воркер), поэтому дёшево и масштабируемо."""
-    return await TorrentRepository(session).facets()
+    return await TorrentRepository(session).facets(
+        offline_engines=engine_health.offline_engines()
+    )
 
 
 @router.post("", response_model=TorrentOut, status_code=201)
@@ -777,10 +784,12 @@ async def get_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDep):
     if row is None:
         raise HTTPException(status_code=404, detail="torrent not found")
     engine = pool.client_for_row(row)
+    engine_online = not engine_health.is_offline(row.engine_id)
     try:
         runtime = await engine.runtime_snapshot(torrent_id)
     except httpx.HTTPError:
         runtime = None
+        engine_online = False
     if runtime and row.info_hash is None:
         ih = runtime.get("info_hash")
         if isinstance(ih, str) and ih and ih != "0" * 40:
@@ -809,6 +818,7 @@ async def get_torrent(torrent_id: int, session: DbSession, pool: EnginePoolDep):
     data["status"] = status
     data["runtime"] = apply_uploaded_carry(row, runtime)
     data["peer_list"] = peer_list
+    data["engine_online"] = engine_online
     return TorrentDetailOut.model_validate(data)
 
 
