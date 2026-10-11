@@ -214,6 +214,12 @@ Prometheus (~15 дней) не используем: горизонт корот
 включая «История» (`/network/history`). nginx отдаёт `index.html` на любой путь,
 перезагрузка страницы не ломает маршрут.
 
+Карточки `/farm` и `/farm/volume` (`farmCard`) собраны из тех же классов, что и
+`/network*` (`wan-card`, `wan-engines`, `wan-eng`). Строка движка на `/farm` —
+`<button class="wan-eng wan-eng--link">`: модификатор только сбрасывает стиль
+кнопки (padding 0, без `font: inherit`), размер шрифта и сетку берёт из `.wan-eng`.
+Своих размеров карточкам фермы не задавать — эталон `/network/download`.
+
 ## Тесты
 
 `tests/test_wan_links.py` — карта каналов: дефолтная топология (b*→WAN1, a*→WAN2), единицы
