@@ -653,6 +653,21 @@ containerd-<svc>:pre-migqueue containerd-<svc>:latest` и `up -d --no-deps` дл
 - «Ждёт проверки» после рестарта движка — настоящая очередь хеша (не баг).
 - Удаление/добавление синхронные, отдельных статусов нет; ошибки показываются тостом.
 
+## 7я2. «Движок недоступен» и «команда в пути» — api 1.26.10.2 / web 1.53.94 — 2026-10-11
+
+Пункты 2 и 3 аудита из §7я (спека — `TORRENT_STATUS.md`, «Движок недоступен и
+команды в пути»). Выкат CT400 ~09:40 (Томск): `/opt/containerd` → `bb606d6`,
+пересобраны и подняты `api` и `web` (`--no-deps`); `queue_worker` не менялся.
+API healthy, ошибок в логе нет. Бэкап до выката:
+`/root/backups/20261011-pre-offline/` (`seeding-db.dump`, `containerd-git.tgz`,
+`git-head.txt` = `d19e06a`) и образы `containerd-{api,web,queue_worker}:pre-offline`.
+Откат: `git checkout d19e06a`, `docker tag containerd-<svc>:pre-offline
+containerd-<svc>:latest`, `up -d --no-deps api web`. БД не менялась.
+
+В main то же — `9d5ce6c` (api 1.26.13 / web 1.54.4). Таблица соответствия
+коммитов hotfix → main — в `DEPLOYMENT_STATE.md` ветки main, §7я.
+Переход прода на main (libtorrent 2.1.2) — после ~24 ч стабильности.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
