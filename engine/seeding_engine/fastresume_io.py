@@ -42,6 +42,16 @@ def snapshot_alert(lt, alert) -> PieceDone | None:
         return None
 
 
+def _error_text(err) -> str:
+    """error_code -> строка, пока алерт жив (сам объект наружу не отдаём)."""
+    if err is None:
+        return ""
+    try:
+        return str(err.message())
+    except Exception:  # noqa: BLE001
+        return str(err)
+
+
 def pop_alert_events(lt, ses) -> list[PieceDone]:
     """Забрать алерты сессии и сразу превратить их в безопасные снимки."""
     out: list[PieceDone] = []
@@ -160,12 +170,13 @@ def save_resume_data_blocking(lt, ses, handles: dict, timeout: float = 15.0) -> 
     side: list[PieceDone] = []
     deadline = time.monotonic() + timeout
     while pending and time.monotonic() < deadline:
-        try:
-            # Возвращённый указатель на алерт не используем: он тоже временный.
-            ses.wait_for_alert(500)
-        except Exception:  # noqa: BLE001
-            pass
         with ALERT_LOCK:
+            try:
+                # wait_for_alert тоже отдаёт указатель на алерт: под замком,
+                # иначе параллельный pop_alerts освободит его до обёртки.
+                ses.wait_for_alert(100)
+            except Exception:  # noqa: BLE001
+                pass
             for a in ses.pop_alerts():
                 if rda is not None and isinstance(a, rda):
                     key = _ih_key(a.handle)
@@ -190,7 +201,7 @@ def save_resume_data_blocking(lt, ses, handles: dict, timeout: float = 15.0) -> 
                     db_id = pending.pop(key, None) if key else None
                     log.warning(
                         "save_resume_data failed db_id=%s: %s",
-                        db_id, str(getattr(a, "error", "")),
+                        db_id, _error_text(getattr(a, "error", None)),
                     )
                 else:
                     ev = snapshot_alert(lt, a)

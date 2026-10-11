@@ -167,3 +167,20 @@ def test_stress_old_pattern_segfaults():
     pytest.importorskip("libtorrent")
     r = _run_stress("buggy", 20)
     assert r.returncode == -signal.SIGSEGV, (r.returncode, r.stdout, r.stderr[-1000:])
+
+
+_ENGINE_STRESS = Path(__file__).with_name("lt_engine_stress.py")
+
+
+def test_engine_stress_add_remove_recheck_no_segfault():
+    """Настоящий LibtorrentTorrentRuntime под пачками add/remove/recheck/pause.
+
+    На 1.6.13.1 падает SIGSEGV за доли секунды, после фикса — нет."""
+    pytest.importorskip("libtorrent")
+    seconds = float(os.getenv("SEEDING_LT_STRESS_SECONDS", "20"))
+    r = subprocess.run(
+        [sys.executable, str(_ENGINE_STRESS), str(seconds)],
+        capture_output=True, text=True, timeout=seconds + 120, env=dict(os.environ),
+    )
+    assert r.returncode == 0, (r.returncode, r.stderr[-2000:])
+    assert "survived" in r.stdout

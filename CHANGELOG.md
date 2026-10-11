@@ -20,7 +20,15 @@
   22:34, 11.10 02:24). Теперь все `pop_alerts()` под одним `ALERT_LOCK`,
   алерт разбирается сразу в снимок `PieceDone`, сами алерты наружу не выходят.
   Стресс `tests/lt_alert_stress.py`: старая схема — SIGSEGV за секунды,
-  новая — без падений. libtorrent 2.1.2, ветка `main`.
+  новая — без падений.
+- **Очередь проверки не трогает удалённую раздачу.** Задача хеш-очереди
+  держала `torrent_handle` с момента постановки и после ожидания слота звала
+  `resume`/`force_recheck` даже если раздачу уже удалили. `force_recheck` по
+  раздаче после `remove_torrent` роняет libtorrent 2.0.11. Теперь pause/resume/
+  recheck идут через `_call_live` под `_lt_lock`, вместе с `remove_torrent`, и
+  только если handle ещё в `_handles`. Стресс настоящего движка
+  `tests/lt_engine_stress.py` (add/remove/recheck/pause пачками): старый
+  движок — SIGSEGV за доли секунды, новый — без падений. libtorrent 2.1.2, ветка `main`.
 
 ## engine 1.6.16 · web 1.54.2 — 2026-10-06
 
