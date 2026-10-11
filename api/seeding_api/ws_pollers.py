@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from seeding_db.models import TorrentStatus
+from seeding_db.models import MIGRATION_STATUSES
 from seeding_db.repository import TorrentRepository
 from seeding_db.status_from_runtime import status_from_runtime
 
@@ -53,7 +53,7 @@ async def _poll_torrents(app, hub) -> None:
         except Exception:  # noqa: BLE001 — движок недоступен/нет в пуле: отдадим без рантайма
             handle = None
         status = row.status
-        if handle is not None and row.status != TorrentStatus.migrating.value:
+        if handle is not None and row.status not in MIGRATION_STATUSES:
             status = status_from_runtime(
                 handle.get("runtime_status"), handle.get("lt_state"),
                 float(handle.get("progress") or 0.0),

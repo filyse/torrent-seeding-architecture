@@ -3603,6 +3603,8 @@ function effectiveStatus(t: TorrentOut | TorrentDetailOut): string {
   const lt = (t.runtime?.lt_state || "").toLowerCase();
   const progress = t.runtime?.progress;
   if (t.status === "migrating") return "migrating";
+  // Ждёт слот переноса: копия ещё не идёт, раздача работает как прежде.
+  if (t.status === "migrate_queued") return "migrate_queued";
   if (rs === "paused" || t.status === "paused") return "paused";
   if (lt === "queued_for_checking" || t.status === "check_queued") return "check_queued";
   if (CHECK_LT.has(lt)) return "checking";
@@ -3624,6 +3626,7 @@ function statusLabel(status: string, ltState?: string | null): string {
     paused: "Пауза",
     queued: "В очереди",
     migrating: "Перенос",
+    migrate_queued: "В очереди на перенос",
     error: "Ошибка",
   };
   return map[status] ?? status;
@@ -3636,6 +3639,11 @@ function displayStatusLabel(t: TorrentOut | TorrentDetailOut): string {
   return statusLabel(st, t.runtime?.lt_state);
 }
 
+/** Перенос идёт или ждёт слот: пауза/старт/проверка недоступны, рантайм статус не меняет. */
+function isMigrationStatus(status: string | null | undefined): boolean {
+  return status === "migrating" || status === "migrate_queued";
+}
+
 function badgeClass(status: string): string {
   if (status === "seeding") return "badge badge--seeding";
   if (status === "paused") return "badge badge--paused";
@@ -3643,6 +3651,7 @@ function badgeClass(status: string): string {
   if (status === "checking") return "badge badge--checking";
   if (status === "check_queued") return "badge badge--queued";
   if (status === "migrating") return "badge badge--migrating";
+  if (status === "migrate_queued") return "badge badge--queued";
   return "badge badge--downloading";
 }
 
@@ -4125,6 +4134,10 @@ type MigrateStatusOut = {
   speed?: number | null;
   eta?: number | null;
   message?: string | null;
+  queued?: boolean;
+  queue_position?: number | null;
+  source_engine_id?: string | null;
+  target_engine_id?: string | null;
 };
 
 const MIGRATE_PHASE_LABELS: Record<string, string> = {
@@ -4168,8 +4181,14 @@ function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLE
     const phase = s.phase || "migrating";
     const pct = typeof s.progress === "number" ? Math.round(s.progress * 100) : null;
     let text = MIGRATE_PHASE_LABELS[phase] ?? phase;
+    if (phase === "queued") {
+      // Ждёт слот: место в очереди и куда переносим, без транспорта и процентов.
+      text = "В очереди на перенос";
+      if (s.queue_position) text += ` · №${s.queue_position}`;
+      if (s.target_engine_id) text += ` → ${s.target_engine_id}`;
+    }
     const tname: Record<string, string> = { media: "общий /media", http: "через оркестратор", direct: "напрямую" };
-    if (s.transport && phase !== "error" && phase !== "done") text += ` · ${tname[s.transport] ?? s.transport}`;
+    if (s.transport && phase !== "error" && phase !== "done" && phase !== "queued") text += ` · ${tname[s.transport] ?? s.transport}`;
     if (pct != null && (phase === "copying" || phase === "checking")) text += ` · ${pct}%`;
     if (phase === "copying" && s.total) text += `  (${fmtBytes(s.copied)} / ${fmtBytes(s.total)})`;
     // Скорость: при копировании держим последнее значение, если в текущем снимке её нет (краткий
@@ -4273,7 +4292,7 @@ function buildResumableRow(
 }
 
 function buildMigrateRow(data: TorrentDetailOut, onStarted: () => void): HTMLElement {
-  if (data.status === "migrating") return buildMigrateProgress(data, onStarted);
+  if (isMigrationStatus(data.status)) return buildMigrateProgress(data, onStarted);
   const host = el("div", { className: "migrate-host" });
   // Если есть прерванный перенос — предложить возобновить/отменить вместо выбора движка.
   void (async () => {
@@ -4292,7 +4311,7 @@ function buildMigrateRow(data: TorrentDetailOut, onStarted: () => void): HTMLEle
   const btn = el("button", { type: "button", className: "btn btn--sm" }, ["Перенести"]) as HTMLButtonElement;
   btn.disabled = true;
 
-  const migrating = data.status === "migrating";
+  const migrating = isMigrationStatus(data.status);
   if (migrating) {
     select.replaceChildren(el("option", { value: "" }, ["Перенос выполняется…"]));
     select.disabled = true;
@@ -4584,9 +4603,10 @@ function renderTorrentCard(
   delBtn.addEventListener("click", () => {
     void deleteTorrentWithDialog({ id: t.id, display_name: t.display_name }, onChange);
   });
-  if (t.status === "migrating") {
+  if (isMigrationStatus(t.status)) {
     pauseBtn.disabled = true;
     resumeBtn.disabled = true;
+    if (t.status === "migrating") delBtn.disabled = true;
   } else if (t.status === "paused") pauseBtn.disabled = true;
   else resumeBtn.disabled = true;
   actions.append(pauseBtn, resumeBtn, delBtn);
@@ -4778,7 +4798,7 @@ function renderTorrentTable(
     }
     if (writable) {
       const isPaused = t.status === "paused";
-      const isMigrating = t.status === "migrating";
+      const isMigrating = isMigrationStatus(t.status);
       const toggleProps: Record<string, string> = {
         type: "button",
         className: "btn btn--ghost btn--xs",
@@ -5930,6 +5950,7 @@ function mountListShell(root: HTMLElement): void {
     downloading: "Загрузка",
     checking: "Проверка",
     check_queued: "Ждёт проверки",
+    migrate_queued: "В очереди на перенос",
     paused: "Пауза",
   };
   const searchInput = el("input", {
@@ -6409,6 +6430,7 @@ function mountListShell(root: HTMLElement): void {
     ["downloading", "Загрузка"],
     ["checking", "Проверка"],
     ["check_queued", "Ждёт проверки"],
+    ["migrate_queued", "В очереди на перенос"],
     ["paused", "Пауза"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
@@ -7034,6 +7056,7 @@ function mountListShell(root: HTMLElement): void {
     downloading: "Загрузка",
     checking: "Проверка",
     check_queued: "Ждёт проверки",
+    migrate_queued: "В очереди на перенос",
     paused: "Пауза",
   };
   const STATE_LABELS: Record<string, string> = {
@@ -7292,7 +7315,7 @@ async function loadDetail(
 
     const backRefresh = () => loadDetail(id, container, metaEl, scheduleNext);
     const st = effectiveStatus(data);
-    const migrating = data.status === "migrating";
+    const migrating = isMigrationStatus(data.status);
 
     let title = data.display_name || `Торрент #${data.id}`;
     if (title.toLowerCase().endsWith(".torrent")) title = title.slice(0, -".torrent".length);
@@ -7454,7 +7477,9 @@ async function loadDetail(
       });
     });
     if (migrating) {
-      for (const b of [toggleBtn, recheckBtn, reannounceBtn, delBtn]) b.disabled = true;
+      for (const b of [toggleBtn, recheckBtn, reannounceBtn]) b.disabled = true;
+      // Ждущий слот перенос можно снять удалением; идущий — только через «Отменить перенос».
+      if (data.status === "migrating") delBtn.disabled = true;
     }
     toolbar.append(
       toggleBtn,

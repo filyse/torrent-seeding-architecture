@@ -9,7 +9,7 @@ import httpx
 from arq import cron
 from arq.connections import RedisSettings
 from seeding_db.config import get_database_url
-from seeding_db.models import TorrentStatus
+from seeding_db.models import MIGRATION_STATUSES, TorrentStatus
 from seeding_db.repository import QuotaRepository, TorrentRepository, UploadSampleRepository
 from seeding_db.session import create_engine, create_session_factory
 from seeding_db.status_from_runtime import status_from_runtime
@@ -154,7 +154,7 @@ async def sync_runtime_to_db(ctx):
 
                 # Источник на время копии стоит на паузе специально. Запись
                 # «paused» поверх «migrating» снимает перенос в интерфейсе.
-                if row.status != TorrentStatus.migrating.value:
+                if row.status not in MIGRATION_STATUSES:
                     target_status = status_from_runtime(
                         rt.get("runtime_status"),
                         rt.get("lt_state"),
