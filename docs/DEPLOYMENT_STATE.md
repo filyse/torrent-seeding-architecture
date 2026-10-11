@@ -608,6 +608,13 @@ inspect, тома состояния без медиа, код), CT400 `/root/ba
 Проверка: `version` 1.6.13.2 в `/internal/v1/session/stats`, `RestartCount`
 не растёт, в `journalctl -k` нет `segfault ... libtorrent`.
 
+Факт выката 2026-10-11 (Томск, UTC+7): a2 1.6.13.2 канарейка, затем 1.6.13.3 в 08:03;
+a1 ~08:19, a3 сразу после; b1–b6 по одному 08:21–08:26. Все healthy, версия 1.6.13.3,
+синк CT400 в норме, segfault после 08:00 нет. В host-only
+`docker-compose.a-host.yml` у a3 тег `seeding-engine-a:2.1.2` (на деле старый 1.6.13)
+заменён на `:latest`, оригинал — `docker-compose.a-host.yml.bak-pre-segfix`.
+Откат: образы `seeding-engine-a:pre-segfix-aN` и `seeding-engine-bN:pre-segfix`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

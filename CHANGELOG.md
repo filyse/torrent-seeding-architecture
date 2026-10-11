@@ -19,6 +19,8 @@
   только если handle ещё в `_handles`. `wait_for_alert` тоже под `ALERT_LOCK`.
   Стресс настоящего движка `tests/lt_engine_stress.py`: 1.6.13.1 — SIGSEGV за
   доли секунды, 1.6.13.3 — без падений.
+- **Выкат 2026-10-11:** a2 08:03, a1 ~08:19, a3, b1–b6 08:21–08:26 (Томск). a3 в
+  `docker-compose.a-host.yml` переведён с тега `seeding-engine-a:2.1.2` на `:latest`.
 
 ## engine 1.6.13.2 — 2026-10-11
 
