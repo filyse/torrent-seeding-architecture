@@ -634,6 +634,53 @@ inspect, тома состояния без медиа, код), CT400 `/root/ba
 ветки hotfix, §7ю–7я2. При переходе прода на main: движки → engine 1.6.17 на
 libtorrent 2.1.2, CT400 → main (api 1.26.13 / web 1.54.4 / queue 1.0.3).
 
+## 7я3. Прод переведён на main — libtorrent 2.1.2 — 2026-10-12
+
+Ветка прода теперь `main` (`8fab5e7`); `hotfix/1.6.13-hold-stick` — только для отката.
+
+| компонент | было (hotfix) | стало (main) |
+|---|---|---|
+| a1–a3, b1–b6 | engine 1.6.13.3 / libtorrent 2.0.11 | engine 1.6.17 / libtorrent 2.1.2 |
+| CT400 api / queue / web | 1.26.10.2 / 1.0.0.1 / 1.53.95 | 1.26.13 / 1.0.3 / 1.54.5 |
+
+Выкат 2026-10-12 (Томск, UTC+7):
+- перед выкатом переносов не было (`migration_jobs` пусто), у b6 ~73 ГБ свободно —
+  новых переносов на b6 не ставить;
+- стресс в образе 2.1.2 (`tests/lt_alert_stress.py fixed 30`,
+  `tests/lt_engine_stress.py 30`) — оба `survived`;
+- a2 канарейка 15:27, 15 мин без рестартов/segfault, синк CT400 в норме;
+- a1, a3 ~15:43; b1 15:44, b2 15:45, b3 15:46, b4 15:47, b5 15:48, b6 15:49 —
+  по одному, каждый healthy, `RestartCount=0`;
+- CT400 ~15:52: `/opt/containerd` → ветка `main`, пересобраны api, queue_worker, web.
+- ~15:51 все 9 healthy, `RestartCount=0`, segfault нет, синк по всем 9 движкам ok.
+  После рестарта движки перепроверяют файлы: ~2500 раздач «Ждёт проверки», 10
+  «Проверка» — очередь хеша (`hash_per_engine`), уходит сама.
+
+Сборка движков: на rudub2 `docker build -f engine/Dockerfile -t seeding-engine-a:212 .`
+→ тег `seeding-engine-a:latest`, `docker compose -f docker-compose.a-host.yml up -d
+--no-deps --no-build aN`. На 192.168.1.171 один образ `seeding-engine-b:212` с тегом
+`seeding-engine-engine:latest` (b1) и `seeding-engine-bN-engine:latest`, затем
+`docker compose -p <project> --env-file .env.engine[.bN] -f docker-compose.engine.yml
+-f docker-compose.bN-content.yml up -d --no-deps --no-build engine`.
+
+Бэкапы до выката (`20261012-pre-212`):
+- rudub2 `~/backups/20261012-pre-212/`: compose/.env, `git-head.txt`, inspect, тома
+  `seeding-engines-a_aN_data`; образ `seeding-engine-a:pre-212`;
+- 192.168.1.171 `~/backups/20261012-pre-212/`: то же, тома `*engine_data`; образы
+  `seeding-engine-engine:pre-212`, `seeding-engine-bN-engine:pre-212`;
+- CT400 `/root/backups/20261012-pre-212/`: `seeding-db.dump`, `containerd-git.tgz`,
+  `.env`, compose; образы `containerd-{api,queue_worker,web}:pre-212`.
+
+Откат одного движка: `docker tag <образ>:pre-212 <образ>:latest` и тот же `up -d
+--no-deps --no-build`. Откат CT400: `git checkout hotfix/1.6.13-hold-stick`,
+`docker tag containerd-<svc>:pre-212 containerd-<svc>:latest`, `up -d --no-deps`
+для трёх сервисов. Схема БД не менялась.
+
+Выкат 1.6.13.3 на hotfix 2026-10-11: a2 08:03 (после канарейки 1.6.13.2), a1 ~08:19,
+a3 сразу после, b1–b6 по одному 08:21–08:26. В host-only `docker-compose.a-host.yml`
+у a3 тег `seeding-engine-a:2.1.2` (на деле старый 1.6.13) заменён на `:latest`,
+оригинал — `docker-compose.a-host.yml.bak-pre-segfix`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
