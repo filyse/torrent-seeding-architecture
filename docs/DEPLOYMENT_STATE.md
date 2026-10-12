@@ -668,6 +668,14 @@ containerd-<svc>:latest`, `up -d --no-deps api web`. БД не менялась.
 коммитов hotfix → main — в `DEPLOYMENT_STATE.md` ветки main, §7я.
 Переход прода на main (libtorrent 2.1.2) — после ~24 ч стабильности.
 
+## 7я3. Прод ушёл на main — 2026-10-12
+
+С 2026-10-12 ~15:27–15:52 (Томск) все движки и CT400 работают с ветки `main`
+(engine 1.6.17 / libtorrent 2.1.2, api 1.26.13, web 1.54.5, queue 1.0.3). Эта ветка
+остаётся для отката: образы `:pre-212` на обоих сидбоксах и в CT400 — её сборки
+(engine 1.6.13.3, api 1.26.10.2, web 1.53.95). Подробности — `DEPLOYMENT_STATE.md`
+ветки main, §7я3.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
