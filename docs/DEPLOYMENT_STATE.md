@@ -2,7 +2,7 @@
 
 > **Исторический снимок 2026-07-18.** Не читать как текущий прод.
 > С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
-> Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-10-06: web 1.54.2 / api 1.26.11 / queue 1.0.2 / engine 1.6.16, libtorrent 2.1.2 на всех девяти движках).
+> Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-10-06: web 1.54.2 / api 1.26.11 / queue 1.0.2 / engine 1.6.16, libtorrent 2.1.2 на всех девяти движках; с 2026-10-16 десятый — c1, §7я4).
 > Источник истины кода — `main` (web-шапка — после коммита этой спеки).
 
 Документ фиксирует **фактическую топологию продакшена**, расхождение рабочих
@@ -16,6 +16,7 @@
 | Оркестратор (control plane) | CT 400 (Proxmox LXC, `192.168.1.101`), доступ через PVE `192.168.1.10` → `pct exec 400` | `/opt/containerd` | `api`, `queue_worker`, `web`, `db` (postgres), `redis`, `caddy`, стек наблюдаемости (prometheus/grafana/cadvisor/node-exporter) |
 | Движки b1–b6 (data plane) | seedbox b-host `rudub@192.168.1.171:24` | `/home/rudub/seeding-engine` | контейнеры `b1-seeding`…`b6-seeding` (по тому на диск), плюс легаси `torrent-api`, `rtorrent-rutorrent`, `ftpd`, `webdav` |
 | Движки a1–a3 (data plane) | seedbox a-host `rudub2@192.168.2.243` (LAN2; SSH только через прыжок `-J root@192.168.1.10`) | `/home/rudub2/torrent-seeding-architecture` | контейнеры `a1-seeding`…`a3-seeding` (один compose-проект `seeding-engines-a`) |
+| Движок c1 (data plane) | c-сидбокс `rudub3@192.168.1.172` (LAN1, вход по паролю через PVE `192.168.1.10`) | `/home/rudub3/torrent-seeding-architecture` | контейнер `c1-seeding` (compose-проект `seeding-engines-c`) + `seeding-upload-edge` |
 
 Деплой-механизм — не `git pull` в CI, а **сборка docker-образов из локального
 чекаута репозитория на самом хосте**:
@@ -681,6 +682,46 @@ a3 сразу после, b1–b6 по одному 08:21–08:26. В host-only 
 у a3 тег `seeding-engine-a:2.1.2` (на деле старый 1.6.13) заменён на `:latest`,
 оригинал — `docker-compose.a-host.yml.bak-pre-segfix`.
 
+## 7я4. Новый движок c1 на rudub3 — 2026-10-16
+
+Хост `rudub3` (`192.168.1.172`, DHCP-резерв на R1 по MAC), Ubuntu 26.04.1, i5-8600,
+14 ГБ RAM. Диск раздачи — Seagate Exos 20 ТБ (`ST20000NM007D`), ext4, метка `c1`,
+fstab по UUID `defaults,nofail 0 2` → `/home/rudub3/storage/c1` → в контейнере `/data/c1`
+(`disk_kind=hdd`).
+
+| что | значение |
+|---|---|
+| движок | `c1`, engine 1.6.17 / libtorrent 2.1.2 (тот же образ, что у a*, `built_at 2026-10-12T08:25:05Z`) |
+| образ | `seeding-engine-c:latest` (= `seeding-engine-c:212`), перенесён `docker save` с rudub2, не пересобирался |
+| API | `https://192.168.1.172:8081` (TLS, cert `engine-c1` от seeding-ca, SAN `IP:192.168.1.172`) |
+| BT-порт | `50021` tcp+udp (a* = 50011–50013, b* = 50001–50006) |
+| upload-edge | `:8090` (`docker-compose.upload-edge.yml`), `/c1/health` отвечает |
+| Docker | docker-ce 29.4.0, compose 5.1.3 из репо `noble` (для `resolute` пакетов нет), `apt-mark hold` |
+| выход в интернет | WAN1 через R1 (`88.204.56.176`), не WAN2 как у a* |
+| проброс | R1 `seeding_c1_172_wan1`: WAN1 50021 tcp+udp → `192.168.1.172:50021`, reflection |
+
+Host-only файлы (untracked): `docker-compose.c-host.yml`, `.env.engine.c` (секреты, 600),
+`certs/`. Cert c1 также лежит на CT400 `/opt/containerd/certs/engine-c.{crt,key}`.
+
+Запуск / пересоздание:
+
+```bash
+cd ~/torrent-seeding-architecture
+sudo docker compose -p seeding-engines-c --env-file .env.engine.c \
+  -f docker-compose.c-host.yml up -d --no-build
+```
+
+Обновление образа: как у a* — собрать (`docker build -f engine/Dockerfile -t seeding-engine-c:<tag> .`)
+или перенести образ, `docker tag … seeding-engine-c:latest`, затем команда выше.
+
+Проверено 2026-10-16: `c1-seeding` healthy, `RestartCount=0`; libtorrent слушает 50021
+tcp/udp (v4+v6); CT400 `/api/v1/health` — `c1: true`, оркестратор опрашивает движок;
+Prometheus собирает `seeding_engine_*{engine="c1"}`; пакеты с WAN1 на 50021 доходят
+через DNAT. Раздач на c1 пока нет.
+
+Не сделано: c1 нет в `SEEDING_UPLOAD_BASE_URLS` на CT400 и нет NPM-маршрута
+`/u/c/` → `192.168.1.172:8090`, поэтому загрузка файлов браузером на c1 пока не
+настроена.
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
