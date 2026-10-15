@@ -77,7 +77,7 @@ UPLOAD_CONTENT_UID=1000
 UPLOAD_CONTENT_GID=1000
 
 # upload-relay — без смены upstream: engine id в path
-UPLOAD_RELAY_UPSTREAMS={"a":"https://seedbox2.hw-s.ru/u/a","b":"https://seedbox2.hw-s.ru/u/b"}
+UPLOAD_RELAY_UPSTREAMS={"a":"https://seedbox2.hw-s.ru/u/a","b":"https://seedbox2.hw-s.ru/u/b","c":"https://seedbox2.hw-s.ru/u/c"}
 # Caddy на RU: :8445, только h1/h2 (без HTTP/3). Релей 0.1.1 повторяет обрыв апстрима.
 ```
 

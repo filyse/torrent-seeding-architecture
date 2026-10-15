@@ -726,9 +726,13 @@ Prometheus собирает `seeding_engine_*{engine="c1"}`; пакеты с WAN
 добавлен `location /u/c/` → `http://192.168.1.172:8090`, такой же, как `/u/a/`, `/u/b/`.
 Правка внесена и в БД NPM, и в `11.conf`. Бэкапы:
 `/data/database.sqlite.bak.20261016-c1`, `/root/11.conf.bak.20261016-c1`.
-`https://seedbox2.hw-s.ru/u/c/c1/health` отвечает health движка. В
-`SEEDING_UPLOAD_RELAY_BASE_URLS` (relay на VDS) c1 нет: без него запасной путь
-через relay для c1 не работает.
+`https://seedbox2.hw-s.ru/u/c/c1/health` отвечает health движка.
+Relay на RU VDS (`185.185.143.207`, systemd `seeding-upload-relay`, `/opt/seeding-upload-relay/relay.env`):
+в `UPLOAD_RELAY_UPSTREAMS` добавлен контур `"c":"https://seedbox2.hw-s.ru/u/c"` (бэкап
+`relay.env.bak-20261016-c1`), на CT400 в `SEEDING_UPLOAD_RELAY_BASE_URLS` —
+`"c1":"https://185-185-143-207.sslip.io:8445/u/c"` (бэкап `/root/env.bak-20261016-c1-relay`).
+Relay ходит к движку через NPM seedbox2, проброс на R1 для этого не нужен.
+`https://185-185-143-207.sslip.io:8445/u/c/c1/health` отвечает health c1.
 
 Права и файрвол — как на rudub2 (.243): `~/storage` 775, `certs/*.crt` и compose 664,
 `engine.key` 600, пользователь в группе `docker`, своих правил sudo нет.
