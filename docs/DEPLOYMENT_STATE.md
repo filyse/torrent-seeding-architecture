@@ -740,6 +740,22 @@ Relay ходит к движку через NPM seedbox2, проброс на R1
 Подготовленный набор правил (SSH из LAN1; 8081 только с CT400, .171 и .243; 8090 только с
 NPM .181; 50021 отовсюду; блок `DOCKER-USER`, потому что Docker обходит INPUT ufw)
 сохранён в `/root/ufw.c1-enabled-20261016.tgz`, `/root/after*.rules.c1-docker-user`.
+Скачивание (`/{engine}/download/v1/file`) идёт по тем же базам, что и заливка: NPM `/u/c/` и
+relay `…:8445/u/c/`. Отдельной настройки для c1 не нужно. Проверено 2026-10-16: с
+неверным ticket оба пути отвечают `403 malformed ticket` от движка, так же как у a1.
+
+FTP на rudub3 (2026-10-16), копия `ftpd` с .243: `~/server/docker-compose.yml`
+(проект `server`), `stilliard/pure-ftpd`, порт 21, пассивные 4559–4659, `PUBLICHOST=192.168.1.172`,
+корень `/home/rudub3/storage`, флаги `-U 133:022 -H`. Пользователь puredb `rudub3`
+(uid/gid 1000) с паролем системного пользователя. Хеш SHA-512 crypt лежит в
+`~/server/ftp-passwd/pureftpd.passwd` (root, 600), `FTP_USER_PASS` не задан. Только LAN:
+на R1 диапазон 4559–4659 уже проброшен на .171, для .172 проброса нет.
+
+Отличия rudub3 от rudub2, оставленные сознательно: нет `sb-cpu-powercap`
+(ограничение частоты CPU под тихий кулер .243), нет `sysstat`, chrony вместо
+timesyncd (дефолт 26.04), ufw выключен, как на .243. Действующие sysctl
+(`vm.max_map_count`, `fq_codel`, `rp_filter=2`, буферы) и `daemon.json` (нет на обоих) совпадают.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
