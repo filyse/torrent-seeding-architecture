@@ -745,11 +745,13 @@ relay `…:8445/u/c/`. Отдельной настройки для c1 не ну
 неверным ticket оба пути отвечают `403 malformed ticket` от движка, так же как у a1.
 
 FTP на rudub3 (2026-10-16), копия `ftpd` с .243: `~/server/docker-compose.yml`
-(проект `server`), `stilliard/pure-ftpd`, порт 21, пассивные 4559–4659, `PUBLICHOST=192.168.1.172`,
+(проект `server`), `stilliard/pure-ftpd`, порт 21, пассивные 4660–4760, `PUBLICHOST=192.168.1.172`,
 корень `/home/rudub3/storage`, флаги `-U 133:022 -H`. Пользователь puredb `rudub3`
 (uid/gid 1000) с паролем системного пользователя. Хеш SHA-512 crypt лежит в
-`~/server/ftp-passwd/pureftpd.passwd` (root, 600), `FTP_USER_PASS` не задан. Только LAN:
-на R1 диапазон 4559–4659 уже проброшен на .171, для .172 проброса нет.
+`~/server/ftp-passwd/pureftpd.passwd` (root, 600), `FTP_USER_PASS` не задан.
+Из интернета: `88.204.56.176:2121`. На R1 проброшены WAN1 2121 → .172:21 и 4660–4760 → .172
+с reflection, так же, как у .171 (26 → 21, 4559–4659). `PUBLICHOST` — LAN-адрес, как у .171:
+клиенты снаружи берут адрес сервера вместо PASV-IP или используют EPSV.
 
 Отличия rudub3 от rudub2, оставленные сознательно: нет `sb-cpu-powercap`
 (ограничение частоты CPU под тихий кулер .243), нет `sysstat`, chrony вместо
