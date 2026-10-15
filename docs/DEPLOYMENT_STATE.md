@@ -719,9 +719,23 @@ tcp/udp (v4+v6); CT400 `/api/v1/health` — `c1: true`, оркестратор �
 Prometheus собирает `seeding_engine_*{engine="c1"}`; пакеты с WAN1 на 50021 доходят
 через DNAT. Раздач на c1 пока нет.
 
-Не сделано: c1 нет в `SEEDING_UPLOAD_BASE_URLS` на CT400 и нет NPM-маршрута
-`/u/c/` → `192.168.1.172:8090`, поэтому загрузка файлов браузером на c1 пока не
-настроена.
+Загрузка браузером (2026-10-16): на CT400 в `SEEDING_UPLOAD_BASE_URLS` добавлен
+`"c1":"https://seedbox2.hw-s.ru/u/c"`, api пересоздан
+(`scripts/deploy-ct400.sh up -d --no-deps --no-build api`, бэкап `/root/env.bak-20261016-c1`).
+В NPM (CT105, `192.168.1.181`, proxy host 11 `seedbox2.hw-s.ru`) в advanced config
+добавлен `location /u/c/` → `http://192.168.1.172:8090`, такой же, как `/u/a/`, `/u/b/`.
+Правка внесена и в БД NPM, и в `11.conf`. Бэкапы:
+`/data/database.sqlite.bak.20261016-c1`, `/root/11.conf.bak.20261016-c1`.
+`https://seedbox2.hw-s.ru/u/c/c1/health` отвечает health движка. В
+`SEEDING_UPLOAD_RELAY_BASE_URLS` (relay на VDS) c1 нет: без него запасной путь
+через relay для c1 не работает.
+
+Права и файрвол — как на rudub2 (.243): `~/storage` 775, `certs/*.crt` и compose 664,
+`engine.key` 600, пользователь в группе `docker`, своих правил sudo нет.
+Отличие: секреты в `.env.engine.c` (600), а не в compose. ufw выключен, как на .243.
+Подготовленный набор правил (SSH из LAN1; 8081 только с CT400, .171 и .243; 8090 только с
+NPM .181; 50021 отовсюду; блок `DOCKER-USER`, потому что Docker обходит INPUT ufw)
+сохранён в `/root/ufw.c1-enabled-20261016.tgz`, `/root/after*.rules.c1-docker-user`.
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
