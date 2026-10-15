@@ -758,6 +758,36 @@ FTP на rudub3 (2026-10-16), копия `ftpd` с .243: `~/server/docker-compos
 timesyncd (дефолт 26.04), ufw выключен, как на .243. Действующие sysctl
 (`vm.max_map_count`, `fq_codel`, `rp_filter=2`, буферы) и `daemon.json` (нет на обоих) совпадают.
 
+## 7я5. Легаси ruTorrent остановлен на обоих сидбоксах — 2026-10-16
+
+На 192.168.2.243 и 192.168.1.171 остановлены `torrent-api`, `rtorrent-rutorrent`,
+`rtorrent-rutorrent-logs` (`docker update --restart=no` + `docker stop`). Перед этим:
+у rtorrent 0 соединений с пирами, у `torrent-api` 0 запросов за 7 дней (на `:8000` висели только
+сканеры из интернета). CT400 и MPW (`backend: seeding`) их не используют.
+После каждого стопа проверялись: health CT400 (все 10 движков true), `seedbox2.hw-s.ru`,
+`/u/a/a1`, `/u/b/b1`, FTP .171 и .243 — без изменений.
+
+`seedbox.hw-s.ru` (NPM на .243, proxy host 4) теперь отдаёт 301 на
+`https://seedbox2.hw-s.ru$request_uri`, кроме `/.well-known/acme-challenge/` (чтобы
+продлевался сертификат). Правка в БД NPM (`advanced_config`) и в `4.conf`.
+NPM host 3 (`npmsb.hw-s.ru`) не трогали.
+
+Бэкапы: `~/backups/20261016-legacy-stop/` на обоих хостах (compose, `api/`, rtorrent
+`/data` + passwd, `.session`, NPM `/data` + letsencrypt, дамп БД NPM, inspect, образы
+`docker save`); копии `.session` на ПК: `C:\Scripts\Project\Backup\legacy-rutorrent-20261016\`.
+
+Откат (на каждом хосте):
+
+```bash
+for c in rtorrent-rutorrent rtorrent-rutorrent-logs torrent-api; do
+  docker update --restart=unless-stopped $c && docker start $c
+done
+# .243, вернуть ruTorrent на seedbox.hw-s.ru: advanced_config host 4 = '' в БД NPM,
+# cp /data/nginx/disabled-20261016/4.conf /data/nginx/proxy_host/4.conf, nginx -s reload
+```
+
+Удаление контейнеров запланировано через неделю (~23.10). Не тронуты: FTP, движки,
+данные, DNS, пробросы на роутерах (WAN 8000/50000 на .171/.243 остаются), конфиги CT400/MPW.
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
