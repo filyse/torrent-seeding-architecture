@@ -30,11 +30,11 @@ import {
   previousPhrase,
   renderFarmChart,
   renderMiniChart,
-  wanColor,
   wanName,
   type HistoryPeriod,
   type UploadedHistory,
 } from "./uploadChart";
+import { alignCellStage, growCells, watchCellBox } from "./cellChart";
 import { creatorBrowseRow, fillCreatorCrumbs } from "./dirBrowser";
 import { intakeDrop, intakeFoot, intakeHead, intakeSegment, type ElFn, type IconFn } from "./intake";
 import {
@@ -790,26 +790,13 @@ function stopListStream(): void {
  *  легли на пиксельную сетку экрана. */
 function mountFarmChart(box: HTMLElement, hist: UploadedHistory): SVGSVGElement {
   const dpr = window.devicePixelRatio || 1;
-  const narrow = window.matchMedia("(max-width: 640px)").matches;
   const w = Math.floor(box.clientWidth || 680);
-  const svg = renderFarmChart(hist, narrow ? Math.max(600, w) : w, dpr);
+  const svg = renderFarmChart(hist, w, dpr);
   box.replaceChildren(svg);
-  alignFarmStage(svg);
+  alignCellStage(svg);
   return svg;
 }
 
-function alignFarmStage(svg: SVGSVGElement): void {
-  const st = svg.querySelector<SVGGElement>(".upload-chart__stage");
-  if (!st) return;
-  st.removeAttribute("transform");
-  const dpr = window.devicePixelRatio || 1;
-  const b = svg.getBoundingClientRect();
-  const fx = (b.left * dpr) % 1;
-  const fy = (b.top * dpr) % 1;
-  const dx = fx > 0.01 && fx < 0.99 ? -fx / dpr : 0;
-  const dy = fy > 0.01 && fy < 0.99 ? -fy / dpr : 0;
-  if (dx || dy) st.setAttribute("transform", `translate(${dx.toFixed(4)} ${dy.toFixed(4)})`);
-}
 
 let farmResizeObs: ResizeObserver | null = null;
 function watchFarmResize(box: HTMLElement, redraw: () => void): void {
@@ -832,44 +819,16 @@ function watchFarmResize(box: HTMLElement, redraw: () => void): void {
 /** «Квадратики» заполняются снизу вверх во всех колонках одновременно, 0.95 с
  *  (easeOutQuint, без отскока): анимируется один общий clipPath, клетки не
  *  искажаются. Один rAF на весь график. */
-let farmGrowRaf = 0;
-let farmGrowEnd: (() => void) | null = null;
+let farmGrowStop: (() => void) | null = null;
 
 function cancelFarmGrow(): void {
-  if (farmGrowRaf) cancelAnimationFrame(farmGrowRaf);
-  farmGrowRaf = 0;
-  farmGrowEnd?.();
-  farmGrowEnd = null;
+  farmGrowStop?.();
+  farmGrowStop = null;
 }
 
 function growFarmBars(svg: SVGSVGElement): void {
   cancelFarmGrow();
-  const r = svg.querySelector<SVGRectElement>(".upload-chart__reveal");
-  if (!r) return;
-  const base = Number(r.getAttribute("data-base"));
-  const H = Number(r.getAttribute("height"));
-  const DUR = 950;
-  const ease = (t: number) => 1 - Math.pow(1 - t, 5);
-  const d = Number(r.getAttribute("data-dpr")) || 1;
-  const set = (p: number) => {
-    // Край раскрытия — на физическом пикселе; в конце клип = весь график.
-    const y = p >= 1 ? 0 : Math.round(base * (1 - p) * d) / d;
-    r.setAttribute("y", y.toFixed(2));
-    r.setAttribute("height", (H - y).toFixed(2));
-  };
-  set(0);
-  const t0 = performance.now();
-  farmGrowEnd = () => set(1);
-  const step = (now: number) => {
-    const t = Math.min(1, (now - t0) / DUR);
-    set(ease(t));
-    if (t < 1) farmGrowRaf = requestAnimationFrame(step);
-    else {
-      farmGrowRaf = 0;
-      farmGrowEnd = null;
-    }
-  };
-  farmGrowRaf = requestAnimationFrame(step);
+  farmGrowStop = growCells(svg);
 }
 
 /* «История»: живое обновление. Сэмплы пишутся раз в 15 минут, сервер держит
@@ -10125,7 +10084,7 @@ function meterRow(pct: number, tone: "accent" | "wan2" | "warn" | "danger"): HTM
   return el("span", { className: "wan-meter" }, [fill]);
 }
 
-type MiniChartSlot = { wrap: HTMLElement; unbind: () => void; tag: string };
+type MiniChartSlot = { wrap: HTMLElement; unbind: () => void; tag: string; period: HistoryPeriod };
 
 function miniChartTag(history: UploadedHistory, wanId: string): string {
   return [
@@ -10148,13 +10107,32 @@ function takeMiniChart(
   const prev = cache?.get(wanId);
   if (prev && prev.tag === tag) return prev.wrap;
 
+  // Прежний график канала: тот же период — клетки плавно меняют цвет на месте,
+  // иначе (первая отрисовка / смена периода) — заполнение снизу вверх.
+  const prevSvg = prev?.wrap.querySelector<SVGSVGElement>("svg.upload-chart") ?? null;
+  const prevFills = prev && prev.period === history.period ? farmCellFills(prevSvg) : null;
   prev?.unbind();
   const wrap = el("div", { className: "wan-card__mini" });
   const chartBox = el("div", { className: "wan-card__chart" });
-  const svg = renderMiniChart(history, wanId, wanColor(wanId), `mini-${wanId}`);
   const tip = el("div", { className: "upload-tip" }) as HTMLElement;
   tip.hidden = true;
-  chartBox.append(svg);
+  let unbindHover: (() => void) | null = null;
+  let stopGrow: () => void = () => {};
+  const draw = (first: boolean) => {
+    stopGrow();
+    unbindHover?.();
+    tip.hidden = true;
+    const svg = renderMiniChart(history, wanId, chartBox.clientWidth, window.devicePixelRatio || 1);
+    chartBox.replaceChildren(svg);
+    alignCellStage(svg);
+    unbindHover = bindMiniHover(svg, history, wanId, engines, tip, fmtBytes);
+    if (first) {
+      if (prevFills && prevFills.size) morphFarmCells(prevFills, svg);
+      else stopGrow = growCells(svg);
+    }
+    if (first && chartBox.scrollWidth > chartBox.clientWidth) chartBox.scrollLeft = chartBox.scrollWidth;
+  };
+  const unwatch = watchCellBox(chartBox, draw);
   wrap.append(
     chartBox,
     el("div", { className: "wan-card__chart-note" }, [
@@ -10162,8 +10140,12 @@ function takeMiniChart(
     ]),
     tip,
   );
-  const unbind = bindMiniHover(svg, history, wanId, engines, tip, fmtBytes);
-  cache?.set(wanId, { wrap, unbind, tag });
+  const unbind = () => {
+    unwatch();
+    stopGrow();
+    unbindHover?.();
+  };
+  cache?.set(wanId, { wrap, unbind, tag, period: history.period });
   return wrap;
 }
 

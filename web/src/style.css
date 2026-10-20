@@ -3022,11 +3022,14 @@ input.file-input::file-selector-button:hover {
 
 .upload-chart--mini .upload-chart__axis,
 .upload-chart--mini .upload-chart__tick {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .upload-chart__col--peak .upload-chart__bar {
   filter: brightness(1.08);
+}
+.upload-chart--cells .upload-chart__col--peak .upload-chart__bar {
+  filter: none;
 }
 
 .wan-card {
@@ -7190,54 +7193,54 @@ body.page-mesh-on .page-mesh-dots {
 
 /* ── «История»: столбики из «квадратиков» (только большой график, .upload-chart--farm).
    Клетки — паттерны; пустые клетки бледно заполняют сетку до верха. */
-.upload-chart--farm .upload-chart__plot {
+.upload-chart--cells .upload-chart__plot {
   fill: transparent;
 }
-.upload-chart--farm .upload-chart__grid {
+.upload-chart--cells .upload-chart__grid {
   stroke: rgba(24, 24, 27, 0.06);
 }
-.upload-chart--farm .upload-chart__axis,
-.upload-chart--farm .upload-chart__tick {
+.upload-chart--cells .upload-chart__axis,
+.upload-chart--cells .upload-chart__tick {
   font-size: 11px;
   fill: #a1a1aa;
 }
-.upload-chart--farm .upload-cell--bg {
+.upload-chart--cells .upload-cell--bg {
   fill: rgba(24, 24, 27, 0.045);
 }
-.upload-chart--farm .upload-cell--na {
+.upload-chart--cells .upload-cell--na {
   color: #a1a1aa;
   opacity: 0.55;
 }
-.upload-chart--farm .upload-cell--wan1 {
+.upload-chart--cells .upload-cell--wan1 {
   fill: #3b82f6;
 }
-.upload-chart--farm .upload-cell--wan2 {
+.upload-chart--cells .upload-cell--wan2 {
   fill: #22c55e;
 }
-.upload-chart--farm .upload-cell--wan1.upload-cell--lo {
+.upload-chart--cells .upload-cell--wan1.upload-cell--lo {
   fill: #7fb0f8;
 }
-.upload-chart--farm .upload-cell--wan2.upload-cell--lo {
+.upload-chart--cells .upload-cell--wan2.upload-cell--lo {
   fill: #6fd99a;
 }
 .upload-chart--farm .upload-chart__empty {
   opacity: 1;
 }
-.upload-chart--farm .upload-chart__hit {
+.upload-chart--cells .upload-chart__hit {
   fill: transparent;
   transition: fill 0.15s ease;
 }
-.upload-chart--farm .upload-chart__col.is-hover .upload-chart__hit {
+.upload-chart--cells .upload-chart__col.is-hover .upload-chart__hit {
   fill: rgba(37, 99, 235, 0.07);
 }
-.upload-chart--farm .upload-chart__guide {
+.upload-chart--cells .upload-chart__guide {
   stroke: #94a3b8;
   stroke-width: 1;
   stroke-dasharray: 2 3;
   opacity: 0;
   pointer-events: none;
 }
-.upload-chart--farm .upload-chart__col.is-hover .upload-chart__guide {
+.upload-chart--cells .upload-chart__col.is-hover .upload-chart__guide {
   opacity: 1;
 }
 .upload-chart--farm .upload-chart__bar {
@@ -7281,14 +7284,27 @@ body.page-mesh-on .page-mesh-dots {
     scrollbar-width: thin;
     height: auto;
   }
-  .upload-history--page .upload-history__chart svg.upload-chart--farm {
-    min-width: 600px;
-  }
 }
-.upload-chart--farm .upload-cell {
+.upload-chart--cells .upload-cell {
   transition: fill 0.6s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.upload-chart--farm .upload-chart__grid,
-.upload-chart--farm .upload-chart__guide {
+.upload-chart--cells .upload-chart__grid,
+.upload-chart--cells .upload-chart__guide {
   shape-rendering: crispEdges;
+}
+/* Графики «квадратиками»: если клетки мельче минимума, график шире
+   контейнера и листается по горизонтали. */
+.upload-history__chart,
+.wan-card__chart {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.upload-chart--cells {
+  display: block;
+  max-width: none;
+}
+.upload-chart--cells.upload-chart--mini .upload-chart__axis,
+.upload-chart--cells.upload-chart--mini .upload-chart__tick {
+  font-size: 10px;
 }

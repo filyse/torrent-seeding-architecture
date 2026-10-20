@@ -2,7 +2,7 @@
 
 > **Исторический снимок 2026-07-18.** Не читать как текущий прод.
 > С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
-> С 2026-10-21: engine 1.6.19 на всех десяти движках, api 1.26.15, web 1.60.1 (§7я7–§7я27).
+> С 2026-10-21: engine 1.6.19 на всех десяти движках, api 1.26.15, web 1.61.0 (§7я7–§7я28).
 > Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-10-06: web 1.54.2 / api 1.26.11 / queue 1.0.2 / engine 1.6.16, libtorrent 2.1.2 на всех девяти движках; с 2026-10-16 десятый — c1, §7я4).
 > Источник истины кода — `main` (web-шапка — после коммита этой спеки).
 
@@ -951,6 +951,12 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1601` (= 1.60.0).
 - Стенд: 5 сценариев зависаний — без зависаний; кропы DPR 1 / 1.25 / 2 — края клеток на целых физических пикселях.
 - Откат: `docker tag containerd-web:pre-1601 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
+## 7я28. web 1.61.0 — все графики «квадратиками» (общий cellChart.ts) — 2026-10-21
+
+- CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1610` (= 1.60.1).
+- Стенд: сценарии зависаний на «Истории» и «Всего отдано» — без зависаний.
+- Откат: `docker tag containerd-web:pre-1610 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
 ## 7. Откат
 
