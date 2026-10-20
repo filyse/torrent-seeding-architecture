@@ -21,8 +21,6 @@ import {
   HISTORY_PERIODS,
   avgUnit,
   bindFarmHover,
-  farmChartGeometry,
-  morphFarmChart,
   bindMiniHover,
   bucketRangeLabel,
   bucketSampled,
@@ -785,49 +783,7 @@ function stopListStream(): void {
   }
 }
 
-/* «История»: живое обновление. Сэмплы пишутся раз в 15 минут, сервер держит
-   rollup 45 с — опрос раз в 30 с почти всегда попадает в его кэш. В скрытой
-   вкладке опрос стоит; при возврате — сразу свежий запрос. Таймер — общий
-   networkPollTimer, его гасит clearViewPolls() при уходе с экрана. */
-const HISTORY_LIVE_MS = 30_000;
-let historyLiveRefresh: (() => Promise<void>) | null = null;
-let historyLiveBound = false;
-
-function scheduleHistoryLive(): void {
-  if (networkPollTimer !== null) clearTimeout(networkPollTimer);
-  networkPollTimer = null;
-  if (!historyLiveRefresh || document.hidden) return;
-  networkPollTimer = setTimeout(() => {
-    networkPollTimer = null;
-    const r = parseRoute();
-    if (r.view !== "network" || r.side !== "history" || !historyLiveRefresh) {
-      historyLiveRefresh = null;
-      return;
-    }
-    void historyLiveRefresh().finally(scheduleHistoryLive);
-  }, HISTORY_LIVE_MS);
-}
-
-function startHistoryLive(refresh: () => Promise<void>): void {
-  historyLiveRefresh = refresh;
-  if (!historyLiveBound) {
-    historyLiveBound = true;
-    document.addEventListener("visibilitychange", () => {
-      const r = parseRoute();
-      if (!historyLiveRefresh || r.view !== "network" || r.side !== "history") return;
-      if (document.hidden) {
-        if (networkPollTimer !== null) clearTimeout(networkPollTimer);
-        networkPollTimer = null;
-      } else {
-        void historyLiveRefresh().finally(scheduleHistoryLive);
-      }
-    });
-  }
-  scheduleHistoryLive();
-}
-
 function clearViewPolls(): void {
-  historyLiveRefresh = null;
   stopListStream();
   if (listPollTimer !== null) {
     clearTimeout(listPollTimer);
@@ -10361,10 +10317,6 @@ function mountNetworkShell(root: HTMLElement): void {
   let lastHistory: UploadedHistory | null = cachedHist;
   let historyPeriod: HistoryPeriod = getHistoryPeriod();
   let unbindFarmHover: (() => void) | null = null;
-  let stopChartMorph: (() => void) | null = null;
-  const chartBox = el("div", { className: "upload-history__chart" });
-  const tip = el("div", { className: "upload-tip" }) as HTMLElement;
-  tip.hidden = true;
   const miniCache = new Map<string, MiniChartSlot>();
   let didFocusScroll = false;
   let cardsRevealed = Boolean(cachedLinks);
@@ -10405,7 +10357,19 @@ function mountNetworkShell(root: HTMLElement): void {
     if (side !== "history") return;
     unbindFarmHover?.();
     unbindFarmHover = null;
-    const segs = periodSegs();
+    const segs = el("div", { className: "wan-tabs", role: "tablist" });
+    for (const p of HISTORY_PERIODS) {
+      const btn = el("button", { type: "button", className: "wan-tab", role: "tab" }, [p.label]) as HTMLButtonElement;
+      btn.classList.toggle("is-active", historyPeriod === p.id);
+      btn.setAttribute("aria-selected", historyPeriod === p.id ? "true" : "false");
+      btn.addEventListener("click", () => {
+        if (historyPeriod === p.id) return;
+        historyPeriod = p.id;
+        setHistoryPeriod(p.id);
+        void loadHistory();
+      });
+      segs.append(btn);
+    }
     const since = lastHistory?.first_sampled_at
       ? `учёт с ${new Date(lastHistory.first_sampled_at).toLocaleString("ru-RU", {
           day: "numeric",
@@ -10483,58 +10447,17 @@ function mountNetworkShell(root: HTMLElement): void {
       el("span", { className: "upload-history__swatch upload-history__swatch--wan2" }, ["WAN2"]),
       el("span", { className: "upload-history__swatch upload-history__swatch--empty" }, ["нет данных"]),
     ]);
-    // Рамка графика живёт между перерисовками: старый SVG — источник геометрии
-    // для плавного перехода к новым данным / периоду.
-    const prevSvg = chartBox.querySelector<SVGSVGElement>("svg.upload-chart");
-    stopChartMorph?.();
-    stopChartMorph = null;
-    const prevGeo = farmChartGeometry(prevSvg);
-    chartBox.replaceChildren();
+    const chartBox = el("div", { className: "upload-history__chart" });
+    const tip = el("div", { className: "upload-tip" }) as HTMLElement;
     tip.hidden = true;
     if (lastHistory) {
       const svg = renderFarmChart(lastHistory);
       chartBox.append(svg);
       unbindFarmHover = bindFarmHover(svg, lastHistory, tip, fmtBytes);
-      stopChartMorph = morphFarmChart(prevGeo, svg, (from, to, onUpdate) =>
-        animate(from, to, { duration: 0.65, ease: [0.22, 1, 0.36, 1], onUpdate }),
-      );
     }
     historyHost.removeAttribute("aria-busy");
     historyHost.replaceChildren(head, stats, legend, chartBox, facts, tip);
   };
-
-  // Переключатель периода — тот же, что «Раздачи / Объём / …» в шапке: те же
-  // классы и тот же скользящий индикатор (bindSlidingTabs). Узел один на весь
-  // экран, поэтому индикатор едет, а не появляется заново.
-  let periodBar: HTMLElement | null = null;
-  function periodSegs(): HTMLElement {
-    if (periodBar) {
-      for (const b of periodBar.querySelectorAll<HTMLElement>(".wan-tab")) {
-        const on = b.dataset.period === historyPeriod;
-        b.classList.toggle("is-active", on);
-        b.setAttribute("aria-selected", on ? "true" : "false");
-      }
-      return periodBar;
-    }
-    const bar = el("div", { className: "wan-tabs wan-tabs--overview", role: "tablist", "aria-label": "Период" });
-    bar.append(el("span", { className: "wan-tabs__thumb", "aria-hidden": "true" }));
-    for (const p of HISTORY_PERIODS) {
-      const btn = el("button", { type: "button", className: "wan-tab", role: "tab" }, [p.label]) as HTMLButtonElement;
-      btn.dataset.period = p.id;
-      btn.addEventListener("click", () => {
-        if (historyPeriod === p.id) return;
-        historyPeriod = p.id;
-        setHistoryPeriod(p.id);
-        periodSegs();
-        void loadHistory();
-      });
-      bar.append(btn);
-    }
-    periodBar = bar;
-    periodSegs();
-    bindSlidingTabs(bar);
-    return bar;
-  }
 
   const loadHistory = async () => {
     if (side !== "history" && side !== "uploaded" && side !== "up" && side !== "down") return;
@@ -10559,14 +10482,6 @@ function mountNetworkShell(root: HTMLElement): void {
     try {
       const next = await loadUploadedHistory(historyPeriod, metric);
       if (next === lastHistory && cached) return;
-      if (
-        lastHistory &&
-        next.period === lastHistory.period &&
-        JSON.stringify(next) === JSON.stringify(lastHistory)
-      ) {
-        lastHistory = next;
-        return;
-      }
       lastHistory = next;
     } catch (e) {
       lastHistory = null;
@@ -10588,13 +10503,7 @@ function mountNetworkShell(root: HTMLElement): void {
   };
 
   if (cachedLinks && side !== "history") paint(lastSessionStats);
-  if (side === "history") {
-    void loadHistory();
-    startHistoryLive(() => {
-      historyMemo.delete(historyCacheKey(historyPeriod, "uploaded"));
-      return loadHistory();
-    });
-  }
+  if (side === "history") void loadHistory();
 
   void (async () => {
     if (side === "history") return;

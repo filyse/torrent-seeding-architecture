@@ -213,7 +213,6 @@ export function renderFarmChart(history: UploadedHistory): SVGSVGElement {
           height: innerH,
           fill: "url(#upload-unsampled)",
           class: "upload-chart__empty",
-          "data-key": `${b.t}|empty`,
         }),
       );
     } else {
@@ -227,7 +226,6 @@ export function renderFarmChart(history: UploadedHistory): SVGSVGElement {
             width: barW.toFixed(2),
             height: 2,
             class: "upload-chart__zero",
-            "data-key": `${b.t}|zero`,
           }),
         );
       } else {
@@ -244,7 +242,6 @@ export function renderFarmChart(history: UploadedHistory): SVGSVGElement {
               fill: wanColor(seg.id),
               rx: isTop ? 2 : 0,
               class: `upload-chart__bar upload-chart__bar--${seg.id}`,
-              "data-key": `${b.t}|${seg.id}`,
             }),
           );
         });
@@ -588,65 +585,5 @@ export function bindMiniHover(
     svg.removeEventListener("pointermove", move);
     svg.removeEventListener("pointerleave", hide);
     hide();
-  };
-}
-
-/* ── Плавная смена данных фермерского графика ──────────────────────────────
-   Новый SVG строится как раньше, затем каждый прямоугольник столбика (ключ —
-   время корзины + WAN) едет из прежней геометрии в новую: при обновлении
-   данных столбики подрастают, при сдвиге окна уезжают влево, новые
-   вырастают от нуля; при смене периода всё перестраивается из старых
-   позиций. Один твин на весь график (motion animate(0→1) + onUpdate), без
-   перерисовки DOM на кадр. prefers-reduced-motion — сразу итог. */
-type Geo = { x: number; y: number; w: number; h: number };
-
-function geoOf(r: Element): Geo {
-  return {
-    x: Number(r.getAttribute("x")),
-    y: Number(r.getAttribute("y")),
-    w: Number(r.getAttribute("width")),
-    h: Number(r.getAttribute("height")),
-  };
-}
-
-export function farmChartGeometry(svg: SVGSVGElement | null): Map<string, Geo> {
-  const out = new Map<string, Geo>();
-  if (!svg) return out;
-  for (const r of svg.querySelectorAll("rect[data-key]")) out.set(r.getAttribute("data-key")!, geoOf(r));
-  return out;
-}
-
-export type ChartTween = (from: number, to: number, onUpdate: (p: number) => void) => { stop: () => void };
-
-export function morphFarmChart(
-  prev: Map<string, Geo>,
-  next: SVGSVGElement,
-  tween: ChartTween,
-): (() => void) | null {
-  if (prev.size === 0) return null;
-  if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
-  const jobs: { r: Element; a: Geo; b: Geo }[] = [];
-  for (const r of next.querySelectorAll("rect[data-key]")) {
-    const b = geoOf(r);
-    const old = prev.get(r.getAttribute("data-key")!);
-    // Новый столбик растёт от нижней оси на своём месте.
-    const a = old ?? { x: b.x, y: b.y + b.h, w: b.w, h: 0 };
-    if (a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h) continue;
-    jobs.push({ r, a, b });
-  }
-  if (!jobs.length) return null;
-  const set = (p: number) => {
-    for (const { r, a, b } of jobs) {
-      r.setAttribute("x", (a.x + (b.x - a.x) * p).toFixed(2));
-      r.setAttribute("y", (a.y + (b.y - a.y) * p).toFixed(2));
-      r.setAttribute("width", Math.max(0, a.w + (b.w - a.w) * p).toFixed(2));
-      r.setAttribute("height", Math.max(0, a.h + (b.h - a.h) * p).toFixed(2));
-    }
-  };
-  set(0);
-  const anim = tween(0, 1, set);
-  return () => {
-    anim.stop();
-    set(1);
   };
 }
