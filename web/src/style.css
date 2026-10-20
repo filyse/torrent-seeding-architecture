@@ -6969,12 +6969,23 @@ body.page-mesh-on {
   --glass-surface: rgba(255, 255, 255, 0.86);
   /* Разделители над пейджером и подвалом: полупрозрачная тёмная линия
      затемняет любой участок фона одинаково — на пятнах её не теряем. */
-  --mesh-line: rgba(24, 24, 27, 0.14);
+  --mesh-line: rgba(24, 24, 27, 0.16);
 }
-/* Внутри приложения (не модалки и не окно входа — они вне #app) все
-   разделители и рамки берут ту же линию: на фоне с пятнами 1px #e4e4e7 тонет. */
-body.page-mesh-on #app {
-  --border: var(--mesh-line);
+/* Рамки — как в 1.56.0 (--border). Разделители над пейджером и подвалом —
+   градиентная линия 1px, гаснущая к краям: на пятнах сплошная #e4e4e7 тонула. */
+body.page-mesh-on .list-pager,
+body.page-mesh-on .app-footer {
+  border-top-color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    var(--mesh-line) 22%,
+    var(--mesh-line) 78%,
+    transparent
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+  background-position: 0 0;
 }
 body.page-mesh-on .page-mesh,
 body.page-mesh-on .page-mesh-dots {
@@ -7000,7 +7011,7 @@ body.page-mesh-on .page-mesh-dots {
   height: 48vw;
   left: -4vw;
   top: -6vw;
-  background: radial-gradient(circle, rgba(37, 99, 235, 0.3), transparent 68%);
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.17), transparent 68%);
   animation: page-mesh-1 38s ease-in-out infinite alternate;
 }
 .page-mesh i:nth-child(2) {
@@ -7008,7 +7019,7 @@ body.page-mesh-on .page-mesh-dots {
   height: 54vw;
   right: -10vw;
   bottom: -14vw;
-  background: radial-gradient(circle, rgba(148, 163, 184, 0.55), transparent 68%);
+  background: radial-gradient(circle, rgba(148, 163, 184, 0.33), transparent 68%);
   animation: page-mesh-2 46s ease-in-out infinite alternate;
 }
 .page-mesh i:nth-child(3) {
@@ -7016,7 +7027,7 @@ body.page-mesh-on .page-mesh-dots {
   height: 40vw;
   right: 4vw;
   top: 2vw;
-  background: radial-gradient(circle, rgba(96, 165, 250, 0.26), transparent 68%);
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.15), transparent 68%);
   animation: page-mesh-3 42s ease-in-out infinite alternate;
 }
 .page-mesh i:nth-child(4) {
@@ -7024,7 +7035,7 @@ body.page-mesh-on .page-mesh-dots {
   height: 44vw;
   left: 6vw;
   bottom: -8vw;
-  background: radial-gradient(circle, rgba(203, 213, 225, 0.7), transparent 68%);
+  background: radial-gradient(circle, rgba(203, 213, 225, 0.42), transparent 68%);
   animation: page-mesh-1 52s ease-in-out infinite alternate-reverse;
 }
 @keyframes page-mesh-1 {
@@ -7056,8 +7067,10 @@ body.page-mesh-on .page-mesh-dots {
   --glass-surface: initial;
   --mesh-line: initial;
 }
-:root[data-theme="dark"] body.page-mesh-on #app {
-  --border: inherit;
+:root[data-theme="dark"] body.page-mesh-on .list-pager,
+:root[data-theme="dark"] body.page-mesh-on .app-footer {
+  border-top-color: var(--border);
+  background-image: none;
 }
 :root[data-theme="dark"] .page-mesh,
 :root[data-theme="dark"] .page-mesh-dots {
@@ -7068,8 +7081,10 @@ body.page-mesh-on .page-mesh-dots {
     --glass-surface: initial;
     --mesh-line: initial;
   }
-  :root:not([data-theme="light"]) body.page-mesh-on #app {
-    --border: inherit;
+  :root:not([data-theme="light"]) body.page-mesh-on .list-pager,
+  :root:not([data-theme="light"]) body.page-mesh-on .app-footer {
+    border-top-color: var(--border);
+    background-image: none;
   }
   :root:not([data-theme="light"]) .page-mesh,
   :root:not([data-theme="light"]) .page-mesh-dots {
