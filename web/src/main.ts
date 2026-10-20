@@ -6273,7 +6273,10 @@ function mountListShell(root: HTMLElement): void {
   };
   const searchClosedW = () => 2.4 * 16;
   const searchOpenW = () => {
-    if (window.innerWidth <= 640) return Math.max(200, window.innerWidth - 24);
+    if (window.innerWidth <= 640) {
+      const left = Math.max(8, searchDock.getBoundingClientRect().left);
+      return Math.max(200, window.innerWidth - left - 12);
+    }
     return 20 * 16;
   };
   let searchWidth = searchClosedW();
@@ -7150,14 +7153,18 @@ function mountListShell(root: HTMLElement): void {
       });
       list.append(b);
     }
-    menu.addEventListener("mouseenter", () => {
+    // Наведение — только мышью: на тач-экране эмулированный mouseenter открывал меню,
+    // а следующий за ним click тут же его закрывал.
+    menu.addEventListener("pointerenter", (ev) => {
+      if (ev.pointerType !== "mouse") return;
       if (leaveTimer) {
         clearTimeout(leaveTimer);
         leaveTimer = null;
       }
       setOpen(true);
     });
-    menu.addEventListener("mouseleave", () => {
+    menu.addEventListener("pointerleave", (ev) => {
+      if (ev.pointerType !== "mouse") return;
       leaveTimer = setTimeout(() => setOpen(false), 120);
     });
     toggle.addEventListener("click", (ev) => {
@@ -11479,4 +11486,46 @@ initCustomSelects();
 window.addEventListener("popstate", () => render());
 // Внутренняя навигация шлёт это событие вручную после pushState (см. pushPath).
 window.addEventListener("hashchange", () => render());
+/* Телефон: любое всплывающее меню/поповер целиком в пределах экрана.
+   Сдвиг — свойством `translate` (не мешает анимациям через transform). Десктоп не трогаем. */
+const POPOVER_SEL =
+  ".filter-popover, .tb-menu__list, .pf-menu, .torrent-card__more-menu, .cselect-panel, .tray-menu, .detail-title-pop";
+function clampPopoversToViewport(): void {
+  const vw = document.documentElement.clientWidth;
+  for (const p of document.querySelectorAll<HTMLElement>(POPOVER_SEL)) {
+    if (p.dataset.vpShift) {
+      p.style.translate = "";
+      delete p.dataset.vpShift;
+    }
+    if (window.innerWidth > 640) continue;
+    const r = p.getBoundingClientRect();
+    if (!r.width) continue;
+    const pad = 8;
+    let dx = 0;
+    if (r.left < pad) dx = pad - r.left;
+    else if (r.right > vw - pad) dx = Math.max(pad - r.left, vw - pad - r.right);
+    if (Math.abs(dx) >= 1) {
+      p.style.translate = `${Math.round(dx)}px 0`;
+      p.dataset.vpShift = "1";
+    }
+  }
+}
+{
+  let raf = 0;
+  const schedule = () => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      clampPopoversToViewport();
+    });
+  };
+  new MutationObserver(schedule).observe(document.body, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ["hidden", "class", "open", "aria-expanded"],
+  });
+  window.addEventListener("resize", schedule);
+}
+
 void bootstrap();
