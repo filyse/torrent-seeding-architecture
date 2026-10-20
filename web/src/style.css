@@ -263,7 +263,7 @@ body.layout-wide #app {
 /* —— panels —— */
 
 .panel {
-  background: var(--surface);
+  background: var(--glass-surface, var(--surface));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -2779,7 +2779,7 @@ input.file-input::file-selector-button:hover {
   position: relative;
   margin-bottom: 0.75rem;
   padding: 0.9rem 1rem 1rem;
-  background: var(--surface);
+  background: var(--glass-surface, var(--surface));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -3037,7 +3037,7 @@ input.file-input::file-selector-button:hover {
   gap: 0.6rem;
   min-width: 0;
   padding: 0.9rem 1rem;
-  background: var(--surface);
+  background: var(--glass-surface, var(--surface));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -3051,7 +3051,7 @@ input.file-input::file-selector-button:hover {
   position: relative;
   overflow: visible;
   padding: 0.9rem 1rem 1rem;
-  background: var(--surface);
+  background: var(--glass-surface, var(--surface));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -5522,7 +5522,7 @@ body:has(.login-overlay) {
   padding: 0.7rem 0.8rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--glass-surface, var(--surface));
 }
 
 .skeleton-line,
@@ -6955,18 +6955,26 @@ body:has(.login-overlay) {
   box-shadow: none;
 }
 
-/* ── Фон главной (список раздач): мягкие пятна + сетка точек ─────────────
+/* ── Фон приложения (все экраны после входа): мягкие пятна + сетка точек ─────────────
    Только CSS: слой закреплён (fixed), анимируется лишь transform, поэтому
    прокрутка его не перерисовывает. Пятна и сетка — под контентом (z-index -1).
    Карточки и таблица — белый 86 % (--glass-surface), всплывающие меню, модалки,
    липкие заголовки таблицы остаются на непрозрачном --surface / --surface-2.
-   Только светлая тема и только экран списка (body.page-mesh-on). */
+   Только светлая тема (body.page-mesh-on ставится в render()). */
 .page-mesh,
 .page-mesh-dots {
   display: none;
 }
 body.page-mesh-on {
   --glass-surface: rgba(255, 255, 255, 0.86);
+  /* Разделители над пейджером и подвалом: полупрозрачная тёмная линия
+     затемняет любой участок фона одинаково — на пятнах её не теряем. */
+  --mesh-line: rgba(24, 24, 27, 0.14);
+}
+/* Внутри приложения (не модалки и не окно входа — они вне #app) все
+   разделители и рамки берут ту же линию: на фоне с пятнами 1px #e4e4e7 тонет. */
+body.page-mesh-on #app {
+  --border: var(--mesh-line);
 }
 body.page-mesh-on .page-mesh,
 body.page-mesh-on .page-mesh-dots {
@@ -7046,6 +7054,10 @@ body.page-mesh-on .page-mesh-dots {
 }
 :root[data-theme="dark"] body.page-mesh-on {
   --glass-surface: initial;
+  --mesh-line: initial;
+}
+:root[data-theme="dark"] body.page-mesh-on #app {
+  --border: inherit;
 }
 :root[data-theme="dark"] .page-mesh,
 :root[data-theme="dark"] .page-mesh-dots {
@@ -7054,6 +7066,10 @@ body.page-mesh-on .page-mesh-dots {
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) body.page-mesh-on {
     --glass-surface: initial;
+    --mesh-line: initial;
+  }
+  :root:not([data-theme="light"]) body.page-mesh-on #app {
+    --border: inherit;
   }
   :root:not([data-theme="light"]) .page-mesh,
   :root:not([data-theme="light"]) .page-mesh-dots {

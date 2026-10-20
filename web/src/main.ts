@@ -11194,7 +11194,7 @@ function render(): void {
   document.body.classList.remove("layout-wide");
   const route = parseRoute();
   ensurePageMesh();
-  document.body.classList.toggle("page-mesh-on", route.view === "list");
+  document.body.classList.add("page-mesh-on");
   if (route.view === "list") mountListShell(root);
   else if (route.view === "settings") mountSettingsShell(root);
   else if (route.view === "cabinet") mountCabinetShell(root);
