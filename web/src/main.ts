@@ -4004,7 +4004,7 @@ function downloadChoiceButton(
     const panel = el("div", { className: "cselect-panel dl-choice", role: "menu" });
     const items: [string, string, boolean][] = [
       ["Напрямую", "с движка", false],
-      ["Через RU-VDS", "скачивание через удаленный прокси", true],
+      ["Через RU-VDS", "С удаленного прокси сервера", true],
     ];
     for (const [name, hint, relay] of items) {
       const it = el("div", { className: "cselect-option dl-choice__item", role: "menuitem", tabindex: "0" }, [
