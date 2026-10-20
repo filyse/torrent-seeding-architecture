@@ -6912,13 +6912,15 @@ body:has(.login-overlay) {
 
 /* «Приоритет» в таблице файлов: свой шеврон вместо системной стрелки
    (appearance: none + SVG в background, как у .select и по MDN), отступы
-   симметричны, ширина под самый длинный вариант («Не качать»). */
+   симметричны, ширина auto — по самому длинному варианту («Не качать»). */
 .file-table .file-prio {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
-  width: 7.25rem;
-  padding: 0 1.6rem 0 0.6rem;
+  /* auto = по самому длинному option («Не качать») у всех строк одинаково;
+     справа: 0.5rem до края + 0.85rem шеврон + 0.45rem до текста. */
+  width: auto;
+  padding: 0 1.8rem 0 0.6rem;
   text-align: left;
   color: var(--text);
   background-color: var(--surface);
