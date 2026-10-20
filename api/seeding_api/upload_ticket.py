@@ -166,15 +166,17 @@ def issue_download_ticket(
     path: str,
     uid: str,
     ttl_seconds: int | None = None,
+    kind: str = "dl",
 ) -> str:
+    """kind="dl" — один файл; "dz" — ZIP всей раздачи (path пустой)."""
     secret = download_ticket_secret()
     if not secret:
         raise RuntimeError("SEEDING_UPLOAD_TICKET_SECRET is not set")
     if ttl_seconds is None:
         ttl_seconds = download_ticket_ttl()
-    rel = normalize_download_path(path)
+    rel = normalize_download_path(path) if kind == "dl" else ""
     payload = {
-        "k": "dl",
+        "k": kind,
         "eng": engine_id,
         "tid": int(torrent_id),
         "path": rel,

@@ -1,5 +1,14 @@
 # Прямое скачивание файла с движка
 
+> **С 2026-10-21 (engine 1.6.18 / api 1.26.14 / web 1.55.0): ZIP всей раздачи.**
+> `POST /api/v1/download/zip-ticket {torrent_id}` → `url` на
+> `/{engine}/download/v1/zip?name=…&ticket=` (ticket `k=dz`, `path` пустой) или,
+> если в раздаче один файл, обычный `/download/v1/file`. Движок стримит ZIP
+> (STORE, ZIP64, UTF-8, data descriptor, точный `Content-Length`, без Range) из
+> готовых файлов; ≤ `SEEDING_DOWNLOAD_ZIP_PARALLEL` (2) потоков на движок, иначе 429.
+> Код: `engine/seeding_engine/zipstream.py`, тесты `tests/test_engine_download_zip.py`
+> (`ZIP64_BIG_TEST=1` — архив > 4 ГБ из sparse-файла). Пункты «zip — не в v1» ниже устарели.
+
 > Внедрено. Зеркало заливки: байты **не** идут через CT400.
 > Заливка: [`FILE_UPLOAD.md`](FILE_UPLOAD.md). Unchoke сюда не относится.
 > Скачать сам `.torrent` раздачи (метаинфо, кнопка в карточке): [`TORRENT_FILE.md`](TORRENT_FILE.md).

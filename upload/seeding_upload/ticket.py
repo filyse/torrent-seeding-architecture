@@ -104,7 +104,17 @@ def normalize_download_path(path: str) -> str:
     return "/".join(parts)
 
 
-def verify_download_ticket(token: str, secret: str, *, now: float | None = None) -> DownloadTicketClaims:
+ZIP_KIND = "dz"
+
+
+def verify_zip_ticket(token: str, secret: str, *, now: float | None = None) -> DownloadTicketClaims:
+    """Ticket на ZIP всей раздачи (k=dz, path пустой)."""
+    return verify_download_ticket(token, secret, now=now, kind=ZIP_KIND)
+
+
+def verify_download_ticket(
+    token: str, secret: str, *, now: float | None = None, kind: str = "dl"
+) -> DownloadTicketClaims:
     if not secret:
         raise TicketError("download ticket secret not configured")
     parts = token.split(".")
@@ -123,10 +133,10 @@ def verify_download_ticket(token: str, secret: str, *, now: float | None = None)
         data = json.loads(payload.decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
         raise TicketError("invalid ticket payload") from exc
-    if str(data.get("k", "")) != "dl":
-        raise TicketError("not a download ticket")
+    if str(data.get("k", "")) != kind:
+        raise TicketError("not a download ticket" if kind == "dl" else "not a zip ticket")
     try:
-        path = normalize_download_path(str(data["path"]))
+        path = normalize_download_path(str(data["path"])) if kind == "dl" else ""
         claims = DownloadTicketClaims(
             engine_id=str(data["eng"]),
             torrent_id=int(data["tid"]),
@@ -155,16 +165,17 @@ def issue_download_ticket(
     ttl_seconds: int = 300,
     jti: str | None = None,
     now: float | None = None,
+    kind: str = "dl",
 ) -> str:
     """Только для тестов / зеркало API (прод выдаёт api)."""
     import secrets as _secrets
 
     ts = time.time() if now is None else now
     payload = {
-        "k": "dl",
+        "k": kind,
         "eng": engine_id,
         "tid": int(torrent_id),
-        "path": normalize_download_path(path),
+        "path": normalize_download_path(path) if kind == "dl" else "",
         "uid": uid,
         "exp": int(ts + ttl_seconds),
         "jti": jti or _secrets.token_urlsafe(16),

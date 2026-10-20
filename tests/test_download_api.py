@@ -155,3 +155,39 @@ def test_download_disabled_404(monkeypatch, tmp_path):
         assert feat.json()["enabled"] is False
         r = client.post("/api/v1/download/ticket", json={"torrent_id": 1, "path": "a.bin"})
         assert r.status_code == 404
+
+
+def test_zip_ticket_single_and_multi(api_download):
+    with respx.mock(assert_all_called=False) as mock:
+        _wire(mock)
+        with TestClient(api_download.app) as client:
+            created = client.post(
+                "/api/v1/torrents",
+                json={
+                    "display_name": "Сериал 1",
+                    "save_path": "/data",
+                    "magnet_uri": "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                },
+            )
+            tid = created.json()["id"]
+            eng = created.json()["engine_id"]
+            one = client.post("/api/v1/download/zip-ticket", json={"torrent_id": tid})
+            assert one.status_code == 200, one.text
+            assert one.json()["kind"] == "file"
+            assert one.json()["url"].endswith(f"/{eng}/download/v1/file")
+
+            mock.get(url__regex=re.escape(ENGINE) + r"/internal/v1/torrents/\d+/files$").mock(
+                return_value=httpx.Response(
+                    200,
+                    json=[
+                        {"index": 0, "path": "S/a.mkv", "size": 10, "downloaded": 10},
+                        {"index": 1, "path": "S/b.mkv", "size": 10, "downloaded": 3},
+                    ],
+                )
+            )
+            many = client.post("/api/v1/download/zip-ticket", json={"torrent_id": tid})
+            body = many.json()
+            assert body["kind"] == "zip" and body["files"] == 1 and body["skipped"] == 1
+            assert body["filename"] == "Сериал 1.zip"
+            assert f"/{eng}/download/v1/zip?name=" in body["url"]
+            assert "/download/v1/zip?name=" in body["relay_url"]

@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
-from seeding_upload.ticket import TicketError, verify_download_ticket
+from seeding_upload.ticket import TicketError, verify_download_ticket, verify_zip_ticket
+
+from seeding_engine.zipstream import ZipEntry, ZipPlan
 
 log = logging.getLogger(__name__)
 
@@ -144,7 +147,133 @@ def build_download_router(
             headers=headers,
         )
 
+    zip_active = {"n": 0}
+
+    @router.api_route("/download/v1/zip", methods=["GET", "HEAD"])
+    async def download_zip(
+        request: Request,
+        ticket: str | None = Query(None),
+        name: str | None = Query(None, max_length=300),
+        authorization: str | None = Header(None),
+        x_download_ticket: str | None = Header(None, alias="X-Download-Ticket"),
+    ):
+        claims = _zip_claims(ticket, authorization, x_download_ticket)
+        rt = getattr(request.app.state, "torrent_runtime", None)
+        list_fn = getattr(rt, "list_files", None) if rt is not None else None
+        path_fn = getattr(rt, "content_file_path", None) if rt is not None else None
+        if list_fn is None or path_fn is None:
+            raise HTTPException(status_code=503, detail="download runtime unavailable")
+        entries = await _zip_entries(claims.torrent_id, list_fn, path_fn)
+        if not entries:
+            raise HTTPException(status_code=404, detail="no complete files to zip")
+        plan = ZipPlan(entries)
+        headers = {
+            "Content-Length": str(plan.total),
+            "Accept-Ranges": "none",
+            "Content-Disposition": _content_disposition(_zip_name(name, claims.torrent_id)),
+            "Cache-Control": "no-store",
+        }
+        if request.method == "HEAD":
+            return Response(status_code=200, headers=headers, media_type="application/zip")
+        # Не больше N ZIP-потоков на движок одновременно: чтение целиком с диска
+        # конкурирует с раздачей. Счётчик растёт только когда поток реально пошёл.
+        if zip_active["n"] >= _zip_max_parallel():
+            raise HTTPException(status_code=429, detail="too many zip downloads, try later")
+
+        async def body():
+            zip_active["n"] += 1
+            try:
+                async for part in plan.stream(_read_entry):
+                    yield part
+            except (asyncio.CancelledError, GeneratorExit):
+                log.info("zip download cancelled tid=%s", claims.torrent_id)
+                raise
+            except OSError as exc:
+                log.warning("zip download aborted tid=%s: %s", claims.torrent_id, exc)
+                raise
+            finally:
+                zip_active["n"] -= 1
+
+        return StreamingResponse(body(), status_code=200, media_type="application/zip", headers=headers)
+
+    def _zip_claims(ticket, authorization, x_ticket):
+        token = (ticket or "").strip() or (x_ticket or "").strip()
+        if not token and authorization and authorization.lower().startswith("bearer "):
+            token = authorization[7:].strip()
+        if not token:
+            raise HTTPException(status_code=401, detail="missing download ticket")
+        try:
+            claims = verify_zip_ticket(token, secret_fn())
+        except TicketError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        if expected_engine_id and claims.engine_id != expected_engine_id:
+            raise HTTPException(status_code=403, detail="ticket engine mismatch")
+        return claims
+
     return router
+
+
+def _zip_max_parallel() -> int:
+    try:
+        return max(1, int(os.getenv("SEEDING_DOWNLOAD_ZIP_PARALLEL", "2")))
+    except ValueError:
+        return 2
+
+
+_BAD_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+
+
+def _zip_name(name: str | None, torrent_id: int) -> str:
+    base = _BAD_NAME.sub("_", (name or "").strip()).strip(" .")[:200]
+    if base.lower().endswith(".zip"):
+        base = base[:-4]
+    return f"{base or f'torrent-{torrent_id}'}.zip"
+
+
+async def _zip_entries(torrent_id: int, list_fn, path_fn) -> list[ZipEntry]:
+    """Только готовые файлы (progress 100%, размер на диске = размер в раздаче)."""
+    files = await list_fn(torrent_id)
+    out: list[ZipEntry] = []
+    seen: set[str] = set()
+    for f in files:
+        rel = str(f.get("path") or "").replace("\\", "/")
+        size = int(f.get("size") or 0)
+        if not rel or int(f.get("downloaded") or 0) < size:
+            continue
+        try:
+            fp = await path_fn(torrent_id, rel)
+        except ValueError:
+            continue
+        if fp is None:
+            continue
+        fp = Path(fp)
+        try:
+            st = fp.stat()
+        except OSError:
+            continue
+        if not fp.is_file() or st.st_size != size:
+            continue
+        name = "/".join(p for p in rel.split("/") if p not in ("", ".", ".."))
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(ZipEntry(name=name, size=size, mtime=st.st_mtime, path=fp))
+    return out
+
+
+async def _read_entry(e: ZipEntry):
+    loop = asyncio.get_running_loop()
+    f = await loop.run_in_executor(None, open, e.path, "rb")
+    try:
+        remaining = e.size
+        while remaining > 0:
+            chunk = await loop.run_in_executor(None, f.read, min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+    finally:
+        f.close()
 
 
 def mount_download(app) -> bool:

@@ -71,3 +71,36 @@ export async function startFileDownload(
   }
   triggerBrowserDownload(href);
 }
+
+export type ZipTicketOut = {
+  ticket: string;
+  url: string;
+  relay_url?: string | null;
+  filename: string;
+  kind: "zip" | "file";
+  files: number;
+  skipped: number;
+  size: number;
+  expires_in: number;
+};
+
+/** Вся раздача: ZIP (STORE) стримит движок; раздача из одного файла — сам файл. */
+export async function startTorrentDownload(
+  deps: FileDownloadDeps,
+  torrentId: number,
+  viaRelay: boolean,
+): Promise<void> {
+  const t = await deps.fetchJson<ZipTicketOut>("/download/zip-ticket", {
+    method: "POST",
+    body: JSON.stringify({ torrent_id: torrentId }),
+  });
+  const href = downloadHref(t, viaRelay);
+  if (!href) {
+    deps.showToast(viaRelay ? "Релей не настроен" : "Нет URL скачивания", true);
+    return;
+  }
+  triggerBrowserDownload(href);
+  if (t.skipped > 0) {
+    deps.showToast(`В архив вошли готовые файлы: ${t.files}, пропущено недокачанных: ${t.skipped}`);
+  }
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -127,5 +128,88 @@ async def create_download_ticket(
         relay_url=f"{relay_base}/download/v1/file" if relay_base else None,
         filename=PurePosixPath(path).name,
         size=size,
+        expires_in=ttl,
+    )
+
+
+class ZipTicketIn(BaseModel):
+    torrent_id: int = Field(ge=1)
+
+
+class ZipTicketOut(BaseModel):
+    ticket: str
+    url: str
+    relay_url: str | None = None
+    filename: str
+    kind: str  # "zip" — архив раздачи; "file" — раздача из одного файла
+    files: int
+    skipped: int
+    size: int
+    expires_in: int
+
+
+def _file_ready(item: dict) -> bool:
+    size = int(item.get("size") or 0)
+    return int(item.get("downloaded") or 0) >= size
+
+
+@router.post("/download/zip-ticket", response_model=ZipTicketOut)
+async def create_zip_ticket(
+    body: ZipTicketIn,
+    session: DbSession,
+    pool: EnginePoolDep,
+    principal: Principal = Depends(require_auth),
+):
+    """Скачать раздачу целиком: ZIP (STORE) стримит сам движок; один файл — как есть."""
+    if not download_enabled():
+        raise HTTPException(status_code=404, detail="file download is disabled")
+    if not download_ticket_secret():
+        raise HTTPException(status_code=503, detail="download ticket secret not configured")
+    row = await TorrentRepository(session).get_by_id(body.torrent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="torrent not found")
+    engine_id = (row.engine_id or "").strip()
+    if not engine_id or pool.spec(engine_id) is None:
+        raise HTTPException(status_code=409, detail="torrent has no engine")
+    try:
+        files = await pool.client_for_row(row).list_files(body.torrent_id)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="engine unavailable") from exc
+    ready = [f for f in files if _file_ready(f)]
+    if not ready:
+        raise HTTPException(status_code=409, detail="no complete files yet")
+    direct = resolve_upload_base_url(engine_id, upload_base_urls())
+    if not direct:
+        raise HTTPException(status_code=503, detail=f"no download base URL for engine {engine_id}")
+    relay_base = resolve_upload_base_url(engine_id, upload_relay_base_urls())
+    ttl = download_ticket_ttl()
+    single = len(files) == 1
+    try:
+        if single:
+            path = normalize_download_path(str(ready[0].get("path") or ""))
+            token = issue_download_ticket(
+                engine_id=engine_id, torrent_id=body.torrent_id, path=path,
+                uid=principal.name, ttl_seconds=ttl,
+            )
+            suffix, filename, query = "/download/v1/file", PurePosixPath(path).name, ""
+        else:
+            token = issue_download_ticket(
+                engine_id=engine_id, torrent_id=body.torrent_id, path="",
+                uid=principal.name, ttl_seconds=ttl, kind="dz",
+            )
+            name = (row.display_name or "").strip() or f"torrent-{body.torrent_id}"
+            filename = f"{name}.zip"
+            suffix, query = "/download/v1/zip", f"?name={quote(name, safe='')}"
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return ZipTicketOut(
+        ticket=token,
+        url=f"{direct}{suffix}{query}",
+        relay_url=f"{relay_base}{suffix}{query}" if relay_base else None,
+        filename=filename,
+        kind="file" if single else "zip",
+        files=len(ready),
+        skipped=len(files) - len(ready),
+        size=sum(int(f.get("size") or 0) for f in ready),
         expires_in=ttl,
     )

@@ -3,6 +3,7 @@ import {
   fileIsComplete,
   loadDownloadFeatures,
   startFileDownload,
+  startTorrentDownload,
   type DownloadFeatures,
 } from "./fileDownload";
 import {
@@ -3981,6 +3982,29 @@ function buildFilesSpoiler(
     return empty;
   }
   const showDl = Boolean(canWrite() && download?.enabled);
+  if (showDl && files.length > 1) {
+    const anyReady = files.some((f) => fileIsComplete(f.progress));
+    const allRow = el("div", { className: "btn-row" });
+    const mk = (label: string, viaRelay: boolean, title: string) => {
+      const b = el("button", { type: "button", className: "btn btn--sm", title }, [label]) as HTMLButtonElement;
+      b.disabled = !anyReady;
+      if (!anyReady) b.title = "ни один файл ещё не скачан";
+      b.addEventListener("click", async () => {
+        b.disabled = true;
+        try {
+          await startTorrentDownload({ fetchJson, showToast }, torrentId, viaRelay);
+        } catch (e) {
+          showToast(e instanceof Error ? e.message : String(e), true);
+        } finally {
+          b.disabled = !anyReady;
+        }
+      });
+      return b;
+    };
+    allRow.append(mk("Скачать всё (ZIP)", false, "Все готовые файлы одним ZIP без сжатия, с папками"));
+    if (download?.relay_enabled) allRow.append(mk("ZIP через RU", true, "Скачать ZIP через RU-релей"));
+    inner.append(allRow);
+  }
   const table = el("table", { className: "peer-table file-table" });
   const headRow = el("tr");
   const labels = ["Файл", "Размер", "%", "Приоритет"];
@@ -7485,6 +7509,23 @@ async function loadDetail(
       title: "Скачать .torrent этой раздачи",
     }, ["Скачать торрент"]);
     const delBtn = el("button", { type: "button", className: "btn btn--danger" }, ["Удалить"]);
+    const downloadAllBtn = canWrite() && downloadFeatures?.enabled
+      ? (el("button", {
+          type: "button",
+          className: "btn",
+          title: "Скачать содержимое раздачи: несколько файлов — одним ZIP без сжатия, один файл — как есть",
+        }, ["Скачать"]) as HTMLButtonElement)
+      : null;
+    downloadAllBtn?.addEventListener("click", async () => {
+      downloadAllBtn.disabled = true;
+      try {
+        await startTorrentDownload({ fetchJson, showToast }, id, false);
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : String(e), true);
+      } finally {
+        downloadAllBtn.disabled = false;
+      }
+    });
 
     toggleBtn.addEventListener("click", async () => {
       toggleBtn.disabled = true;
@@ -7555,6 +7596,7 @@ async function loadDetail(
       toggleBtn,
       recheckBtn,
       reannounceBtn,
+      ...(downloadAllBtn ? [downloadAllBtn] : []),
       downloadTorrentBtn,
       el("span", { className: "detail-toolbar__spacer" }),
       delBtn,
