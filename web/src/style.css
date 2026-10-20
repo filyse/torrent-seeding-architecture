@@ -6863,3 +6863,25 @@ body:has(.login-overlay) {
   background: color-mix(in srgb, var(--muted, #888) 16%, transparent);
   animation: badge-pulse 1.4s ease-in-out infinite;
 }
+
+/* Меню выбора маршрута скачивания (поверх .cselect-panel). */
+.dl-choice .dl-choice__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: normal;
+}
+.dl-choice__name {
+  font-weight: 600;
+}
+.dl-choice__hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.dl-choice .dl-choice__item:focus-visible {
+  outline: none;
+  background: var(--surface-2);
+}
+.btn.cselect-active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}

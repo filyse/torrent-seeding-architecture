@@ -3968,6 +3968,107 @@ function buildPeersSpoiler(peers: TorrentPeerOut[], torrentId: number): HTMLDeta
   return d;
 }
 
+// —— Выбор маршрута скачивания: «Напрямую» / «Через RU-VDS» ——————————————
+// Один кнопка «Скачать»; если релей включён — по клику всплывает меню в стиле
+// выпадающих списков (.cselect-panel), иначе качаем сразу напрямую.
+let closeDlChoice: (() => void) | null = null;
+
+function downloadChoiceButton(
+  label: (string | Node)[],
+  className: string,
+  relayEnabled: boolean,
+  onPick: (viaRelay: boolean) => Promise<void>,
+  title?: string,
+): HTMLButtonElement {
+  const btn = el("button", { type: "button", className, title: title ?? "" }, label) as HTMLButtonElement;
+  const run = async (viaRelay: boolean) => {
+    btn.disabled = true;
+    try {
+      await onPick(viaRelay);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), true);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (!relayEnabled) {
+      void run(false);
+      return;
+    }
+    if (closeDlChoice) {
+      closeDlChoice();
+      return;
+    }
+    const panel = el("div", { className: "cselect-panel dl-choice", role: "menu" });
+    const items: [string, string, boolean][] = [
+      ["Напрямую", "seedbox2 — быстрее из дома и по LAN", false],
+      ["Через RU-VDS", "если seedbox2 недоступен или режется", true],
+    ];
+    for (const [name, hint, relay] of items) {
+      const it = el("div", { className: "cselect-option dl-choice__item", role: "menuitem", tabindex: "0" }, [
+        el("span", { className: "dl-choice__name" }, [name]),
+        el("span", { className: "dl-choice__hint" }, [hint]),
+      ]);
+      const pick = () => {
+        close();
+        void run(relay);
+      };
+      it.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        pick();
+      });
+      it.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          pick();
+        }
+      });
+      panel.append(it);
+    }
+    const r = btn.getBoundingClientRect();
+    panel.style.minWidth = `${Math.max(r.width, 220)}px`;
+    const below = window.innerHeight - r.bottom > 140;
+    // Кнопка в правой половине (колонка «Скачать» в таблице) — меню по правому краю.
+    if (r.left > window.innerWidth / 2) panel.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
+    else panel.style.left = `${r.left}px`;
+    if (below) panel.style.top = `${r.bottom + 4}px`;
+    else panel.style.bottom = `${window.innerHeight - r.top + 4}px`;
+    document.body.append(panel);
+    btn.classList.add("cselect-active");
+    (panel.firstElementChild as HTMLElement | null)?.focus();
+    const onDoc = (e: Event) => {
+      if (!panel.contains(e.target as Node) && e.target !== btn) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        close();
+        btn.focus();
+      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const list = Array.from(panel.children) as HTMLElement[];
+        const i = list.indexOf(document.activeElement as HTMLElement);
+        list[(i + (e.key === "ArrowDown" ? 1 : list.length - 1)) % list.length]?.focus();
+      }
+    };
+    function close() {
+      panel.remove();
+      btn.classList.remove("cselect-active");
+      document.removeEventListener("mousedown", onDoc, true);
+      document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("scroll", close, true);
+      closeDlChoice = null;
+    }
+    document.addEventListener("mousedown", onDoc, true);
+    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("scroll", close, true);
+    closeDlChoice = close;
+    openAnchorPanel(panel, below ? "top" : "bottom", null);
+  });
+  return btn;
+}
+
 function buildFilesSpoiler(
   files: TorrentFileOut[],
   torrentId: number,
@@ -3982,29 +4083,6 @@ function buildFilesSpoiler(
     return empty;
   }
   const showDl = Boolean(canWrite() && download?.enabled);
-  if (showDl && files.length > 1) {
-    const anyReady = files.some((f) => fileIsComplete(f.progress));
-    const allRow = el("div", { className: "btn-row" });
-    const mk = (label: string, viaRelay: boolean, title: string) => {
-      const b = el("button", { type: "button", className: "btn btn--sm", title }, [label]) as HTMLButtonElement;
-      b.disabled = !anyReady;
-      if (!anyReady) b.title = "ни один файл ещё не скачан";
-      b.addEventListener("click", async () => {
-        b.disabled = true;
-        try {
-          await startTorrentDownload({ fetchJson, showToast }, torrentId, viaRelay);
-        } catch (e) {
-          showToast(e instanceof Error ? e.message : String(e), true);
-        } finally {
-          b.disabled = !anyReady;
-        }
-      });
-      return b;
-    };
-    allRow.append(mk("Скачать всё (ZIP)", false, "Все готовые файлы одним ZIP без сжатия, с папками"));
-    if (download?.relay_enabled) allRow.append(mk("ZIP через RU", true, "Скачать ZIP через RU-релей"));
-    inner.append(allRow);
-  }
   const table = el("table", { className: "peer-table file-table" });
   const headRow = el("tr");
   const labels = ["Файл", "Размер", "%", "Приоритет"];
@@ -4043,51 +4121,15 @@ function buildFilesSpoiler(
     );
     if (showDl) {
       const ready = fileIsComplete(f.progress);
-      const dlBtn = el("button", { type: "button", className: "btn btn--sm" }, ["Скачать"]) as HTMLButtonElement;
+      const dlBtn = downloadChoiceButton(
+        ["Скачать"],
+        "btn btn--sm",
+        Boolean(download?.relay_enabled),
+        (via) => startFileDownload({ fetchJson, showToast }, torrentId, f.path, via),
+      );
       dlBtn.disabled = !ready;
       if (!ready) dlBtn.title = "файл ещё качается";
-      dlBtn.addEventListener("click", async () => {
-        if (!ready) return;
-        dlBtn.disabled = true;
-        try {
-          await startFileDownload(
-            { fetchJson, showToast },
-            torrentId,
-            f.path,
-            false,
-          );
-        } catch (e) {
-          showToast(e instanceof Error ? e.message : String(e), true);
-        } finally {
-          dlBtn.disabled = !ready;
-        }
-      });
       const cellKids: (string | Node)[] = [dlBtn];
-      if (download?.relay_enabled) {
-        const ru = el("button", {
-          type: "button",
-          className: "btn btn--sm",
-          title: "Скачать через RU-релей",
-        }, ["Через RU"]) as HTMLButtonElement;
-        ru.disabled = !ready;
-        ru.addEventListener("click", async () => {
-          if (!ready) return;
-          ru.disabled = true;
-          try {
-            await startFileDownload(
-              { fetchJson, showToast },
-              torrentId,
-              f.path,
-              true,
-            );
-          } catch (e) {
-            showToast(e instanceof Error ? e.message : String(e), true);
-          } finally {
-            ru.disabled = !ready;
-          }
-        });
-        cellKids.push(ru);
-      }
       row.append(
         el("td", { className: "file-table__dl" }, [
           el("div", { className: "file-table__dl-btns" }, cellKids),
@@ -7510,22 +7552,14 @@ async function loadDetail(
     }, ["Скачать торрент"]);
     const delBtn = el("button", { type: "button", className: "btn btn--danger" }, ["Удалить"]);
     const downloadAllBtn = canWrite() && downloadFeatures?.enabled
-      ? (el("button", {
-          type: "button",
-          className: "btn",
-          title: "Скачать содержимое раздачи: несколько файлов — одним ZIP без сжатия, один файл — как есть",
-        }, ["Скачать"]) as HTMLButtonElement)
+      ? downloadChoiceButton(
+          ["Скачать"],
+          "btn",
+          Boolean(downloadFeatures.relay_enabled),
+          (via) => startTorrentDownload({ fetchJson, showToast }, id, via),
+          "Скачать содержимое раздачи: несколько файлов — одним ZIP без сжатия, один файл — как есть",
+        )
       : null;
-    downloadAllBtn?.addEventListener("click", async () => {
-      downloadAllBtn.disabled = true;
-      try {
-        await startTorrentDownload({ fetchJson, showToast }, id, false);
-      } catch (e) {
-        showToast(e instanceof Error ? e.message : String(e), true);
-      } finally {
-        downloadAllBtn.disabled = false;
-      }
-    });
 
     toggleBtn.addEventListener("click", async () => {
       toggleBtn.disabled = true;
