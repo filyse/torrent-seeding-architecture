@@ -958,6 +958,12 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - Стенд: сценарии зависаний на «Истории» и «Всего отдано» — без зависаний.
 - Откат: `docker tag containerd-web:pre-1610 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
+## 7я29. web 1.62.0 — кнопка «‹ К списку раздач» вместо ссылки — 2026-10-21
+
+- CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1620` (= 1.61.0).
+- Проверено вживую: карточка раздачи, «Сеть», «Ферма», «Кабинет», «Настройки» (десктоп и телефон).
+- Откат: `docker tag containerd-web:pre-1620 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

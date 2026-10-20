@@ -2790,8 +2790,19 @@ function goNetwork(side: Exclude<NetworkSide, "history">, engineId?: string): vo
   pushPath(networkPath(side, engineId));
 }
 
-function navLink(label: string, onClick: () => void): HTMLElement {
-  const a = el("a", { href: "/", className: "back-link" }, [label]);
+const BACK_CHEVRON_SVG =
+  '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4l-4 4 4 4"/></svg>';
+
+/** Кнопка «‹ К списку раздач» в стиле кнопок пагинатора. */
+function backButton(label = "К списку раздач"): HTMLAnchorElement {
+  const a = el("a", { href: "/", className: "back-link" }) as HTMLAnchorElement;
+  a.innerHTML = BACK_CHEVRON_SVG;
+  a.append(el("span", {}, [label]));
+  return a;
+}
+
+function navLink(_label: string, onClick: () => void): HTMLElement {
+  const a = backButton();
   a.addEventListener("click", (ev) => {
     ev.preventDefault();
     onClick();
@@ -7896,7 +7907,7 @@ function mountDetailShell(root: HTMLElement, id: number): void {
   const metaEl = el("div", { className: "app-header__meta" });
   const main = el("div", { className: "detail-body" });
 
-  const back = el("a", { href: "/", className: "back-link" }, ["← Назад к списку"]);
+  const back = backButton();
   back.addEventListener("click", (ev) => {
     ev.preventDefault();
     setHashList();
