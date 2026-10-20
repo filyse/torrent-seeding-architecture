@@ -2,6 +2,7 @@
 
 > **Исторический снимок 2026-07-18.** Не читать как текущий прод.
 > С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
+> С 2026-10-21: engine 1.6.19 на a1–a3/b1–b6 (c1 — 1.6.17), api 1.26.14, web 1.55.0 (§7я7).
 > Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-10-06: web 1.54.2 / api 1.26.11 / queue 1.0.2 / engine 1.6.16, libtorrent 2.1.2 на всех девяти движках; с 2026-10-16 десятый — c1, §7я4).
 > Источник истины кода — `main` (web-шапка — после коммита этой спеки).
 
@@ -795,6 +796,36 @@ done
 `containerd-web:pre-1546`. Откат: `docker tag containerd-web:pre-1546
 containerd-web:latest` и `up -d --no-deps --no-build web`. Ветка hotfix не
 трогается (прод на main, §7я3).
+
+## 7я7. ZIP всей раздачи — engine 1.6.19 / api 1.26.14 / web 1.55.0 — 2026-10-21
+
+Спека — `FILE_DOWNLOAD.md` (врезка сверху). Edge и RU-релей не менялись
+(`/{engine}/download/v1/` уже общий).
+
+Выкат (Томск, UTC+7):
+- 00:51 a2 канарейка engine 1.6.18, затем a1, a3, b1–b6 по одному (~00:55), все
+  healthy, `RestartCount=0`;
+- ~01:00 CT400 `deploy-ct400.sh up -d --build api web` (api 1.26.14, web 1.55.0);
+- живой тест через `seedbox2.hw-s.ru/u/a/a2/…/zip`: раздача 3 файла 1.69 ГБ, 200,
+  `Content-Length` = размер, ~60 МБ/с, `zipfile.testzip()` чисто; через RU-релей
+  тот же ответ (~8 МБ/с, `Content-Length` релей не передаёт — прогресс без общего
+  размера);
+- найдено: после обрыва клиента слот ZIP не освобождался (429). Фикс engine 1.6.19
+  (`35c5005`): ~01:12 a1, проверено 4 обрыва подряд + повтор — 200; ~01:25 a2, a3,
+  b1–b6, все healthy, `RestartCount=0`.
+- **c1 (rudub3, .172) не обновлён** — там вход по паролю, ключа нет. До обновления
+  ZIP для раздач c1 отвечает 404 (одиночный файл раздачи работает). Обновить как
+  в §7я4: `docker build -f engine/Dockerfile -t seeding-engine-c:1619 .`, тег
+  `latest`, `up -d --no-build`.
+
+Бэкапы образов: a-host `seeding-engine-a:pre-1618`; b-host
+`seeding-engine-engine:pre-1618`, `seeding-engine-bN-engine:pre-1618`; CT400
+`containerd-api:pre-zip`, `containerd-web:pre-zip`. Схема БД не менялась.
+
+Откат: быстрый — `SEEDING_DOWNLOAD_ENABLED=0` на api (выключит и файлы, и ZIP).
+Полный: движок — `docker tag <образ>:pre-1618 <образ>:latest` и тот же
+`up -d --no-deps --no-build`; CT400 — `docker tag containerd-{api,web}:pre-zip
+containerd-{api,web}:latest`, `scripts/deploy-ct400.sh up -d --no-deps --no-build api web`.
 
 ## 7. Откат
 
