@@ -785,6 +785,30 @@ function stopListStream(): void {
   }
 }
 
+/** Рост столбиков от оси: 0.5 с ease-out, задержка по колонке ≤ 12 мс (вся волна < 0.8 с). */
+function growFarmBars(svg: SVGSVGElement): void {
+  const cols = svg.querySelectorAll<SVGGElement>(".upload-chart__col");
+  const step = cols.length > 1 ? Math.min(12, 300 / (cols.length - 1)) : 0;
+  // Опора — общая ось графика (низ самого нижнего столбика), а не низ каждого
+  // сегмента: стопка WAN1/WAN2 растёт целиком, сегменты не разъезжаются.
+  let base = 0;
+  for (const r of svg.querySelectorAll<SVGRectElement>("rect[data-key]")) {
+    base = Math.max(base, Number(r.getAttribute("y")) + Number(r.getAttribute("height")));
+  }
+  cols.forEach((col, i) => {
+    for (const r of col.querySelectorAll<SVGRectElement>("rect[data-key]")) {
+      r.style.transformBox = "view-box";
+      r.style.transformOrigin = `0px ${base}px`;
+      r.animate([{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], {
+        duration: 500,
+        delay: i * step,
+        easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+        fill: "backwards",
+      });
+    }
+  });
+}
+
 /* «История»: живое обновление. Сэмплы пишутся раз в 15 минут, сервер держит
    rollup 45 с — опрос раз в 30 с почти всегда попадает в его кэш. В скрытой
    вкладке опрос стоит; при возврате — сразу свежий запрос. Таймер — общий
@@ -10496,10 +10520,13 @@ function mountNetworkShell(root: HTMLElement): void {
       const svg = renderFarmChart(lastHistory);
       chartBox.append(svg);
       unbindFarmHover = bindFarmHover(svg, lastHistory, tip, fmtBytes);
-      const periodChanged = paintedPeriod !== null && paintedPeriod !== lastHistory.period;
+      // Первая отрисовка и смена периода — столбики «вырастают» от оси
+      // (transform scaleY, композитор; лёгкая волна слева направо). Фоновое
+      // обновление — только твин высоты на месте, без повторного роста.
+      const regrow = paintedPeriod === null || paintedPeriod !== lastHistory.period;
       paintedPeriod = lastHistory.period;
-      if (periodChanged) {
-        if (!reducedMotion()) svg.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
+      if (regrow) {
+        if (!reducedMotion()) growFarmBars(svg);
       } else {
         stopChartMorph = morphFarmChart(prevGeo, svg, (from, to, onUpdate) =>
           animate(from, to, { duration: 0.45, ease: "easeOut", onUpdate }),
@@ -10555,8 +10582,11 @@ function mountNetworkShell(root: HTMLElement): void {
     if (cached) {
       lastHistory = cached;
       if (side === "history") {
+        // Карточку «проявляем» только в первый раз; при смене периода
+        // анимируется лишь рост столбиков.
+        const first = paintedPeriod === null;
         paintHistory();
-        revealKids(historyHost);
+        if (first) revealKids(historyHost);
       } else paintCharts();
     } else if (side === "history" && !background) {
       if (!historyHost.querySelector(".sk--chart")) {
