@@ -6738,7 +6738,8 @@ body:has(.login-overlay) {
 
 .cabinet-pref__control .select,
 .cabinet-pref__control .label-combo {
-  width: min(16rem, 100%);
+  width: 12rem;
+  max-width: 100%;
 }
 
 .cabinet-pref__control .label-combo .select,
@@ -7095,4 +7096,94 @@ body.page-mesh-on .page-mesh-dots {
   .page-mesh i {
     animation: none;
   }
+}
+
+/* ── Настройки и кабинет: элементы управления в едином стиле 1.55.x ────────
+   Как «N / стр.» и кнопки пейджера: 28px, радиус 6px, 0.8rem, слева 0.6rem,
+   шеврон в 0.5rem от края, фон --surface-2 → --border при наведении,
+   transition 0.12s. Поведение не меняется — только вид. */
+:is(body[data-view="settings"], body[data-view="cabinet"]) #app .select {
+  box-sizing: border-box;
+  height: 1.75rem;
+  min-height: 1.75rem;
+  padding: 0 1.8rem 0 0.6rem;
+  font-size: 0.8rem;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background-color: var(--surface-2);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23808a99' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+:is(body[data-view="settings"], body[data-view="cabinet"]) #app .select:hover,
+:is(body[data-view="settings"], body[data-view="cabinet"]) #app .select:active {
+  background-color: var(--border);
+  border-color: var(--border);
+}
+:is(body[data-view="settings"], body[data-view="cabinet"]) #app .select:focus {
+  outline: none;
+}
+:is(body[data-view="settings"], body[data-view="cabinet"]) #app .select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+:is(body[data-view="settings"], body[data-view="cabinet"]) #app :is(input[type="text"], input[type="password"], input[type="number"], input[type="url"], input[type="search"], input[type="email"], input:not([type])) {
+  box-sizing: border-box;
+  height: 1.75rem;
+  min-height: 1.75rem;
+  padding: 0 0.6rem;
+  font-size: 0.8rem;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  transition: border-color 0.12s;
+}
+:is(body[data-view="settings"], body[data-view="cabinet"]) #app .btn {
+  box-sizing: border-box;
+  height: 1.75rem;
+  padding: 0 0.7rem;
+  font-size: 0.8rem;
+  border-radius: 6px;
+}
+:is(body[data-view="settings"], body[data-view="cabinet"]) #app .btn.list-controls__icon {
+  width: 1.75rem;
+  padding: 0;
+}
+/* Сегменты (Тема, Вид списка, Строк, Период): 28px, радиус 6px, рамка --border;
+   выбранный — как активная вкладка настроек: акцентный текст на лёгкой
+   акцентной подложке, а не сплошная синяя заливка. */
+.cabinet-seg.view-switch {
+  box-sizing: border-box;
+  height: 1.75rem;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.cabinet-seg .view-switch__btn {
+  height: 100%;
+  padding: 0 0.7rem;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  color: var(--text);
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.cabinet-seg .view-switch__btn:hover {
+  background: var(--border);
+}
+.cabinet-seg .view-switch__btn.is-active {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+  font-weight: 600;
+}
+.cabinet-seg .view-switch__btn.is-active:hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
 }

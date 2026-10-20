@@ -11195,6 +11195,8 @@ function render(): void {
   const route = parseRoute();
   ensurePageMesh();
   document.body.classList.add("page-mesh-on");
+  // Для стилей, общих только экранам настроек и кабинета.
+  document.body.dataset.view = route.view;
   if (route.view === "list") mountListShell(root);
   else if (route.view === "settings") mountSettingsShell(root);
   else if (route.view === "cabinet") mountCabinetShell(root);
