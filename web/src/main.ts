@@ -4003,8 +4003,8 @@ function downloadChoiceButton(
     }
     const panel = el("div", { className: "cselect-panel dl-choice", role: "menu" });
     const items: [string, string, boolean][] = [
-      ["Напрямую", "seedbox2 — быстрее из дома и по LAN", false],
-      ["Через RU-VDS", "если seedbox2 недоступен или режется", true],
+      ["Напрямую", "с движка", false],
+      ["Через RU-VDS", "скачивание через удаленный прокси", true],
     ];
     for (const [name, hint, relay] of items) {
       const it = el("div", { className: "cselect-option dl-choice__item", role: "menuitem", tabindex: "0" }, [
