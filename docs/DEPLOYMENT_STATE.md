@@ -2,7 +2,7 @@
 
 > **Исторический снимок 2026-07-18.** Не читать как текущий прод.
 > С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
-> С 2026-10-21: engine 1.6.19 на a1–a3/b1–b6 (c1 — 1.6.17), api 1.26.14, web 1.55.0 (§7я7).
+> С 2026-10-21: engine 1.6.19 на всех десяти движках, api 1.26.14, web 1.55.0 (§7я7).
 > Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-10-06: web 1.54.2 / api 1.26.11 / queue 1.0.2 / engine 1.6.16, libtorrent 2.1.2 на всех девяти движках; с 2026-10-16 десятый — c1, §7я4).
 > Источник истины кода — `main` (web-шапка — после коммита этой спеки).
 
@@ -813,12 +813,16 @@ containerd-web:latest` и `up -d --no-deps --no-build web`. Ветка hotfix н
 - найдено: после обрыва клиента слот ZIP не освобождался (429). Фикс engine 1.6.19
   (`35c5005`): ~01:12 a1, проверено 4 обрыва подряд + повтор — 200; ~01:25 a2, a3,
   b1–b6, все healthy, `RestartCount=0`.
-- **c1 (rudub3, .172) не обновлён** — там вход по паролю, ключа нет. До обновления
-  ZIP для раздач c1 отвечает 404 (одиночный файл раздачи работает). Обновить как
-  в §7я4: `docker build -f engine/Dockerfile -t seeding-engine-c:1619 .`, тег
-  `latest`, `up -d --no-build`.
+- ~01:33 c1 (rudub3, .172; вход по паролю из `seedbox.md`, docker без sudo):
+  `seeding-engine-c:pre-1618` ← старый latest, `git reset --hard origin/main`
+  (`201bb8e`), сборка `seeding-engine-c:1619` → `latest`, `docker compose -p
+  seeding-engines-c --env-file .env.engine.c -f docker-compose.c-host.yml up -d
+  --no-build`; c1 healthy 1.6.19, `RestartCount=0`; ftpd и upload-edge не
+  трогались, порты 21/50021/8081/8090 слушают. Живой ZIP через
+  `seedbox2.hw-s.ru/u/c/c1/…/zip`: 8 файлов, 5.9 ГБ (ZIP64), 200, `Content-Length`
+  совпал, ~39 МБ/с, `testzip()` чисто.
 
-Бэкапы образов: a-host `seeding-engine-a:pre-1618`; b-host
+Бэкапы образов: a-host `seeding-engine-a:pre-1618`; c-host `seeding-engine-c:pre-1618`; b-host
 `seeding-engine-engine:pre-1618`, `seeding-engine-bN-engine:pre-1618`; CT400
 `containerd-api:pre-zip`, `containerd-web:pre-zip`. Схема БД не менялась.
 
