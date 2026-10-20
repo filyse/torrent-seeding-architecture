@@ -7198,7 +7198,7 @@ body.page-mesh-on .page-mesh-dots {
 }
 .upload-chart--farm .upload-chart__axis,
 .upload-chart--farm .upload-chart__tick {
-  font-size: 9.5px;
+  font-size: 11px;
   fill: #a1a1aa;
 }
 .upload-chart--farm .upload-cell--bg {
@@ -7283,7 +7283,12 @@ body.page-mesh-on .page-mesh-dots {
   }
   .upload-history--page .upload-history__chart svg.upload-chart--farm {
     min-width: 600px;
-    height: auto;
-    aspect-ratio: 680 / 260;
   }
+}
+.upload-chart--farm .upload-cell {
+  transition: fill 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.upload-chart--farm .upload-chart__grid,
+.upload-chart--farm .upload-chart__guide {
+  shape-rendering: crispEdges;
 }

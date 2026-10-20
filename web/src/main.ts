@@ -21,8 +21,8 @@ import {
   HISTORY_PERIODS,
   avgUnit,
   bindFarmHover,
-  farmChartGeometry,
-  morphFarmChart,
+  farmCellFills,
+  morphFarmCells,
   bindMiniHover,
   bucketRangeLabel,
   bucketSampled,
@@ -785,6 +785,50 @@ function stopListStream(): void {
   }
 }
 
+/** Рисует график «Истории» по реальной ширине контейнера (CSS px) и DPR и
+ *  сдвигает сцену на дробную долю физического пикселя, чтобы края клеток
+ *  легли на пиксельную сетку экрана. */
+function mountFarmChart(box: HTMLElement, hist: UploadedHistory): SVGSVGElement {
+  const dpr = window.devicePixelRatio || 1;
+  const narrow = window.matchMedia("(max-width: 640px)").matches;
+  const w = Math.floor(box.clientWidth || 680);
+  const svg = renderFarmChart(hist, narrow ? Math.max(600, w) : w, dpr);
+  box.replaceChildren(svg);
+  alignFarmStage(svg);
+  return svg;
+}
+
+function alignFarmStage(svg: SVGSVGElement): void {
+  const st = svg.querySelector<SVGGElement>(".upload-chart__stage");
+  if (!st) return;
+  st.removeAttribute("transform");
+  const dpr = window.devicePixelRatio || 1;
+  const b = svg.getBoundingClientRect();
+  const fx = (b.left * dpr) % 1;
+  const fy = (b.top * dpr) % 1;
+  const dx = fx > 0.01 && fx < 0.99 ? -fx / dpr : 0;
+  const dy = fy > 0.01 && fy < 0.99 ? -fy / dpr : 0;
+  if (dx || dy) st.setAttribute("transform", `translate(${dx.toFixed(4)} ${dy.toFixed(4)})`);
+}
+
+let farmResizeObs: ResizeObserver | null = null;
+function watchFarmResize(box: HTMLElement, redraw: () => void): void {
+  if (typeof ResizeObserver !== "function") return;
+  farmResizeObs?.disconnect();
+  let lastW = box.clientWidth;
+  let lastDpr = window.devicePixelRatio;
+  let raf = 0;
+  farmResizeObs = new ResizeObserver(() => {
+    const w = box.clientWidth;
+    if (Math.abs(w - lastW) < 1 && window.devicePixelRatio === lastDpr) return;
+    lastW = w;
+    lastDpr = window.devicePixelRatio;
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(redraw);
+  });
+  farmResizeObs.observe(box);
+}
+
 /** «Квадратики» заполняются снизу вверх во всех колонках одновременно, 0.95 с
  *  (easeOutQuint, без отскока): анимируется один общий clipPath, клетки не
  *  искажаются. Один rAF на весь график. */
@@ -806,8 +850,10 @@ function growFarmBars(svg: SVGSVGElement): void {
   const H = Number(r.getAttribute("height"));
   const DUR = 950;
   const ease = (t: number) => 1 - Math.pow(1 - t, 5);
+  const d = Number(r.getAttribute("data-dpr")) || 1;
   const set = (p: number) => {
-    const y = base * (1 - p);
+    // Край раскрытия — на физическом пикселе; в конце клип = весь график.
+    const y = p >= 1 ? 0 : Math.round(base * (1 - p) * d) / d;
     r.setAttribute("y", y.toFixed(2));
     r.setAttribute("height", (H - y).toFixed(2));
   };
@@ -870,6 +916,8 @@ function startHistoryLive(refresh: () => Promise<void>): void {
 function clearViewPolls(): void {
   historyLiveRefresh = null;
   cancelFarmGrow();
+  farmResizeObs?.disconnect();
+  farmResizeObs = null;
   stopListStream();
   if (listPollTimer !== null) {
     clearTimeout(listPollTimer);
@@ -10532,13 +10580,15 @@ function mountNetworkShell(root: HTMLElement): void {
     const prevSvg = chartBox.querySelector<SVGSVGElement>("svg.upload-chart");
     stopChartMorph?.();
     stopChartMorph = null;
-    const prevGeo = farmChartGeometry(prevSvg);
+    const prevFills = farmCellFills(prevSvg);
     const prevScroll = chartBox.scrollLeft;
     chartBox.replaceChildren();
     tip.hidden = true;
+    // Ширину меряем на живом узле: карточку собираем до отрисовки графика.
+    historyHost.removeAttribute("aria-busy");
+    historyHost.replaceChildren(head, stats, legend, chartBox, facts, tip);
     if (lastHistory) {
-      const svg = renderFarmChart(lastHistory);
-      chartBox.append(svg);
+      const svg = mountFarmChart(chartBox, lastHistory);
       unbindFarmHover = bindFarmHover(svg, lastHistory, tip, fmtBytes);
       // Первая отрисовка и смена периода — «квадратики» заполняются снизу вверх
       // (общий clipPath, один rAF). Фоновое
@@ -10549,13 +10599,17 @@ function mountNetworkShell(root: HTMLElement): void {
       if (regrow) {
         if (!reducedMotion()) growFarmBars(svg);
       } else {
-        stopChartMorph = morphFarmChart(prevGeo, svg, (from, to, onUpdate) =>
-          animate(from, to, { duration: 0.6, ease: [0.22, 1, 0.36, 1], onUpdate }),
-        );
+        morphFarmCells(prevFills, svg);
       }
     }
-    historyHost.removeAttribute("aria-busy");
-    historyHost.replaceChildren(head, stats, legend, chartBox, facts, tip);
+    watchFarmResize(chartBox, () => {
+      if (!lastHistory || side !== "history") return;
+      cancelFarmGrow();
+      unbindFarmHover?.();
+      tip.hidden = true;
+      const svg = mountFarmChart(chartBox, lastHistory);
+      unbindFarmHover = bindFarmHover(svg, lastHistory, tip, fmtBytes);
+    });
     // Телефон: график листается — по умолчанию показываем свежие столбики справа.
     if (chartBox.scrollWidth > chartBox.clientWidth) {
       chartBox.scrollLeft = paintedFresh ? chartBox.scrollWidth : prevScroll;

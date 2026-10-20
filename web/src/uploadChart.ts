@@ -119,22 +119,27 @@ function bucketLabel(iso: string, period: HistoryPeriod, index: number, n: numbe
   return d.toLocaleDateString("ru-RU", { day: "numeric" });
 }
 
-export function renderFarmChart(history: UploadedHistory): SVGSVGElement {
-  const W = 680;
+/** Большой график «Истории»: колонки «квадратиков». Раскладка — в CSS-пикселях
+ *  реальной ширины (viewBox == размер элемента, без растяжения), каждая клетка
+ *  и зазор кратны физическому пикселю (round(n·dpr)/dpr) — края чёткие при
+ *  DPR 1 / 1.25 / 1.5 / 2. Клетки — отдельные rect (без <pattern>: он ресэмплится). */
+export function renderFarmChart(history: UploadedHistory, widthPx = 680, dpr = 1): SVGSVGElement {
+  const d = Math.max(1, dpr);
+  const snap = (v: number) => Math.round(v * d) / d;
+  const W = Math.max(320, Math.round(widthPx));
   const H = 260;
   const pad = { l: 46, r: 8, t: 10, b: 24 };
   const innerW = W - pad.l - pad.r;
   const n = Math.max(1, history.buckets.length);
-  // Сетка «квадратиков»: колонка = слот, клетка cs×cs, шаг по вертикали u.
-  // Клетки рисуются паттернами (по одному узлу на сегмент), не отдельными rect.
   const slot = innerW / n;
-  const cs = Math.min(12, slot * 0.8);
-  const vgap = Math.max(1.6, Math.min(2.6, slot - cs));
-  const u = cs + vgap;
+  const gap = snap(2);
+  const cs = Math.max(snap(4), snap(Math.min(14, slot - Math.max(2, slot * 0.2))));
+  const u = cs + gap;
   const baseY = H - pad.b;
-  const rows = Math.max(1, Math.floor((baseY - 10) / u));
+  const rows = Math.max(1, Math.floor((baseY - pad.t) / u));
   const innerH = rows * u;
-  pad.t = baseY - innerH;
+  const top = baseY - innerH;
+  const rx = cs >= 8 ? 2 : 1;
   const wanOrder = uniqueWans(history);
   const sampledVals = history.buckets.filter(bucketSampled).map((b) =>
     wanOrder.reduce((s, id) => s + (b.wan[id] ?? 0), 0),
@@ -143,10 +148,14 @@ export function renderFarmChart(history: UploadedHistory): SVGSVGElement {
 
   const root = svgEl("svg", {
     viewBox: `0 0 ${W} ${H}`,
+    width: W,
+    height: H,
     class: "upload-chart upload-chart--farm",
     role: "img",
     "aria-label": "Отдача фермы за период",
   }) as SVGSVGElement;
+  root.style.width = `${W}px`;
+  root.style.height = `${H}px`;
 
   const defs = svgEl("defs");
   const pat = svgEl("pattern", {
@@ -157,86 +166,9 @@ export function renderFarmChart(history: UploadedHistory): SVGSVGElement {
     patternTransform: "rotate(35)",
   });
   pat.appendChild(
-    svgEl("path", {
-      d: "M0 0 H5",
-      stroke: "currentColor",
-      "stroke-width": 1,
-      class: "upload-chart__hatch",
-    }),
+    svgEl("path", { d: "M0 0 H5", stroke: "currentColor", "stroke-width": 1, class: "upload-chart__hatch" }),
   );
   defs.appendChild(pat);
-  root.appendChild(defs);
-
-  const plot = svgEl("rect", {
-    x: pad.l,
-    y: pad.t,
-    width: innerW,
-    height: innerH,
-    class: "upload-chart__plot",
-  });
-  root.appendChild(plot);
-
-  for (const frac of [0, 0.5, 1]) {
-    const y = pad.t + innerH * (1 - frac);
-    root.appendChild(
-      svgEl("line", {
-        x1: pad.l,
-        x2: W - pad.r,
-        y1: y.toFixed(2),
-        y2: y.toFixed(2),
-        class: "upload-chart__grid",
-      }),
-    );
-    const lab = svgEl("text", {
-      x: pad.l - 6,
-      y: (y + 3).toFixed(2),
-      "text-anchor": "end",
-      class: "upload-chart__axis",
-    });
-    lab.textContent = frac === 0 ? "0" : fmtChartBytes(max * frac);
-    root.appendChild(lab);
-  }
-
-  // Паттерны клеток: плитка slot×u, клетка прижата к низу плитки (к оси).
-  const cellPat = (id: string, cls: string, fill?: string) => {
-    const p = svgEl("pattern", {
-      id,
-      x: pad.l.toFixed(2),
-      y: baseY.toFixed(2),
-      width: slot.toFixed(3),
-      height: u.toFixed(3),
-      patternUnits: "userSpaceOnUse",
-    });
-    const c: Record<string, string | number> = {
-      x: ((slot - cs) / 2).toFixed(2),
-      y: vgap.toFixed(2),
-      width: cs.toFixed(2),
-      height: cs.toFixed(2),
-      rx: Math.min(2.5, cs / 4).toFixed(2),
-      class: cls,
-    };
-    if (fill) c.fill = fill;
-    p.appendChild(svgEl("rect", c));
-    defs.appendChild(p);
-  };
-  cellPat("upload-cell-bg", "upload-cell upload-cell--bg");
-  cellPat("upload-cell-na", "upload-cell upload-cell--na", "url(#upload-unsampled)");
-  for (const id of ["wan1", "wan2"]) {
-    cellPat(`upload-cell-${id}`, `upload-cell upload-cell--${id}`);
-    cellPat(`upload-cell-${id}-lo`, `upload-cell upload-cell--${id} upload-cell--lo`);
-  }
-  // Фон: пустые клетки на всю сетку — один rect.
-  root.appendChild(
-    svgEl("rect", {
-      x: pad.l,
-      y: pad.t.toFixed(2),
-      width: innerW.toFixed(2),
-      height: innerH.toFixed(2),
-      fill: "url(#upload-cell-bg)",
-      class: "upload-chart__cells-bg",
-    }),
-  );
-  // Раскрытие снизу вверх при росте: общий clipPath, его высоту анимирует main.ts.
   const reveal = svgEl("clipPath", { id: "upload-cells-reveal" });
   reveal.appendChild(
     svgEl("rect", {
@@ -245,73 +177,90 @@ export function renderFarmChart(history: UploadedHistory): SVGSVGElement {
       width: W,
       height: H,
       class: "upload-chart__reveal",
-      "data-base": baseY.toFixed(2),
+      "data-base": String(baseY),
+      "data-dpr": String(d),
     }),
   );
   defs.appendChild(reveal);
+  root.appendChild(defs);
+  // Сдвиг на дробную долю физического пикселя (позиция svg на странице) — main.ts.
+  const stage = svgEl("g", { class: "upload-chart__stage" });
+  root.appendChild(stage);
+
+  for (const frac of [0, 0.5, 1]) {
+    const y = snap(top + innerH * (1 - frac)) + 0.5 / d;
+    stage.appendChild(
+      svgEl("line", { x1: pad.l, x2: W - pad.r, y1: y, y2: y, class: "upload-chart__grid" }),
+    );
+    const lab = svgEl("text", {
+      x: pad.l - 6,
+      y: (y + 3).toFixed(2),
+      "text-anchor": "end",
+      class: "upload-chart__axis",
+    });
+    lab.textContent = frac === 0 ? "0" : fmtChartBytes(max * frac);
+    stage.appendChild(lab);
+  }
+
   const colsWrap = svgEl("g", { class: "upload-chart__cols", "clip-path": "url(#upload-cells-reveal)" });
-  root.appendChild(colsWrap);
+  stage.appendChild(colsWrap);
 
   history.buckets.forEach((b, i) => {
     const x = pad.l + i * slot;
+    const cx = snap(x + (slot - cs) / 2);
     const g = svgEl("g", { class: "upload-chart__col", "data-bucket": String(i) });
     g.appendChild(
       svgEl("rect", {
-        x: x.toFixed(2),
-        y: pad.t.toFixed(2),
-        width: slot.toFixed(2),
-        height: innerH.toFixed(2),
+        x: snap(x),
+        y: top,
+        width: snap(slot),
+        height: innerH,
         class: "upload-chart__hit",
         "data-bucket": String(i),
       }),
     );
-    g.appendChild(
-      svgEl("line", {
-        x1: (x + slot / 2).toFixed(2),
-        x2: (x + slot / 2).toFixed(2),
-        y1: pad.t.toFixed(2),
-        y2: baseY.toFixed(2),
-        class: "upload-chart__guide",
-      }),
-    );
-    if (!bucketSampled(b)) {
-      g.appendChild(
-        svgEl("rect", {
-          x: x.toFixed(2),
-          y: pad.t.toFixed(2),
-          width: slot.toFixed(2),
-          height: innerH.toFixed(2),
-          fill: "url(#upload-cell-na)",
-          class: "upload-chart__empty",
-        }),
-      );
-    } else {
+    const gx = snap(cx + cs / 2) + 0.5 / d;
+    g.appendChild(svgEl("line", { x1: gx, x2: gx, y1: top, y2: baseY, class: "upload-chart__guide" }));
+
+    // Состояние каждой клетки снизу вверх.
+    const state: string[] = new Array(rows).fill("bg");
+    const sampled = bucketSampled(b);
+    if (!sampled) state.fill("na");
+    else {
       const stack = wanOrder.map((id) => ({ id, v: b.wan[id] ?? 0 })).filter((s) => s.v > 0);
       const total = stack.reduce((s, x2) => s + x2.v, 0);
-      const cells = total > 0 ? Math.max(1, Math.round((total / max) * rows)) : 0;
-      const lo = cells / rows < 0.35;
+      const cells = total > 0 ? Math.min(rows, Math.max(1, Math.round((total / max) * rows))) : 0;
+      const lo = cells / rows < 0.35 ? "-lo" : "";
       let used = 0;
       let acc = 0;
       stack.forEach((seg, si) => {
         acc += seg.v;
-        // Округляем накопленную сумму, чтобы сегменты точно сходились в cells.
         const upto = si === stack.length - 1 ? cells : Math.round((acc / total) * cells);
-        const k = Math.max(0, upto - used);
-        if (k === 0) return;
-        const pal = WAN_ORDER.includes(seg.id) && seg.id === "wan2" ? "wan2" : "wan1";
-        g.appendChild(
-          svgEl("rect", {
-            x: x.toFixed(2),
-            y: (baseY - upto * u).toFixed(2),
-            width: slot.toFixed(2),
-            height: (k * u).toFixed(2),
-            fill: `url(#upload-cell-${pal}${lo ? "-lo" : ""})`,
-            class: `upload-chart__bar upload-chart__bar--${seg.id}`,
-            "data-key": `${i}|${seg.id}`,
-          }),
-        );
-        used = upto;
+        const pal = seg.id === "wan2" ? "wan2" : "wan1";
+        for (let r = used; r < upto; r++) state[r] = pal + lo;
+        used = Math.max(used, upto);
       });
+    }
+    for (let r = 0; r < rows; r++) {
+      const s = state[r];
+      const cls =
+        s === "bg"
+          ? "upload-cell upload-cell--bg"
+          : s === "na"
+            ? "upload-cell upload-cell--na"
+            : `upload-cell upload-cell--${s.slice(0, 4)}${s.endsWith("-lo") ? " upload-cell--lo" : ""} upload-chart__bar`;
+      const attrs: Record<string, string | number> = {
+        x: cx,
+        y: baseY - (r + 1) * u + gap,
+        width: cs,
+        height: cs,
+        rx,
+        class: cls,
+        "data-cell": `${i}|${r}`,
+        "data-state": s,
+      };
+      if (s === "na") attrs.fill = "url(#upload-unsampled)";
+      g.appendChild(svgEl("rect", attrs));
     }
     colsWrap.appendChild(g);
 
@@ -328,6 +277,41 @@ export function renderFarmChart(history: UploadedHistory): SVGSVGElement {
     }
   });
   return root;
+}
+
+/** Снимок цветов клеток (для плавной смены при фоновом обновлении). */
+export function farmCellFills(svg: SVGSVGElement | null): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!svg) return out;
+  for (const r of svg.querySelectorAll<SVGRectElement>("rect[data-cell]")) {
+    out.set(r.dataset.cell!, `${r.dataset.state}|${getComputedStyle(r).fill}`);
+  }
+  return out;
+}
+
+/** Фоновое обновление: изменившиеся клетки плавно меняют цвет на месте (CSS
+ *  transition 0.6 с), геометрия не двигается — края остаются на пикселях. */
+export function morphFarmCells(prev: Map<string, string>, next: SVGSVGElement): void {
+  if (prev.size === 0) return;
+  if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const changed: SVGRectElement[] = [];
+  for (const r of next.querySelectorAll<SVGRectElement>("rect[data-cell]")) {
+    const old = prev.get(r.dataset.cell!);
+    if (!old) continue;
+    const bar = old.indexOf("|");
+    if (old.slice(0, bar) === r.dataset.state) continue;
+    r.style.transition = "none";
+    r.style.fill = old.slice(bar + 1);
+    changed.push(r);
+  }
+  if (!changed.length) return;
+  void next.getBoundingClientRect();
+  requestAnimationFrame(() => {
+    for (const r of changed) {
+      r.style.transition = "";
+      r.style.fill = "";
+    }
+  });
 }
 
 export function renderMiniChart(
