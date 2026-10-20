@@ -788,6 +788,14 @@ done
 
 Удаление контейнеров запланировано через неделю (~23.10). Не тронуты: FTP, движки,
 данные, DNS, пробросы на роутерах (WAN 8000/50000 на .171/.243 остаются), конфиги CT400/MPW.
+## 7я6. web 1.54.6 — строки выпадающих списков не сжимаются — 2026-10-21
+
+Только CT400, только `web`: `git fetch origin && git reset --hard origin/main`,
+`bash scripts/deploy-ct400.sh up -d --build web`. Бэкап образа —
+`containerd-web:pre-1546`. Откат: `docker tag containerd-web:pre-1546
+containerd-web:latest` и `up -d --no-deps --no-build web`. Ветка hotfix не
+трогается (прод на main, §7я3).
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

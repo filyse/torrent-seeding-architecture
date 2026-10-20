@@ -427,6 +427,9 @@ body.layout-wide #app {
 }
 
 .cselect-option {
+  /* Не сжимать строки во flex-колонке: при длинном списке панель скроллится,
+     а не урезает высоту строк (обрезка букв на 1080p). */
+  flex: 0 0 auto;
   padding: 0.45rem 0.6rem;
   font-size: 0.85rem;
   line-height: 1.25;
