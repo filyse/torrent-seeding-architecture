@@ -7187,3 +7187,103 @@ body.page-mesh-on .page-mesh-dots {
 .cabinet-seg .view-switch__btn.is-active:hover {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface));
 }
+
+/* ── «История»: столбики из «квадратиков» (только большой график, .upload-chart--farm).
+   Клетки — паттерны; пустые клетки бледно заполняют сетку до верха. */
+.upload-chart--farm .upload-chart__plot {
+  fill: transparent;
+}
+.upload-chart--farm .upload-chart__grid {
+  stroke: rgba(24, 24, 27, 0.06);
+}
+.upload-chart--farm .upload-chart__axis,
+.upload-chart--farm .upload-chart__tick {
+  font-size: 9.5px;
+  fill: #a1a1aa;
+}
+.upload-chart--farm .upload-cell--bg {
+  fill: rgba(24, 24, 27, 0.045);
+}
+.upload-chart--farm .upload-cell--na {
+  color: #a1a1aa;
+  opacity: 0.55;
+}
+.upload-chart--farm .upload-cell--wan1 {
+  fill: #3b82f6;
+}
+.upload-chart--farm .upload-cell--wan2 {
+  fill: #22c55e;
+}
+.upload-chart--farm .upload-cell--wan1.upload-cell--lo {
+  fill: #7fb0f8;
+}
+.upload-chart--farm .upload-cell--wan2.upload-cell--lo {
+  fill: #6fd99a;
+}
+.upload-chart--farm .upload-chart__empty {
+  opacity: 1;
+}
+.upload-chart--farm .upload-chart__hit {
+  fill: transparent;
+  transition: fill 0.15s ease;
+}
+.upload-chart--farm .upload-chart__col.is-hover .upload-chart__hit {
+  fill: rgba(37, 99, 235, 0.07);
+}
+.upload-chart--farm .upload-chart__guide {
+  stroke: #94a3b8;
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0;
+  pointer-events: none;
+}
+.upload-chart--farm .upload-chart__col.is-hover .upload-chart__guide {
+  opacity: 1;
+}
+.upload-chart--farm .upload-chart__bar {
+  opacity: 1;
+}
+.upload-history .upload-history__swatch--wan1::before,
+.upload-history .upload-tip__swatch--wan1 {
+  background: #2563eb;
+}
+.upload-history .upload-history__swatch--wan2::before,
+.upload-history .upload-tip__swatch--wan2 {
+  background: #16a34a;
+}
+.upload-history .upload-tip__swatch {
+  border-radius: 50%;
+}
+/* Подсказка — как наши всплывающие меню. */
+.upload-history .upload-tip {
+  border-radius: 10px;
+  border-color: rgba(24, 24, 27, 0.08);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1), 0 1px 2px rgba(15, 23, 42, 0.06);
+  padding: 0.55rem 0.75rem;
+}
+:root[data-theme="dark"] .upload-history .upload-tip {
+  background: var(--surface);
+  border-color: var(--border);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .upload-history .upload-tip {
+    background: var(--surface);
+    border-color: var(--border);
+  }
+}
+/* Телефон: клетки не мельче ~10px — график листается по горизонтали. */
+@media (max-width: 640px) {
+  .upload-history--page .upload-history__chart {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    height: auto;
+  }
+  .upload-history--page .upload-history__chart svg.upload-chart--farm {
+    min-width: 600px;
+    height: auto;
+    aspect-ratio: 680 / 260;
+  }
+}

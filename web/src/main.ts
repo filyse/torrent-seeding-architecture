@@ -785,43 +785,45 @@ function stopListStream(): void {
   }
 }
 
-/** Рост столбиков от оси: все одновременно, каждый до своей высоты, 0.95 с
- *  (easeOutQuint, без отскока). Сегменты WAN1/WAN2 одного столбика — вместе.
- *  Только transform (композитор), will-change — лишь на время анимации. */
-let farmGrowAnims: Animation[] = [];
+/** «Квадратики» заполняются снизу вверх во всех колонках одновременно, 0.95 с
+ *  (easeOutQuint, без отскока): анимируется один общий clipPath, клетки не
+ *  искажаются. Один rAF на весь график. */
+let farmGrowRaf = 0;
+let farmGrowEnd: (() => void) | null = null;
 
 function cancelFarmGrow(): void {
-  for (const a of farmGrowAnims) a.cancel();
-  farmGrowAnims = [];
+  if (farmGrowRaf) cancelAnimationFrame(farmGrowRaf);
+  farmGrowRaf = 0;
+  farmGrowEnd?.();
+  farmGrowEnd = null;
 }
 
 function growFarmBars(svg: SVGSVGElement): void {
   cancelFarmGrow();
-  const cols = svg.querySelectorAll<SVGGElement>(".upload-chart__col");
+  const r = svg.querySelector<SVGRectElement>(".upload-chart__reveal");
+  if (!r) return;
+  const base = Number(r.getAttribute("data-base"));
+  const H = Number(r.getAttribute("height"));
   const DUR = 950;
-  // Опора — общая ось графика (низ самого нижнего столбика): стопка растёт целиком.
-  let base = 0;
-  for (const r of svg.querySelectorAll<SVGRectElement>("rect[data-key]")) {
-    base = Math.max(base, Number(r.getAttribute("y")) + Number(r.getAttribute("height")));
-  }
-  cols.forEach((col) => {
-    for (const r of col.querySelectorAll<SVGRectElement>("rect[data-key]")) {
-      r.style.transformBox = "view-box";
-      r.style.transformOrigin = `0px ${base}px`;
-      r.style.willChange = "transform";
-      const a = r.animate([{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], {
-        duration: DUR,
-        easing: "cubic-bezier(0.22, 1, 0.36, 1)",
-        fill: "backwards",
-      });
-      const done = () => {
-        r.style.willChange = "";
-      };
-      a.onfinish = done;
-      a.oncancel = done;
-      farmGrowAnims.push(a);
+  const ease = (t: number) => 1 - Math.pow(1 - t, 5);
+  const set = (p: number) => {
+    const y = base * (1 - p);
+    r.setAttribute("y", y.toFixed(2));
+    r.setAttribute("height", (H - y).toFixed(2));
+  };
+  set(0);
+  const t0 = performance.now();
+  farmGrowEnd = () => set(1);
+  const step = (now: number) => {
+    const t = Math.min(1, (now - t0) / DUR);
+    set(ease(t));
+    if (t < 1) farmGrowRaf = requestAnimationFrame(step);
+    else {
+      farmGrowRaf = 0;
+      farmGrowEnd = null;
     }
-  });
+  };
+  farmGrowRaf = requestAnimationFrame(step);
 }
 
 /* «История»: живое обновление. Сэмплы пишутся раз в 15 минут, сервер держит
@@ -10403,6 +10405,7 @@ function mountNetworkShell(root: HTMLElement): void {
   let unbindFarmHover: (() => void) | null = null;
   let stopChartMorph: (() => void) | null = null;
   let paintedPeriod: HistoryPeriod | null = null;
+  let paintedFresh = false;
   const chartBox = el("div", { className: "upload-history__chart" });
   const tip = el("div", { className: "upload-tip" }) as HTMLElement;
   tip.hidden = true;
@@ -10530,16 +10533,18 @@ function mountNetworkShell(root: HTMLElement): void {
     stopChartMorph?.();
     stopChartMorph = null;
     const prevGeo = farmChartGeometry(prevSvg);
+    const prevScroll = chartBox.scrollLeft;
     chartBox.replaceChildren();
     tip.hidden = true;
     if (lastHistory) {
       const svg = renderFarmChart(lastHistory);
       chartBox.append(svg);
       unbindFarmHover = bindFarmHover(svg, lastHistory, tip, fmtBytes);
-      // Первая отрисовка и смена периода — столбики «вырастают» от оси
-      // (transform scaleY, композитор; лёгкая волна слева направо). Фоновое
+      // Первая отрисовка и смена периода — «квадратики» заполняются снизу вверх
+      // (общий clipPath, один rAF). Фоновое
       // обновление — только твин высоты на месте, без повторного роста.
       const regrow = paintedPeriod === null || paintedPeriod !== lastHistory.period;
+      paintedFresh = regrow;
       paintedPeriod = lastHistory.period;
       if (regrow) {
         if (!reducedMotion()) growFarmBars(svg);
@@ -10551,6 +10556,11 @@ function mountNetworkShell(root: HTMLElement): void {
     }
     historyHost.removeAttribute("aria-busy");
     historyHost.replaceChildren(head, stats, legend, chartBox, facts, tip);
+    // Телефон: график листается — по умолчанию показываем свежие столбики справа.
+    if (chartBox.scrollWidth > chartBox.clientWidth) {
+      chartBox.scrollLeft = paintedFresh ? chartBox.scrollWidth : prevScroll;
+    }
+    paintedFresh = false;
   };
 
   // Переключатель периода — тот же, что «Раздачи / Объём / …» в шапке: те же
