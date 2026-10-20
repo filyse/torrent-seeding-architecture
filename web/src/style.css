@@ -6968,3 +6968,27 @@ body:has(.login-overlay) {
 .list-pager .pager__info {
   font-size: 0.8rem;
 }
+
+/* «N / стр.» ведёт себя как кнопки « ‹ › » рядом (значения .btn): фон
+   --surface-2 → --border при наведении/нажатии/открытом списке, рамка --border,
+   текст --text, transition background/border-color 0.12s ease. Обводки фокуса нет:
+   Chrome считает клик по select «видимым фокусом», у кнопок после клика её нет. Шеврон тот же во всех состояниях. */
+.list-pager .pager__size {
+  background-color: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  box-shadow: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+.list-pager .pager__size:hover,
+.list-pager .pager__size:active,
+.list-pager .pager__size.cselect-active {
+  background-color: var(--border);
+  border-color: var(--border);
+  box-shadow: none;
+}
+.list-pager .pager__size:focus {
+  outline: none;
+  border-color: var(--border);
+  box-shadow: none;
+}
