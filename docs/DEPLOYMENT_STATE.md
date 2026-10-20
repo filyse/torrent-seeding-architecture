@@ -2,7 +2,7 @@
 
 > **Исторический снимок 2026-07-18.** Не читать как текущий прод.
 > С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
-> С 2026-10-21: engine 1.6.19 на всех десяти движках, api 1.26.15, web 1.58.0 (§7я7–§7я20).
+> С 2026-10-21: engine 1.6.19 на всех десяти движках, api 1.26.15, web 1.58.0 (§7я7–§7я22; 1.59.0 откатан).
 > Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-10-06: web 1.54.2 / api 1.26.11 / queue 1.0.2 / engine 1.6.16, libtorrent 2.1.2 на всех девяти движках; с 2026-10-16 десятый — c1, §7я4).
 > Источник истины кода — `main` (web-шапка — после коммита этой спеки).
 
@@ -915,6 +915,12 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 
 - CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1580`.
 - Откат: `docker tag containerd-web:pre-1580 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
+## 7я22. Откат web 1.59.0 → 1.58.0 — 2026-10-21
+
+- Причина: «История» зависала в скелетоне после автообновления; анимация графика неудачная.
+- CT400: `docker tag containerd-web:pre-1590 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`. Образ 1.59.0 сохранён как `containerd-web:bad-1590`.
+- `main`: коммит 1.59.0 ревертнут отдельным revert-коммитом (без force-push); запись §7я21 и строка CHANGELOG 1.59.0 ушли вместе с ревертом.
 
 ## 7. Откат
 
