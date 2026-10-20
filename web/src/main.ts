@@ -11175,6 +11175,15 @@ function mountSettingsShell(root: HTMLElement): void {
   });
 }
 
+/** Фон экрана списка: пятна и сетка точек (вся анимация — в CSS). Создаётся один раз. */
+function ensurePageMesh(): void {
+  if (document.querySelector(".page-mesh")) return;
+  const mesh = el("div", { className: "page-mesh", "aria-hidden": "true" });
+  for (let i = 0; i < 4; i++) mesh.append(document.createElement("i"));
+  const dots = el("div", { className: "page-mesh-dots", "aria-hidden": "true" });
+  document.body.prepend(mesh, dots);
+}
+
 function render(): void {
   releaseSearchOverlay();
   clearViewPolls();
@@ -11184,6 +11193,8 @@ function render(): void {
   // Широкая раскладка — только для табличного вида списка; на других экранах сбрасываем.
   document.body.classList.remove("layout-wide");
   const route = parseRoute();
+  ensurePageMesh();
+  document.body.classList.toggle("page-mesh-on", route.view === "list");
   if (route.view === "list") mountListShell(root);
   else if (route.view === "settings") mountSettingsShell(root);
   else if (route.view === "cabinet") mountCabinetShell(root);
