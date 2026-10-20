@@ -6885,3 +6885,27 @@ body:has(.login-overlay) {
 .btn.cselect-active {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
+
+/* Таблица файлов: «Приоритет» и «Скачать» — один размер (высота, радиус, шрифт),
+   все ячейки по центру строки. */
+.file-table td {
+  vertical-align: middle;
+}
+.file-table .file-prio,
+.file-table .file-table__dl .btn {
+  box-sizing: border-box;
+  height: 1.75rem;
+  min-height: 1.75rem;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  border-radius: 6px;
+  margin: 0;
+  vertical-align: middle;
+}
+.file-table .file-table__dl .btn {
+  padding: 0 0.7rem;
+}
+.file-table .file-prio {
+  padding: 0 0.4rem 0 0.6rem;
+}
