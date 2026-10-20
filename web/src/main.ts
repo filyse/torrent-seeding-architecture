@@ -44,7 +44,7 @@ import {
   unlockTickMinWidth,
   type TickFmt,
 } from "./countTick";
-import { loginPaths } from "./loginBg";
+import { loginStreams } from "./loginBg";
 import { animate } from "motion";
 import {
   applyPopProgress,
@@ -8868,7 +8868,7 @@ function showLoginDialog(): void {
   if (canDismiss) titleRow.append(modalCloseBtn(() => void dismiss()));
 
   const stage = el("aside", { className: "login-stage" }, [
-    loginPaths(),
+    loginStreams(),
     brandLockup(),
     el("div", { className: "login-stage__copy" }, [
       el("p", { className: "login-stage__lead" }, ["Кабинет раздач"]),

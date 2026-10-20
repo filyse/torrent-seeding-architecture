@@ -1,65 +1,142 @@
 /**
- * Фон входа — кривые из компонента Background Paths (Aceternity UI).
+ * Фон входа — «потоки данных»: бледные кривые сходятся в синий узел-реле
+ * и расходятся к пирам, по ним бегут точки с хвостами.
  *
- * Мерцание, которое не давалось несколько подходов, оказалось не ошибкой
- * анимации, а свойством картинки: штрих тоньше пикселя при движении каждый
- * кадр по-новому ложится на пиксельную сетку, и полоса таких штрихов дрожит.
- * Отсюда два решения. Рисунок неподвижен, движение отдано композитору — он
- * возит готовый растр и сглаживание не пересчитывает. А сами линии вдвое
- * реже и заметно толще: замер разницы соседних кадров упал с 5.3 до 1.1.
+ * Бережём процессор: кривые рисуются один раз во внеэкранный холст, кадров
+ * не больше 30 в секунду, DPR не выше 1.5, цикл стоит, пока вкладка скрыта
+ * или панель вне экрана. При prefers-reduced-motion — один неподвижный кадр.
  */
 
-const NS = "http://www.w3.org/2000/svg";
+const INK = "71,85,105";
+const BLUE = "37,99,235";
+const FRAME_MS = 32;
+const MAX_DPR = 1.5;
 
-/** У оригинала кривых вдвое больше, но там они и не движутся вместе с фоном. */
-const PATHS = 18;
+type P = { x: number; y: number };
+type Curve = [P, P, P, P];
+type Dot = { ci: number; u: number; sp: number; blue: boolean };
+type Scene = { curves: Curve[]; bg: HTMLCanvasElement; dots: Dot[]; hub: P };
 
-/** Шаг между кривыми против оригинального — чтобы веер занял ту же площадь. */
-const STEP = 2;
-
-/** Набор рисуется дважды, зеркально: position = 1 и -1. */
-function pathD(i: number, position: number): string {
-  const k = i * STEP;
-  const dx = k * 5 * position;
-  const dy = k * 6;
-  return (
-    `M-${380 - dx} -${189 + dy}` +
-    `C-${380 - dx} -${189 + dy} -${312 - dx} ${216 - dy} ${152 - dx} ${343 - dy}` +
-    `C${616 - dx} ${470 - dy} ${684 - dx} ${875 - dy} ${684 - dx} ${875 - dy}`
-  );
+function bez(q: Curve, u: number): [number, number] {
+  const v = 1 - u;
+  const a = v * v * v, b = 3 * v * v * u, c = 3 * v * u * u, d = u * u * u;
+  return [a * q[0].x + b * q[1].x + c * q[2].x + d * q[3].x, a * q[0].y + b * q[1].y + c * q[2].y + d * q[3].y];
 }
 
-/**
- * Ни фильтров, ни масок: фильтр считается в экранных координатах, поэтому
- * на каждом сдвиге слоя браузер пересобирал бы растр — и слой перестал бы
- * быть композитным. Проверено: с фильтром 24 кадра в секунду, без него 128.
- */
-function pathsLayer(position: number): SVGSVGElement {
-  const side = position > 0 ? "a" : "b";
-  const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("class", `login-paths__svg login-paths__svg--${side}`);
-  // Кадр по разлёту веера, а не по месту схождения: у оригинала (696×316)
-  // сходящийся хвост кривых остаётся за рамкой, там линии ложатся впритык.
-  svg.setAttribute("viewBox", "-380 -200 600 660");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("preserveAspectRatio", "xMidYMid slice");
-  for (let i = 0; i < PATHS; i++) {
-    const p = document.createElementNS(NS, "path");
-    p.setAttribute("d", pathD(i, position));
-    p.setAttribute("stroke", "currentColor");
-    // Толщина и плотность растут с номером — от этого у веера глубина.
-    p.setAttribute("stroke-width", (1.7 + i * 0.1).toFixed(2));
-    p.setAttribute("stroke-opacity", (0.055 + i * 0.033).toFixed(3));
-    svg.append(p);
+function buildScene(w: number, h: number, dpr: number): Scene {
+  const hub = { x: w * 0.62, y: h * 0.5 };
+  const curves: Curve[] = [];
+  for (let k = 0; k < 9; k++) {
+    const sy = h * (0.08 + k * 0.105);
+    curves.push([{ x: -20, y: sy }, { x: w * 0.3, y: sy }, { x: hub.x - w * 0.2, y: hub.y + (sy - hub.y) * 0.3 }, hub]);
   }
-  return svg;
+  for (let k = 0; k < 5; k++) {
+    const ey = h * (0.15 + k * 0.18);
+    curves.push([hub, { x: hub.x + w * 0.15, y: hub.y + (ey - hub.y) * 0.4 }, { x: w * 0.85, y: ey }, { x: w + 20, y: ey }]);
+  }
+  const bg = document.createElement("canvas");
+  bg.width = Math.max(1, Math.round(w * dpr));
+  bg.height = Math.max(1, Math.round(h * dpr));
+  const b = bg.getContext("2d")!;
+  b.scale(dpr, dpr);
+  b.lineWidth = 1;
+  b.strokeStyle = `rgba(${INK},.18)`;
+  for (const q of curves) {
+    b.beginPath();
+    b.moveTo(q[0].x, q[0].y);
+    b.bezierCurveTo(q[1].x, q[1].y, q[2].x, q[2].y, q[3].x, q[3].y);
+    b.stroke();
+  }
+  const dots: Dot[] = [];
+  curves.forEach((_, ci) => {
+    for (let m = 0; m < 4; m++) dots.push({ ci, u: Math.random(), sp: 0.12 + Math.random() * 0.12, blue: Math.random() < 0.3 });
+  });
+  return { curves, bg, dots, hub };
 }
 
-/** Два зеркальных набора кривых на всю левую колонку. */
-export function loginPaths(): HTMLElement {
+function draw(c: CanvasRenderingContext2D, w: number, h: number, s: Scene, dt: number, t: number): void {
+  c.clearRect(0, 0, w, h);
+  c.drawImage(s.bg, 0, 0, w, h);
+  for (const d of s.dots) {
+    d.u = (d.u + d.sp * dt) % 1;
+    const q = s.curves[d.ci];
+    for (let k = 0; k < 6; k++) {
+      const [x, y] = bez(q, Math.max(0, d.u - k * 0.008));
+      c.fillStyle = d.blue ? `rgba(${BLUE},${0.8 - k * 0.13})` : `rgba(${INK},${0.5 - k * 0.08})`;
+      c.beginPath();
+      c.arc(x, y, (d.blue ? 2 : 1.5) - k * 0.2, 0, 7);
+      c.fill();
+    }
+  }
+  const r = 6 + 2 * Math.sin(t * 2);
+  c.strokeStyle = `rgba(${BLUE},.35)`;
+  c.lineWidth = 1;
+  c.beginPath();
+  c.arc(s.hub.x, s.hub.y, r + 8, 0, 7);
+  c.stroke();
+  c.fillStyle = `rgb(${BLUE})`;
+  c.beginPath();
+  c.arc(s.hub.x, s.hub.y, 4, 0, 7);
+  c.fill();
+}
+
+export function loginStreams(): HTMLElement {
   const wrap = document.createElement("div");
-  wrap.className = "login-paths";
+  wrap.className = "login-streams";
   wrap.setAttribute("aria-hidden", "true");
-  wrap.append(pathsLayer(1), pathsLayer(-1));
+  const canvas = document.createElement("canvas");
+  wrap.append(canvas);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return wrap;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let w = 0, h = 0, raf = 0, last = 0, t = 0, running = false, onScreen = true;
+  let scene: Scene | null = null;
+
+  const frame = (ts: number) => {
+    if (!wrap.isConnected) return stop(true);
+    raf = requestAnimationFrame(frame);
+    if (ts - last < FRAME_MS) return;
+    const dt = Math.min((ts - last) / 1000, 0.1);
+    last = ts;
+    t += dt;
+    if (scene) draw(ctx, w, h, scene, dt, t);
+  };
+  function go(): void {
+    if (running || reduce || document.hidden || !onScreen || !scene) return;
+    running = true;
+    last = performance.now();
+    raf = requestAnimationFrame(frame);
+  }
+  function stop(teardown = false): void {
+    running = false;
+    cancelAnimationFrame(raf);
+    if (teardown) {
+      io.disconnect();
+      ro.disconnect();
+      document.removeEventListener("visibilitychange", onVis);
+    }
+  }
+  const onVis = () => (document.hidden ? stop() : go());
+  function resize(): void {
+    const r = canvas.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+    w = r.width;
+    h = r.height;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+    scene = buildScene(w, h, dpr);
+    draw(ctx!, w, h, scene, 0, t);
+    go();
+  }
+  const io = new IntersectionObserver((e) => {
+    onScreen = e[e.length - 1].isIntersecting;
+    onScreen ? go() : stop();
+  });
+  const ro = new ResizeObserver(resize);
+  io.observe(canvas);
+  ro.observe(canvas);
+  document.addEventListener("visibilitychange", onVis);
   return wrap;
 }

@@ -4791,65 +4791,28 @@ body:has(.login-overlay) {
   position: relative;
   z-index: 1;
 }
-.login-paths {
+.login-streams {
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
-  isolation: isolate;
-  contain: paint;
-  color: var(--text);
-  opacity: 0.42;
-  transform: translateZ(0);
-  animation: login-paths-in 1.6s ease-out both;
+  contain: strict;
+  animation: login-streams-in 1.2s ease-out both;
 }
-@keyframes login-paths-in {
+@keyframes login-streams-in {
   from {
     opacity: 0;
   }
   to {
-    opacity: 0.42;
+    opacity: 1;
   }
 }
-/* `will-change` обязателен: без него сдвиг слоя заново растрирует все дуги
-   каждый кадр — это и дорого, и пересчитывает сглаживание. Со своим слоем
-   композитор возит уже готовую картинку. Смещение только параллельное:
-   от масштаба или поворота растр пришлось бы пересобирать. */
-.login-paths__svg {
+.login-streams canvas {
   position: absolute;
-  top: -12%;
-  left: -16%;
-  width: 136%;
-  height: 128%;
-  will-change: transform;
-  animation: login-drift-a 34s ease-in-out infinite alternate;
-}
-.login-paths__svg--b {
-  animation-name: login-drift-b;
-  animation-duration: 44s;
-}
-/* Слои едут навстречу: рисунок пересечений медленно меняется. Скорость
-   заодно задаёт заметность дрожания — оно ей прямо пропорционально. */
-@keyframes login-drift-a {
-  from {
-    transform: translate3d(-2.6%, 1.9%, 0);
-  }
-  to {
-    transform: translate3d(2.6%, -1.9%, 0);
-  }
-}
-@keyframes login-drift-b {
-  from {
-    transform: translate3d(2.4%, -2.1%, 0);
-  }
-  to {
-    transform: translate3d(-2.4%, 2.1%, 0);
-  }
-}
-.login-paths path {
-  fill: none;
-  shape-rendering: geometricPrecision;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 .login-panel {
   position: relative;
@@ -5041,8 +5004,7 @@ body:has(.login-overlay) {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .login-paths,
-  .login-paths__svg {
+  .login-streams {
     animation: none;
   }
 }
