@@ -2,7 +2,7 @@
 
 > **Исторический снимок 2026-07-18.** Не читать как текущий прод.
 > С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
-> С 2026-10-21: engine 1.6.19 на всех десяти движках, api 1.26.14, web 1.55.0 (§7я7).
+> С 2026-10-21: engine 1.6.19 на всех десяти движках, api 1.26.14, web 1.55.3 (§7я7, §7я8).
 > Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-10-06: web 1.54.2 / api 1.26.11 / queue 1.0.2 / engine 1.6.16, libtorrent 2.1.2 на всех девяти движках; с 2026-10-16 десятый — c1, §7я4).
 > Источник истины кода — `main` (web-шапка — после коммита этой спеки).
 
@@ -830,6 +830,21 @@ containerd-web:latest` и `up -d --no-deps --no-build web`. Ветка hotfix н
 Полный: движок — `docker tag <образ>:pre-1618 <образ>:latest` и тот же
 `up -d --no-deps --no-build`; CT400 — `docker tag containerd-{api,web}:pre-zip
 containerd-{api,web}:latest`, `scripts/deploy-ct400.sh up -d --no-deps --no-build api web`.
+
+## 7я8. Меню «Напрямую / Через RU-VDS» — web 1.55.3 — 2026-10-21
+
+Только CT400, только `web`. ~01:52 web 1.55.1 (`bf5c143`: одна кнопка «Скачать» с
+меню, «Скачать всё (ZIP)» над файлами убрана), ~01:55 1.55.2 (`b958799`, подписи),
+~02:00 1.55.3 (`203e3ac`, финальная подпись RU). Подписи: «Напрямую» — «с движка»,
+«Через RU-VDS» — «С удаленного прокси сервера».
+
+Проверка: `seedbox2.hw-s.ru` 200, в бандле 1.55.3 и обе подписи. Маршруты (a1,
+раздача 3 файла): ZIP напрямую 200 + `Content-Length`, ZIP через RU 200, файл
+напрямую 200 + `Content-Length`, файл через RU 200; все обрывались через 3 с.
+
+Бэкап: `containerd-web:pre-1551` (web 1.55.0). Откат: `docker tag
+containerd-web:pre-1551 containerd-web:latest`,
+`scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
 ## 7. Откат
 
