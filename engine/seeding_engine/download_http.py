@@ -180,21 +180,17 @@ def build_download_router(
         if zip_active["n"] >= _zip_max_parallel():
             raise HTTPException(status_code=429, detail="too many zip downloads, try later")
 
+        tid = claims.torrent_id
+
         async def body():
-            zip_active["n"] += 1
             try:
                 async for part in plan.stream(_read_entry):
                     yield part
-            except (asyncio.CancelledError, GeneratorExit):
-                log.info("zip download cancelled tid=%s", claims.torrent_id)
-                raise
             except OSError as exc:
-                log.warning("zip download aborted tid=%s: %s", claims.torrent_id, exc)
+                log.warning("zip download aborted tid=%s: %s", tid, exc)
                 raise
-            finally:
-                zip_active["n"] -= 1
 
-        return StreamingResponse(body(), status_code=200, media_type="application/zip", headers=headers)
+        return _CountedStream(zip_active, tid, body(), status_code=200, media_type="application/zip", headers=headers)
 
     def _zip_claims(ticket, authorization, x_ticket):
         token = (ticket or "").strip() or (x_ticket or "").strip()
@@ -211,6 +207,31 @@ def build_download_router(
         return claims
 
     return router
+
+
+class _CountedStream(StreamingResponse):
+    """Счётчик активных ZIP-потоков: +1 на старте отдачи, −1 в finally вокруг всей
+    отдачи. Генератор при обрыве клиента Starlette не закрывает явно, поэтому
+    считаем здесь, а не в finally генератора."""
+
+    def __init__(self, counter: dict, tid: int, content, **kw):
+        super().__init__(content, **kw)
+        self._counter = counter
+        self._tid = tid
+
+    async def __call__(self, scope, receive, send):
+        self._counter["n"] += 1
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._counter["n"] -= 1
+            aclose = getattr(self.body_iterator, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:  # noqa: BLE001
+                    pass
+            log.info("zip stream closed tid=%s active=%s", self._tid, self._counter["n"])
 
 
 def _zip_max_parallel() -> int:

@@ -147,3 +147,13 @@ def test_zip64_sparse_big(tmp_path: Path):
     with z.open("R/большой.bin") as f:
         f.seek(4500 * 1024 * 1024 - 4)
         assert f.read() == b"tail"
+
+
+def test_zip_slots_released(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SEEDING_DOWNLOAD_ZIP_PARALLEL", "1")
+    client = _setup(tmp_path)
+    for _ in range(3):
+        assert client.get("/download/v1/zip", params={"ticket": _tok()}).status_code == 200
+    with client.stream("GET", "/download/v1/zip", params={"ticket": _tok()}) as r:
+        next(r.iter_bytes())  # обрыв посреди потока
+    assert client.get("/download/v1/zip", params={"ticket": _tok()}).status_code == 200
