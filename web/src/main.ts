@@ -396,11 +396,22 @@ let detailAbort: AbortController | null = null;
 let detailWsOff: (() => void) | null = null;
 let listLoadGeneration = 0;
 let lastListItems: TorrentOut[] = [];
-const PAGE_SIZES = [20, 50, 100] as const;
+const PAGE_SIZES = [25, 50, 100, 250] as const;
+
+/** Сохранённый размер страницы не из списка (старые 20/200 и т.п.) — ближайший допустимый. */
+function nearestPageSize(v: number): number {
+  if (!Number.isFinite(v) || v <= 0) return 50;
+  let best: number = PAGE_SIZES[0];
+  for (const n of PAGE_SIZES) if (Math.abs(n - v) < Math.abs(best - v)) best = n;
+  return best;
+}
 let listPage = 0;
 let listPageSize: number = ((): number => {
-  const v = parseInt(lsGet("ui.pageSize") || "50", 10);
-  return (PAGE_SIZES as readonly number[]).includes(v) ? v : 50;
+  const raw = lsGet("ui.pageSize");
+  if (!raw) return 50;
+  const v = nearestPageSize(parseInt(raw, 10));
+  if (String(v) !== raw) lsSet("ui.pageSize", String(v));
+  return v;
 })();
 let listTotal = 0;
 let pagerHost: HTMLElement | null = null;

@@ -2,7 +2,7 @@
 
 > **Исторический снимок 2026-07-18.** Не читать как текущий прод.
 > С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
-> С 2026-10-21: engine 1.6.19 на всех десяти движках, api 1.26.14, web 1.55.8 (§7я7–§7я13).
+> С 2026-10-21: engine 1.6.19 на всех десяти движках, api 1.26.15, web 1.55.9 (§7я7–§7я14).
 > Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-10-06: web 1.54.2 / api 1.26.11 / queue 1.0.2 / engine 1.6.16, libtorrent 2.1.2 на всех девяти движках; с 2026-10-16 десятый — c1, §7я4).
 > Источник истины кода — `main` (web-шапка — после коммита этой спеки).
 
@@ -875,6 +875,13 @@ containerd-web:pre-1551 containerd-web:latest`,
 Только CT400, только `web`, только CSS. Бэкап `containerd-web:pre-1558` (web 1.55.7).
 Откат: `docker tag containerd-web:pre-1558 containerd-web:latest`,
 `scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
+## 7я14. api 1.26.15 / web 1.55.9 — 25/50/100/250 на страницу — 2026-10-21
+
+CT400: `api` и `web`. Бэкапы `containerd-api:pre-12615` (api 1.26.14),
+`containerd-web:pre-1559` (web 1.55.8). Откат: `docker tag containerd-api:pre-12615
+containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:latest`,
+`scripts/deploy-ct400.sh up -d --no-deps --no-build api web`.
 
 ## 7. Откат
 
