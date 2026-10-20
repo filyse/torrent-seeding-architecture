@@ -6997,7 +6997,7 @@ body.page-mesh-on .page-mesh-dots {
   z-index: -1;
   pointer-events: none;
   overflow: hidden;
-  filter: blur(50px);
+  filter: blur(34px);
   contain: strict;
 }
 .page-mesh i {
@@ -7007,34 +7007,34 @@ body.page-mesh-on .page-mesh-dots {
   backface-visibility: hidden;
 }
 .page-mesh i:nth-child(1) {
-  width: 48vw;
-  height: 48vw;
-  left: -4vw;
-  top: -6vw;
+  width: 32vw;
+  height: 32vw;
+  left: 4vw;
+  top: 2vw;
   background: radial-gradient(circle, rgba(37, 99, 235, 0.17), transparent 68%);
   animation: page-mesh-1 38s ease-in-out infinite alternate;
 }
 .page-mesh i:nth-child(2) {
-  width: 54vw;
-  height: 54vw;
-  right: -10vw;
-  bottom: -14vw;
+  width: 36vw;
+  height: 36vw;
+  right: 1vw;
+  bottom: -5vw;
   background: radial-gradient(circle, rgba(148, 163, 184, 0.33), transparent 68%);
   animation: page-mesh-2 46s ease-in-out infinite alternate;
 }
 .page-mesh i:nth-child(3) {
-  width: 40vw;
-  height: 40vw;
-  right: 4vw;
-  top: 2vw;
+  width: 27vw;
+  height: 27vw;
+  right: 10.5vw;
+  top: 8.5vw;
   background: radial-gradient(circle, rgba(96, 165, 250, 0.15), transparent 68%);
   animation: page-mesh-3 42s ease-in-out infinite alternate;
 }
 .page-mesh i:nth-child(4) {
-  width: 44vw;
-  height: 44vw;
-  left: 6vw;
-  bottom: -8vw;
+  width: 29vw;
+  height: 29vw;
+  left: 13.5vw;
+  bottom: -0.5vw;
   background: radial-gradient(circle, rgba(203, 213, 225, 0.42), transparent 68%);
   animation: page-mesh-1 52s ease-in-out infinite alternate-reverse;
 }
