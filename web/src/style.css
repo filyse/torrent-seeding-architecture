@@ -6936,3 +6936,35 @@ body:has(.login-overlay) {
 .file-table .file-prio::-ms-expand {
   display: none;
 }
+
+/* Пейджер списка: «N / стр.» — как «Приоритет» в таблице файлов (28px, радиус 6px,
+   0.8rem, слева 0.6rem, тот же шеврон в 0.5rem от края, ширина по самому длинному
+   варианту); кнопки « ‹ › » той же высоты. */
+.list-pager .pager__size {
+  box-sizing: border-box;
+  height: 1.75rem;
+  min-height: 1.75rem;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0 1.8rem 0 0.6rem;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  border-radius: 6px;
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23808a99' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+  background-position: right 0.5rem center;
+  background-size: 0.85rem;
+}
+.list-pager .pager__btn {
+  box-sizing: border-box;
+  height: 1.75rem;
+  min-width: 1.75rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+.list-pager .pager__info {
+  font-size: 0.8rem;
+}
