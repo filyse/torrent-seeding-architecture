@@ -785,26 +785,41 @@ function stopListStream(): void {
   }
 }
 
-/** Рост столбиков от оси: 0.5 с ease-out, задержка по колонке ≤ 12 мс (вся волна < 0.8 с). */
+/** Рост столбиков от оси: все одновременно, каждый до своей высоты, 0.95 с
+ *  (easeOutQuint, без отскока). Сегменты WAN1/WAN2 одного столбика — вместе.
+ *  Только transform (композитор), will-change — лишь на время анимации. */
+let farmGrowAnims: Animation[] = [];
+
+function cancelFarmGrow(): void {
+  for (const a of farmGrowAnims) a.cancel();
+  farmGrowAnims = [];
+}
+
 function growFarmBars(svg: SVGSVGElement): void {
+  cancelFarmGrow();
   const cols = svg.querySelectorAll<SVGGElement>(".upload-chart__col");
-  const step = cols.length > 1 ? Math.min(12, 300 / (cols.length - 1)) : 0;
-  // Опора — общая ось графика (низ самого нижнего столбика), а не низ каждого
-  // сегмента: стопка WAN1/WAN2 растёт целиком, сегменты не разъезжаются.
+  const DUR = 950;
+  // Опора — общая ось графика (низ самого нижнего столбика): стопка растёт целиком.
   let base = 0;
   for (const r of svg.querySelectorAll<SVGRectElement>("rect[data-key]")) {
     base = Math.max(base, Number(r.getAttribute("y")) + Number(r.getAttribute("height")));
   }
-  cols.forEach((col, i) => {
+  cols.forEach((col) => {
     for (const r of col.querySelectorAll<SVGRectElement>("rect[data-key]")) {
       r.style.transformBox = "view-box";
       r.style.transformOrigin = `0px ${base}px`;
-      r.animate([{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], {
-        duration: 500,
-        delay: i * step,
+      r.style.willChange = "transform";
+      const a = r.animate([{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], {
+        duration: DUR,
         easing: "cubic-bezier(0.22, 1, 0.36, 1)",
         fill: "backwards",
       });
+      const done = () => {
+        r.style.willChange = "";
+      };
+      a.onfinish = done;
+      a.oncancel = done;
+      farmGrowAnims.push(a);
     }
   });
 }
@@ -852,6 +867,7 @@ function startHistoryLive(refresh: () => Promise<void>): void {
 
 function clearViewPolls(): void {
   historyLiveRefresh = null;
+  cancelFarmGrow();
   stopListStream();
   if (listPollTimer !== null) {
     clearTimeout(listPollTimer);
@@ -10529,7 +10545,7 @@ function mountNetworkShell(root: HTMLElement): void {
         if (!reducedMotion()) growFarmBars(svg);
       } else {
         stopChartMorph = morphFarmChart(prevGeo, svg, (from, to, onUpdate) =>
-          animate(from, to, { duration: 0.45, ease: "easeOut", onUpdate }),
+          animate(from, to, { duration: 0.6, ease: [0.22, 1, 0.36, 1], onUpdate }),
         );
       }
     }
