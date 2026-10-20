@@ -2800,7 +2800,7 @@ input.file-input::file-selector-button:hover {
 
 .wan-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
   gap: 0.75rem;
   margin-bottom: 0.75rem;
 }
@@ -3116,7 +3116,7 @@ input.file-input::file-selector-button:hover {
 
 .wan-charts__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
   gap: 1rem 1.25rem;
 }
 
@@ -7337,4 +7337,115 @@ body.page-mesh-on .page-mesh-dots {
 .upload-chart--cells.upload-chart--mini .upload-chart__axis,
 .upload-chart--cells.upload-chart--mini .upload-chart__tick {
   font-size: 10px;
+}
+
+/* —— Телефон (≤ 640px): без горизонтального скролла страницы (web 1.63.0) ——
+   Шапка переносится: заголовок — своей строкой, контролы — под ним с переносом;
+   ленту вкладок «Сеть/Ферма» листаем внутри неё самой. Десктоп не затронут. */
+@media (max-width: 640px) {
+  .app-header {
+    flex-wrap: wrap;
+    row-gap: 0.75rem;
+  }
+  .app-header > :first-child {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .app-header__side {
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: 100%;
+    align-items: stretch;
+  }
+  .app-header__side .app-header__meta {
+    align-self: flex-start;
+  }
+  .app-header__actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    min-width: 0;
+    max-width: 100%;
+    justify-content: flex-start;
+    row-gap: 0.5rem;
+  }
+  .app-header__actions > .wan-tabs--overview {
+    flex: 1 1 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .app-header__actions > .wan-tabs--overview::-webkit-scrollbar {
+    display: none;
+  }
+  .wan-tabs--overview .wan-tab {
+    min-height: 1.75rem;
+    padding-inline: 0.6rem;
+  }
+  .app-header__actions > :last-child {
+    margin-left: auto;
+  }
+  .wan-card,
+  .sk--mini {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+@media (max-width: 640px) {
+  .search-palette__panel {
+    width: calc(100vw - 2rem);
+  }
+}
+/* Карточки каналов в сетке не раздвигают колонку своим содержимым. */
+.wan-grid > *,
+.wan-charts__grid > * {
+  min-width: 0;
+}
+/* Планшет (2 узкие колонки) — строка движка в компактном виде, как на телефоне. */
+@media (min-width: 561px) and (max-width: 820px) {
+  .wan-eng {
+    grid-template-columns: 2.2rem 5.6rem minmax(0, 1fr) 2.6rem;
+  }
+  .wan-eng__peers,
+  .wan-eng__act {
+    display: none;
+  }
+}
+@media (max-width: 640px) {
+  /* Аватар-меню — в строке заголовка справа, а не отдельной строкой. */
+  .app-header {
+    position: relative;
+  }
+  .app-header > :first-child {
+    padding-right: 3.25rem;
+  }
+  .app-header__actions > .profile:last-child {
+    position: absolute;
+    top: 0;
+    right: 0;
+    margin-left: 0;
+  }
+  /* Панель списка: кнопки не уезжают за левый край, переносятся. */
+  .list-controls__actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+  .list-controls__actions > :last-child {
+    margin-left: auto;
+  }
+  /* Карточка раздачи: больше места под название. */
+  .torrent-card--pct .torrent-card__lead {
+    gap: 0.6rem;
+  }
+  .torrent-card--pct .torrent-card__pct {
+    flex-basis: 3.1rem;
+    font-size: 1.2rem;
+  }
+  .torrent-card--pct .torrent-card__up {
+    flex-basis: 4.2rem;
+  }
 }

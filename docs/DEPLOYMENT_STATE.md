@@ -964,6 +964,12 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - Проверено вживую: карточка раздачи, «Сеть», «Ферма», «Кабинет», «Настройки» (десктоп и телефон).
 - Откат: `docker tag containerd-web:pre-1620 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
+## 7я30. web 1.63.0 — мобильная вёрстка без горизонтального скролла — 2026-10-21
+
+- CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1630` (= 1.62.0).
+- Аудит 360/390/414/768: все страницы (вход, список, раздача + файлы, Сеть ×4, Ферма ×2, Кабинет, Настройки все вкладки, меню профиля) — scrollWidth = ширине окна. Десктоп 1440/1024 — раскладка совпадает с 1.62.0.
+- Откат: `docker tag containerd-web:pre-1630 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

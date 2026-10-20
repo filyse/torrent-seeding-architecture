@@ -2734,7 +2734,16 @@ function bindSlidingTabs(bar: HTMLElement): void {
     hover = btn;
     place(btn ?? active(), instant);
   };
-  const ro = new ResizeObserver(() => place(hover ?? active(), true));
+  let centered = false;
+  const ro = new ResizeObserver(() => {
+    place(hover ?? active(), true);
+    // Телефон: лента вкладок листается внутри себя — один раз показываем активную.
+    const a = active();
+    if (!centered && a && bar.scrollWidth > bar.clientWidth + 1) {
+      centered = true;
+      bar.scrollLeft = Math.max(0, a.offsetLeft - (bar.clientWidth - a.offsetWidth) / 2);
+    }
+  });
   ro.observe(bar);
   for (const btn of bar.querySelectorAll<HTMLElement>(".wan-tab")) {
     btn.addEventListener("pointerenter", () => follow(btn));
