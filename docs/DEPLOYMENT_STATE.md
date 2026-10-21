@@ -994,6 +994,12 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - Проверка 360/390 (тап): ни одна вкладка не обрезана, прокрутки нет, подсветка совпадает с активной вкладкой и после перехода в другой ряд.
 - Откат: `docker tag containerd-web:pre-1634 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
+## 7я35. web 1.63.5 — телефон: одинаковые строки лимитов — 2026-10-21
+
+- CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1635` (= 1.63.4).
+- Проверка 360/390/414 с реальными «своб.» (TB и GB): 12 строк (движки + каналы) — одна и та же раскладка, без переполнения; 1440 — как раньше в одну строку.
+- Откат: `docker tag containerd-web:pre-1635 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

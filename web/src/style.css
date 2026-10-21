@@ -7568,3 +7568,35 @@ body.page-mesh-on .page-mesh-dots {
     text-overflow: ellipsis;
   }
 }
+
+/* —— web 1.63.5: телефон — строки лимитов (движки, каналы) одинаковой раскладки ——
+   Раньше .key-row переносился по flex-wrap в зависимости от длины «своб. …»:
+   «2.9 TB» помещалось в строку с полями, «115.5 GB» — нет. Теперь всегда:
+   имя и свободное место — строкой, под ними поля ↓/↑ поровну и «ОК». */
+@media (max-width: 640px) {
+  .key-row:has(> .engine-limits__controls) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.45rem;
+  }
+  .key-row:has(> .engine-limits__controls) > .key-row__meta {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.6rem;
+  }
+  .key-row:has(> .engine-limits__controls) .key-row__sub {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .key-row > .engine-limits__controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    flex-wrap: nowrap;
+  }
+  .key-row > .engine-limits__controls .limits-form__field {
+    width: auto;
+    min-width: 0;
+  }
+}
