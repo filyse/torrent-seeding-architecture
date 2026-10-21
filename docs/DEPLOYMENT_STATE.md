@@ -1006,6 +1006,12 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - Проверка 360/390/414: «История» День (24) / Неделя (28) / Месяц (30) и мини-графики (30) — svg = ширине блока, прокрутки нет, ни одна подпись не обрезана, подсказка в пределах карточки.
 - Откат: `docker tag containerd-web:pre-1636 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
+## 7я37. web 1.64.0 — тёмная тема — 2026-10-21
+
+- CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1640` (= 1.63.6).
+- Проверка: все экраны и поповеры в тёмной теме на 1440 и 390; светлая 1440 — попиксельно как 1.63.6 (кроме версии в подвале и времени).
+- Откат: `docker tag containerd-web:pre-1640 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

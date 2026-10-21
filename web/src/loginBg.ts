@@ -7,8 +7,16 @@
  * или панель вне экрана. При prefers-reduced-motion — один неподвижный кадр.
  */
 
-const INK = "71,85,105";
-const BLUE = "37,99,235";
+/** Тёмная тема: явный выбор (data-theme) или системная. */
+function darkTheme(): boolean {
+  const t = document.documentElement.getAttribute("data-theme");
+  if (t === "dark") return true;
+  if (t === "light") return false;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+const DARK = typeof document !== "undefined" && darkTheme();
+const INK = DARK ? "161,161,170" : "71,85,105";
+const BLUE = DARK ? "96,165,250" : "37,99,235";
 const FRAME_MS = 32;
 const MAX_DPR = 1.5;
 
