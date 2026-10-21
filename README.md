@@ -31,6 +31,7 @@
 - [`docs/CREATOR.md`](docs/CREATOR.md) — создание `.torrent` из контента; Kafka `creator.task.deleted` → MPW
 - [`docs/NETWORK.md`](docs/NETWORK.md) — экран «Сеть»: отдача и скачивание по WAN-каналам
 - [`docs/HEADER_STATS.md`](docs/HEADER_STATS.md) — свёртка мини-меню статистики в шапке
+- [`docs/WEB_UI.md`](docs/WEB_UI.md) — общие правила вида веба: контролы, графики «квадратиками», телефон, тёмная тема, кэш
 - [`docs/LIST_TILES.md`](docs/LIST_TILES.md) — плитки, карточки и мини таблица списка
 - [`docs/LOGIN_SCREEN.md`](docs/LOGIN_SCREEN.md) — фон входа, знак и иконка вкладки
 - [`docs/BACKUP.md`](docs/BACKUP.md) — суточные бэкапы БД и состояния движков, восстановление
