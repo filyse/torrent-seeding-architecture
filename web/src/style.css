@@ -7549,3 +7549,22 @@ body.page-mesh-on .page-mesh-dots {
     border-left: 0;
   }
 }
+
+/* —— web 1.63.4: телефон — вкладки «Сеть/Ферма» ровной сеткой 3×2 без прокрутки ——
+   Подсветка (.wan-tabs__thumb) ставится по offsetLeft/Top кнопки — плавно ездит и между рядами. */
+@media (max-width: 640px) {
+  .app-header__actions > .wan-tabs--overview {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.1rem;
+    overflow: visible;
+    border-radius: 14px;
+  }
+  .wan-tabs--overview .wan-tab {
+    min-width: 0;
+    padding-inline: 0.25rem;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
