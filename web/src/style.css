@@ -7104,22 +7104,22 @@ body.page-mesh-on .page-mesh-dots {
   --mesh-line: rgba(250, 250, 250, 0.16);
 }
 :root[data-theme="dark"] .page-mesh {
-  opacity: 0.55;
+  opacity: 1;
 }
 :root[data-theme="dark"] .page-mesh i:nth-child(1) {
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.22), transparent 68%);
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.42), transparent 68%);
 }
 :root[data-theme="dark"] .page-mesh i:nth-child(2) {
-  background: radial-gradient(circle, rgba(100, 116, 139, 0.22), transparent 68%);
+  background: radial-gradient(circle, rgba(129, 140, 248, 0.30), transparent 68%);
 }
 :root[data-theme="dark"] .page-mesh i:nth-child(3) {
-  background: radial-gradient(circle, rgba(96, 165, 250, 0.16), transparent 68%);
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.34), transparent 68%);
 }
 :root[data-theme="dark"] .page-mesh i:nth-child(4) {
-  background: radial-gradient(circle, rgba(71, 85, 105, 0.24), transparent 68%);
+  background: radial-gradient(circle, rgba(100, 116, 139, 0.40), transparent 68%);
 }
 :root[data-theme="dark"] .page-mesh-dots {
-  background-image: radial-gradient(rgba(161, 161, 170, 0.14) 1px, transparent 1.2px);
+  background-image: radial-gradient(rgba(161, 161, 170, 0.24) 1px, transparent 1.2px);
 }
 :root[data-theme="dark"] .wan-tabs--overview .wan-tabs__thumb {
   background: var(--surface-2);
@@ -7169,22 +7169,22 @@ body.page-mesh-on .page-mesh-dots {
     --mesh-line: rgba(250, 250, 250, 0.16);
   }
   :root:not([data-theme="light"]) .page-mesh {
-    opacity: 0.55;
+    opacity: 1;
   }
   :root:not([data-theme="light"]) .page-mesh i:nth-child(1) {
-    background: radial-gradient(circle, rgba(59, 130, 246, 0.22), transparent 68%);
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.42), transparent 68%);
   }
   :root:not([data-theme="light"]) .page-mesh i:nth-child(2) {
-    background: radial-gradient(circle, rgba(100, 116, 139, 0.22), transparent 68%);
+    background: radial-gradient(circle, rgba(129, 140, 248, 0.30), transparent 68%);
   }
   :root:not([data-theme="light"]) .page-mesh i:nth-child(3) {
-    background: radial-gradient(circle, rgba(96, 165, 250, 0.16), transparent 68%);
+    background: radial-gradient(circle, rgba(96, 165, 250, 0.34), transparent 68%);
   }
   :root:not([data-theme="light"]) .page-mesh i:nth-child(4) {
-    background: radial-gradient(circle, rgba(71, 85, 105, 0.24), transparent 68%);
+    background: radial-gradient(circle, rgba(100, 116, 139, 0.40), transparent 68%);
   }
   :root:not([data-theme="light"]) .page-mesh-dots {
-    background-image: radial-gradient(rgba(161, 161, 170, 0.14) 1px, transparent 1.2px);
+    background-image: radial-gradient(rgba(161, 161, 170, 0.24) 1px, transparent 1.2px);
   }
   :root:not([data-theme="light"]) .wan-tabs--overview .wan-tabs__thumb {
     background: var(--surface-2);

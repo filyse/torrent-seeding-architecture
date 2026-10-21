@@ -1012,6 +1012,11 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - Проверка: все экраны и поповеры в тёмной теме на 1440 и 390; светлая 1440 — попиксельно как 1.63.6 (кроме версии в подвале и времени).
 - Откат: `docker tag containerd-web:pre-1640 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
+## 7я38. web 1.64.1 — тёмная тема: фон ярче — 2026-10-21
+
+- CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1641` (= 1.64.0).
+- Откат: `docker tag containerd-web:pre-1641 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
