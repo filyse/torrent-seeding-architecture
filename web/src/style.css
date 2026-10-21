@@ -7600,3 +7600,12 @@ body.page-mesh-on .page-mesh-dots {
     min-width: 0;
   }
 }
+
+/* —— web 1.63.6: телефон — графики «квадратиками» целиком по ширине, без прокрутки —— */
+@media (max-width: 640px) {
+  .upload-history--page .upload-history__chart,
+  .upload-history__chart,
+  .wan-card__chart {
+    overflow-x: hidden;
+  }
+}

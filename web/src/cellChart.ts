@@ -47,7 +47,9 @@ export function renderCellChart(spec: CellChartSpec): SVGSVGElement {
   const snap = (v: number) => Math.round(v * d) / d;
   const { pad, cols } = spec;
   const n = Math.max(1, cols.length);
-  const gap = snap(spec.gap ?? 2);
+  // Узкий слот (телефон) — зазор 1 физ. px·dpr вместо 2, иначе клетка съедается зазором.
+  const slot0 = (spec.width - pad.l - pad.r) / n;
+  const gap = snap(slot0 < 8 ? Math.min(spec.gap ?? 2, 1) : (spec.gap ?? 2));
   // Минимальная ширина, при которой клетка не мельче minCell.
   const minW = pad.l + pad.r + n * (spec.minCell + gap + 1);
   const W = Math.max(Math.round(spec.width), Math.ceil(minW));
@@ -165,7 +167,12 @@ export function renderCellChart(spec: CellChartSpec): SVGSVGElement {
     }
     wrap.appendChild(g);
     if (c.label) {
-      const t = svgEl("text", { x: (x + slot / 2).toFixed(2), y: H - 6, "text-anchor": "middle", class: "upload-chart__tick" });
+      // Крайняя подпись не обрезается краем svg: прижимаем к краю (ширина ~6px на символ).
+      const tx = x + slot / 2;
+      const half = c.label.length * 3.2;
+      const anchor = tx + half > W - 1 ? "end" : tx - half < 1 ? "start" : "middle";
+      const ax = anchor === "end" ? W - 1 : anchor === "start" ? 1 : tx;
+      const t = svgEl("text", { x: ax.toFixed(2), y: H - 6, "text-anchor": anchor, class: "upload-chart__tick" });
       t.textContent = c.label;
       g.appendChild(t);
     }

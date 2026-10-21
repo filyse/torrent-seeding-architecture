@@ -101,7 +101,7 @@ function uniqueWans(history: UploadedHistory): string[] {
   return [...seen].filter((id) => WAN_ORDER.includes(id) || history.buckets.some((b) => (b.wan[id] ?? 0) > 0));
 }
 
-function bucketLabel(iso: string, period: HistoryPeriod, index: number, n: number): string {
+function bucketLabel(iso: string, period: HistoryPeriod, index: number, n: number, prevIso?: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   if (period === "day") {
@@ -109,10 +109,19 @@ function bucketLabel(iso: string, period: HistoryPeriod, index: number, n: numbe
     return d.toLocaleTimeString("ru-RU", { hour: "2-digit", hour12: false });
   }
   if (period === "week") {
+    // Телефон: подпись дня — только на первой корзине дня (иначе «срсрср» сливается).
+    if (narrowScreen() && prevIso) {
+      const p = new Date(prevIso);
+      if (!Number.isNaN(p.getTime()) && p.getDate() === d.getDate()) return "";
+    }
     return d.toLocaleDateString("ru-RU", { weekday: "short" });
   }
   if (index % 5 !== 0 && index !== n - 1) return "";
   return d.toLocaleDateString("ru-RU", { day: "numeric" });
+}
+
+function narrowScreen(): boolean {
+  return typeof window !== "undefined" && window.innerWidth <= 640;
 }
 
 /** Большой график «Истории» — общий рендер «квадратиков» (cellChart.ts). */
@@ -130,12 +139,13 @@ export function renderFarmChart(history: UploadedHistory, widthPx = 680, dpr = 1
     cols: history.buckets.map((b, i) => ({
       sampled: bucketSampled(b),
       segs: wanOrder.map((id) => ({ id: id === "wan2" ? "wan2" : "wan1", v: b.wan[id] ?? 0 })),
-      label: bucketLabel(b.t, history.period, i, n),
+      label: bucketLabel(b.t, history.period, i, n, history.buckets[i - 1]?.t),
     })),
     max: Math.max(1, ...sampledVals),
     axisFmt: fmtChartBytes,
     maxCell: 14,
-    minCell: 10,
+    // Телефон: клетка считается от ширины экрана (до ~4px) — график целиком, без прокрутки.
+    minCell: narrowScreen() ? 4 : 10,
     cls: "upload-chart--farm",
     uid: "farm",
     aria: "Отдача фермы за период",
@@ -161,13 +171,13 @@ export function renderMiniChart(
     cols: history.buckets.map((b, i) => ({
       sampled: bucketSampled(b),
       segs: [{ id: pal, v: values[i] }],
-      label: bucketLabel(b.t, history.period, i, n),
+      label: bucketLabel(b.t, history.period, i, n, history.buckets[i - 1]?.t),
       peak: bucketSampled(b) && peak > 0 && values[i] === peak,
     })),
     max: Math.max(1, ...values),
     axisFmt: fmtChartBytes,
     maxCell: 8,
-    minCell: 5,
+    minCell: narrowScreen() ? 3 : 5,
     gap: 1.5,
     cls: "upload-chart--mini",
     uid: `mini-${wanId}`,
@@ -262,6 +272,14 @@ function placeTip(tip: HTMLElement, ev: PointerEvent): void {
   let y = ev.clientY + gap;
   if (x + tw > window.innerWidth - pad) x = ev.clientX - tw - gap;
   if (y + th > window.innerHeight - pad) y = ev.clientY - th - gap;
+  // Телефон: подсказка не выходит за карточку графика.
+  if (window.innerWidth <= 640) {
+    const card = (ev.target as Element | null)?.closest?.(".panel, .wan-card, .upload-history");
+    if (card) {
+      const r = card.getBoundingClientRect();
+      x = Math.min(Math.max(x, r.left + pad), r.right - tw - pad);
+    }
+  }
   tip.style.left = `${Math.max(pad, x)}px`;
   tip.style.top = `${Math.max(pad, y)}px`;
 }

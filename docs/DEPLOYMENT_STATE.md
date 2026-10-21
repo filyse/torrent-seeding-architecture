@@ -1000,6 +1000,12 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - Проверка 360/390/414 с реальными «своб.» (TB и GB): 12 строк (движки + каналы) — одна и та же раскладка, без переполнения; 1440 — как раньше в одну строку.
 - Откат: `docker tag containerd-web:pre-1635 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
+## 7я36. web 1.63.6 — телефон: графики целиком без прокрутки — 2026-10-21
+
+- CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1636` (= 1.63.5).
+- Проверка 360/390/414: «История» День (24) / Неделя (28) / Месяц (30) и мини-графики (30) — svg = ширине блока, прокрутки нет, ни одна подпись не обрезана, подсказка в пределах карточки.
+- Откат: `docker tag containerd-web:pre-1636 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
