@@ -248,19 +248,59 @@ export function bindFarmHover(
     }
 
     tip.hidden = false;
-    placeTip(tip, ev);
+    placeTip(tip, ev, hit.closest(".upload-chart__col") ?? hit);
   };
 
+  return wireTip(svg, tip, move, hide);
+}
+
+/** Общая обвязка подсказки cell-графика (Сеть, Ферма/История).
+ *  Мышь: как раньше — следует за курсором, прячется на pointerleave.
+ *  Тач/перо: тап показывает подсказку у столбика и держит её; скролл,
+ *  pointercancel (начался жест прокрутки), тап вне графика, resize — прячут.
+ *  Раньше на iOS подсказка (position:fixed) оставалась с координатами тапа
+ *  и при прокрутке «уезжала» поверх других карточек. */
+function wireTip(
+  svg: SVGSVGElement,
+  tip: HTMLElement,
+  move: (ev: PointerEvent) => void,
+  hide: () => void,
+): () => void {
+  const onDown = (ev: PointerEvent) => {
+    if (ev.pointerType !== "mouse") move(ev);
+  };
+  const onLeave = (ev: PointerEvent) => {
+    if (ev.pointerType === "mouse") hide();
+  };
+  const hideIfShown = () => {
+    if (!tip.hidden) hide();
+  };
+  const onDocDown = (ev: PointerEvent) => {
+    if (tip.hidden) return;
+    const t = ev.target as Node | null;
+    if (t && svg.contains(t)) return;
+    hide();
+  };
   svg.addEventListener("pointermove", move);
-  svg.addEventListener("pointerleave", hide);
+  svg.addEventListener("pointerdown", onDown);
+  svg.addEventListener("pointerleave", onLeave);
+  svg.addEventListener("pointercancel", hide);
+  window.addEventListener("scroll", hideIfShown, { capture: true, passive: true });
+  window.addEventListener("resize", hideIfShown, { passive: true });
+  document.addEventListener("pointerdown", onDocDown, true);
   return () => {
     svg.removeEventListener("pointermove", move);
-    svg.removeEventListener("pointerleave", hide);
+    svg.removeEventListener("pointerdown", onDown);
+    svg.removeEventListener("pointerleave", onLeave);
+    svg.removeEventListener("pointercancel", hide);
+    window.removeEventListener("scroll", hideIfShown, { capture: true });
+    window.removeEventListener("resize", hideIfShown);
+    document.removeEventListener("pointerdown", onDocDown, true);
     hide();
   };
 }
 
-function placeTip(tip: HTMLElement, ev: PointerEvent): void {
+function placeTip(tip: HTMLElement, ev: PointerEvent, anchor?: Element | null): void {
   // Фиксируем к окну: иначе ячейка мини-графика (~120px) режет карточку,
   // а при hidden ширина ещё 0 — первый кадр «неполный», пока не сдвинешь мышь.
   void tip.offsetWidth;
@@ -268,6 +308,18 @@ function placeTip(tip: HTMLElement, ev: PointerEvent): void {
   const gap = 12;
   const tw = tip.offsetWidth;
   const th = tip.offsetHeight;
+  // Тач: привязка к столбику (над ним, иначе под ним), зажим 8px в окне.
+  if (ev.pointerType !== "mouse" && anchor) {
+    const r = anchor.getBoundingClientRect();
+    let ax = r.left + r.width / 2 - tw / 2;
+    let ay = r.top - th - 8;
+    if (ay < pad) ay = r.bottom + 8;
+    ax = Math.min(Math.max(ax, pad), window.innerWidth - tw - pad);
+    ay = Math.min(Math.max(ay, pad), window.innerHeight - th - pad);
+    tip.style.left = `${Math.max(pad, ax)}px`;
+    tip.style.top = `${Math.max(pad, ay)}px`;
+    return;
+  }
   let x = ev.clientX + gap;
   let y = ev.clientY + gap;
   if (x + tw > window.innerWidth - pad) x = ev.clientX - tw - gap;
@@ -364,16 +416,10 @@ export function bindMiniHover(
       if (wan <= 0) tip.append(tipNode("upload-tip__muted", "в этом интервале тишина"));
     }
     tip.hidden = false;
-    placeTip(tip, ev);
+    placeTip(tip, ev, hit.closest(".upload-chart__col") ?? hit);
   };
 
-  svg.addEventListener("pointermove", move);
-  svg.addEventListener("pointerleave", hide);
-  return () => {
-    svg.removeEventListener("pointermove", move);
-    svg.removeEventListener("pointerleave", hide);
-    hide();
-  };
+  return wireTip(svg, tip, move, hide);
 }
 
 /* ── Плавная смена данных фермерского графика ──────────────────────────────

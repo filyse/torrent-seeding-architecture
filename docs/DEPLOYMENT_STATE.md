@@ -2,7 +2,7 @@
 
 > **Исторический снимок 2026-07-18.** Не читать как текущий прод.
 > С тех пор на CT 400 живёт creator (`/api/v1/creator`), upload-edge/relay и download.
-> С 2026-10-21: engine 1.6.19 на всех десяти движках, api 1.26.15, web 1.64.3 (§7я7–§7я40; правила вида — [`WEB_UI.md`](WEB_UI.md)).
+> С 2026-10-21: engine 1.6.19 на всех десяти движках, api 1.26.15, web 1.64.4 (§7я7–§7я41; правила вида — [`WEB_UI.md`](WEB_UI.md)).
 > Живые версии — [`CHANGELOG.md`](../CHANGELOG.md) (на 2026-10-06: web 1.54.2 / api 1.26.11 / queue 1.0.2 / engine 1.6.16, libtorrent 2.1.2 на всех девяти движках; с 2026-10-16 десятый — c1, §7я4).
 > Источник истины кода — `main` (web-шапка — после коммита этой спеки).
 
@@ -1028,6 +1028,14 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1643` (= 1.64.2).
 - Значения (тёмная тема, явная и системная): слой 0.78, пятна 0.32 / 0.26 (индиго) / 0.25 / 0.32, точки 0.19.
 - Откат: `docker tag containerd-web:pre-1643 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
+## 7я41. web 1.64.4 — подсказка cell-графиков на таче — 2026-10-21
+
+- CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1644` (= 1.64.3).
+- Причина: подсказка `position:fixed` ставилась по координатам pointermove и на таче не пряталась — при скролле висела на месте окна поверх других карточек (WAN1).
+- Фикс: `wireTip()` в `web/src/uploadChart.ts` — тап привязывает подсказку к столбику (зажим 8px), скролл/pointercancel/тап вне/resize прячут; мышь как раньше.
+- Проверка: headless Chromium, 390px, touch — тап → подсказка у столбика, скролл → скрыта; десктоп 1440 hover работает.
+- Откат: `docker tag containerd-web:pre-1644 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
 ## 7. Откат
 
