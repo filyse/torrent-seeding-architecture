@@ -7493,3 +7493,59 @@ body.page-mesh-on .page-mesh-dots {
     word-break: break-word;
   }
 }
+
+/* —— web 1.63.3: телефон — полоса статистики сеткой чипов, «Обновлено» своей строкой ——
+   На телефоне «шторка» с чипами не сворачивается (inline-стили анимации перекрыты). */
+@media (max-width: 640px) {
+  .stats-dock {
+    flex-direction: column;
+    align-items: stretch;
+    align-self: stretch;
+    gap: 0.35rem;
+    max-width: 100%;
+    overflow: visible;
+  }
+  .stats-dock .stats-dock__trays {
+    width: auto !important;
+    max-width: none !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    overflow: visible;
+    justify-content: stretch;
+  }
+  .stats-dock__trays-inner {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.3rem;
+    width: 100%;
+  }
+  .stats-dock .tray {
+    min-width: 0;
+  }
+  .stats-dock .tray-toggle {
+    width: 100%;
+    min-width: 0 !important;
+    height: 1.75rem;
+    justify-content: flex-start;
+    padding: 0 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+  }
+  .stats-dock .tray-toggle:hover,
+  .stats-dock .tray.is-open .tray-toggle {
+    background: var(--surface-2);
+  }
+  .stats-dock .tray-toggle__val {
+    min-width: 0 !important;
+    text-overflow: ellipsis;
+  }
+  .stats-dock .app-header__meta,
+  .stats-dock.is-expanded .app-header__meta,
+  .stats-dock:has(.tray.is-open) .app-header__meta {
+    align-self: flex-start;
+    margin: 0;
+    padding: 0;
+    border-left: 0;
+  }
+}

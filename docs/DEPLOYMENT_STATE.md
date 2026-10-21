@@ -982,6 +982,12 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - Проверка (эмуляция тача, tap): фильтры ×4, «N / стр.», приоритет файла, селекты настроек — 0 своих списков, системное меню не блокируется, выбор применяется. Мышь — 1 свой список, как раньше.
 - Откат: `docker tag containerd-web:pre-1632 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
+## 7я33. web 1.63.3 — телефон: полоса статистики сеткой — 2026-10-21
+
+- CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1633` (= 1.63.2).
+- Проверка 360/390/414 (тап, реалистичные значения): чипы и меню чипов в пределах экрана, scrollWidth = ширине окна.
+- Откат: `docker tag containerd-web:pre-1633 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

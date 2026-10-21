@@ -2170,7 +2170,9 @@ function placeTrayMenu(host: HTMLElement, menu: HTMLElement): void {
   menu.style.position = "fixed";
   menu.style.width = `${mw}px`;
   menu.style.top = `${Math.round(r.bottom + gap)}px`;
-  if (idx >= 0 && idx < 2) {
+  // Телефон: чипы стоят сеткой — меню под своим чипом, прижато в пределах экрана.
+  const mobile = window.innerWidth <= 640;
+  if (mobile ? r.left + r.width / 2 < window.innerWidth / 2 : idx >= 0 && idx < 2) {
     const left = Math.min(Math.max(8, r.left), window.innerWidth - mw - 8);
     menu.style.left = `${Math.round(left)}px`;
     menu.style.right = "auto";
