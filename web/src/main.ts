@@ -1231,6 +1231,11 @@ function fitSelectToSelected(select: HTMLSelectElement): void {
   probe.remove();
 }
 
+/** Устройство только с тач-вводом (нет мыши/тачпада) — телефон, планшет. */
+function coarsePointerOnly(): boolean {
+  return window.matchMedia("(pointer: coarse)").matches && !window.matchMedia("(any-pointer: fine)").matches;
+}
+
 function enhanceSelect(select: HTMLSelectElement): void {
   if (select.dataset.cselDone === "1") return;
   select.dataset.cselDone = "1";
@@ -1353,13 +1358,26 @@ function enhanceSelect(select: HTMLSelectElement): void {
     panel.remove();
   }
 
-  // Блокируем системное меню и открываем своё.
+  // Тач/перо: только системный пикер (iOS открывает его уже на касании, и наш
+  // список появлялся вторым). Мышь — свой список, системное меню блокируем.
+  let lastPointer = "mouse";
+  select.addEventListener("pointerdown", (ev) => {
+    lastPointer = ev.pointerType || "mouse";
+  });
+  select.addEventListener("touchstart", () => {
+    lastPointer = "touch";
+  }, { passive: true });
   select.addEventListener("mousedown", (ev) => {
+    if (lastPointer !== "mouse" || coarsePointerOnly()) {
+      lastPointer = "mouse";
+      return;
+    }
     ev.preventDefault();
     select.focus({ preventScroll: true });
     open ? close() : open_();
   });
   select.addEventListener("keydown", (ev) => {
+    if (coarsePointerOnly()) return;
     if (["Enter", " ", "ArrowDown", "ArrowUp"].includes(ev.key)) {
       ev.preventDefault();
       if (!open) open_();
