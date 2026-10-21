@@ -11548,4 +11548,14 @@ function clampPopoversToViewport(): void {
   window.addEventListener("resize", schedule);
 }
 
+// Клавиатурная навигация (Tab/стрелки) — показываем кольца фокуса; мышь/тап — прячем.
+document.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.key === "Tab" || e.key.startsWith("Arrow")) document.documentElement.classList.add("kbd-nav");
+  },
+  true,
+);
+document.addEventListener("pointerdown", () => document.documentElement.classList.remove("kbd-nav"), true);
+
 void bootstrap();

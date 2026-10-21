@@ -7268,8 +7268,13 @@ body.page-mesh-on .page-mesh-dots {
 :is(body[data-view="settings"], body[data-view="cabinet"]) #app .select:focus {
   outline: none;
 }
+/* Синей обводки нет: Chrome/Safari считают клик/тап по select «видимым фокусом».
+   Нейтральное кольцо — только при навигации с клавиатуры (html.kbd-nav). */
 :is(body[data-view="settings"], body[data-view="cabinet"]) #app .select:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: none;
+}
+html.kbd-nav :is(body[data-view="settings"], body[data-view="cabinet"]) #app .select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--muted) 55%, transparent);
   outline-offset: 1px;
 }
 :is(body[data-view="settings"], body[data-view="cabinet"]) #app :is(input[type="text"], input[type="password"], input[type="number"], input[type="url"], input[type="search"], input[type="email"], input:not([type])) {

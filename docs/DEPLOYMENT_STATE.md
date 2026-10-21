@@ -1017,6 +1017,12 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1641` (= 1.64.0).
 - Откат: `docker tag containerd-web:pre-1641 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
+## 7я39. web 1.64.2 — без синей обводки у селектов настроек — 2026-10-21
+
+- CT400: пересобран только `web`. Бэкап образа: `containerd-web:pre-1642` (= 1.64.1).
+- Проверка: 7 селектов (Кабинет + все вкладки Настроек), светлая/тёмная, 1440/390 — после клика/тапа обводки нет; с клавиатуры — нейтральное кольцо.
+- Откат: `docker tag containerd-web:pre-1642 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
