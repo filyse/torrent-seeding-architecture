@@ -43,7 +43,7 @@ def _secret() -> str:
 
 
 def _cors_origins() -> list[str]:
-    raw = os.getenv("UPLOAD_CORS_ORIGINS", "https://seedbox2.hw-s.ru,https://seedbox.hw-s.ru").strip()
+    raw = os.getenv("UPLOAD_CORS_ORIGINS", "https://seedbox2.hw-s.ru").strip()
     if raw == "*":
         return ["*"]
     return [x.strip() for x in raw.split(",") if x.strip()]

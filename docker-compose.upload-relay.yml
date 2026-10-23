@@ -15,7 +15,7 @@ services:
     restart: unless-stopped
     environment:
       UPLOAD_RELAY_UPSTREAMS: ${UPLOAD_RELAY_UPSTREAMS:-{"a":"https://seedbox2.hw-s.ru/u/a","b":"https://seedbox2.hw-s.ru/u/b"}}
-      UPLOAD_CORS_ORIGINS: ${UPLOAD_CORS_ORIGINS:-https://seedbox2.hw-s.ru,https://seedbox.hw-s.ru}
+      UPLOAD_CORS_ORIGINS: ${UPLOAD_CORS_ORIGINS:-https://seedbox2.hw-s.ru}
     ports:
       - "${UPLOAD_RELAY_PUBLISH_PORT:-8091}:8091"
     healthcheck:

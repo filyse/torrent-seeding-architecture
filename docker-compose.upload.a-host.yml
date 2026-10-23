@@ -4,7 +4,7 @@ services:
     environment:
       UPLOAD_ENGINE_ROOTS: >-
         {"a1":"/data/a1","a2":"/data/a2","a3":"/data/a3"}
-      UPLOAD_CORS_ORIGINS: "https://seedbox2.hw-s.ru,https://seedbox.hw-s.ru,https://192.168.1.101"
+      UPLOAD_CORS_ORIGINS: "https://seedbox2.hw-s.ru,https://192.168.1.101"
     ports:
       - "8090:8090"
     volumes:

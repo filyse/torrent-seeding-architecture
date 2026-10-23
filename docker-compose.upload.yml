@@ -21,7 +21,7 @@ services:
       UPLOAD_ENGINE_ROOTS: ${UPLOAD_ENGINE_ROOTS:-}
       UPLOAD_CHUNK_SIZE: ${UPLOAD_CHUNK_SIZE:-8388608}
       UPLOAD_GC_MINUTES: ${UPLOAD_GC_MINUTES:-30}
-      UPLOAD_CORS_ORIGINS: ${UPLOAD_CORS_ORIGINS:-https://seedbox2.hw-s.ru,https://seedbox.hw-s.ru}
+      UPLOAD_CORS_ORIGINS: ${UPLOAD_CORS_ORIGINS:-https://seedbox2.hw-s.ru}
       # Всегда rudub/rudub2 (1000:1000) + mode 0644 после complete.
       UPLOAD_CONTENT_UID: ${UPLOAD_CONTENT_UID:-1000}
       UPLOAD_CONTENT_GID: ${UPLOAD_CONTENT_GID:-1000}
