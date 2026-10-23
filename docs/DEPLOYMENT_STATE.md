@@ -789,6 +789,32 @@ done
 
 Удаление контейнеров запланировано через неделю (~23.10). Не тронуты: FTP, движки,
 данные, DNS, пробросы на роутерах (WAN 8000/50000 на .171/.243 остаются), конфиги CT400/MPW.
+
+## 7я7. Легаси ruTorrent удалён — 2026-10-23
+
+Перед удалением (за 7 дней): health CT400 — 10/10 движков true; в логах CT400 (api,
+queue_worker), движков a1–a3/b1–b6, upload-edge и MPW нет обращений к `.243:8000`,
+`.171:8000`; `seedbox.hw-s.ru` в Caddy — только продление сертификата, в NPM host 4 —
+только сканеры. MPW `backend: seeding`.
+
+- .243 и .171: `docker rm` `rtorrent-rutorrent`, `rtorrent-rutorrent-logs`, `torrent-api`;
+  `docker rmi` всех тегов `crazymax/rtorrent-rutorrent`, `api-torrent-api`, `torrent-api`.
+  FTP, движки, данные, NPM не тронуты. Бэкап: `~/backups/20261023-legacy-remove/`
+  (inspect, compose, `api/`, списки образов/контейнеров) + прежний `20261016-legacy-stop`
+  (там `images.tar.gz` — `docker load` для отката).
+- Роутеры: пробросы 8000/50000 удалены (см. `Proxmox/Routers/README.md`).
+- CT400: `seedbox.hw-s.ru` убран из `Caddyfile` и дефолтов `UPLOAD_CORS_ORIGINS`
+  (compose, `.env.engine.example`, `upload_http.py`, `upload-edge/nginx.conf`) — коммит
+  `67fdb5f`; на CT400 `git reset --hard origin/main` + `caddy reload`. Бэкап
+  `/root/backup-legacy-seedbox-20261023/`. Движки и upload-edge на сидбоксах получат
+  новые дефолты CORS при следующем деплое (лишний origin безвреден).
+- DNS `seedbox.hw-s.ru` и NPM host 4 (301 → seedbox2) оставлены: имя — FTP-хост SSD в MPW.
+- MPW: legacy-бэкенд убран, всегда CT 400 (локальный коммит `22c1b2f`).
+
+Откат CT400: `cp /root/backup-legacy-seedbox-20261023/Caddyfile /opt/containerd/Caddyfile`
+и `docker exec containerd-caddy-1 caddy reload --config /etc/caddy/Caddyfile`.
+Контейнеры: `gunzip -c ~/backups/20261016-legacy-stop/images.tar.gz | docker load`,
+затем `docker compose up -d` в `~/server` и `~/server/api` (только эти сервисы).
 ## 7я6. web 1.54.6 — строки выпадающих списков не сжимаются — 2026-10-21
 
 Только CT400, только `web`: `git fetch origin && git reset --hard origin/main`,
