@@ -800,6 +800,7 @@ queue_worker), движков a1–a3/b1–b6, upload-edge и MPW нет обр�
 - .243 и .171: `docker rm` `rtorrent-rutorrent`, `rtorrent-rutorrent-logs`, `torrent-api`;
   `docker rmi` всех тегов `crazymax/rtorrent-rutorrent`, `api-torrent-api`, `torrent-api`.
   FTP, движки, данные, NPM не тронуты. Бэкап: `~/backups/20261023-legacy-remove/`
+- `qbittorrent-nox` на .171 **удалён 23.10.2026** (стоял остановленным с 11.2025): контейнер и образ `qbittorrentofficial/qbittorrent-nox:5.1.2-2`; `~/docker-qbittorrent-nox/docker-compose.yml` → `.removed-20261023`. Данные оставлены: `~/docker-qbittorrent-nox/config` (7,3M), `/home/rudub/storage` (общий). Бэкап: `~/backups/20261023-qbit-remove/` и `C:\Scripts\Project\Backup\qbittorrent-nox-remove-20261023\`.
   (inspect, compose, `api/`, списки образов/контейнеров) + прежний `20261016-legacy-stop`
   (там `images.tar.gz` — `docker load` для отката).
 - Роутеры: пробросы 8000/50000 удалены (см. `Proxmox/Routers/README.md`).
