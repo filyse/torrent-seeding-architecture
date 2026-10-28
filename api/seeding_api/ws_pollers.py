@@ -98,7 +98,7 @@ async def _poll_stats(app, hub) -> None:
     Та же форма, что у SSE `/stream` и `GET /session/stats`, чтобы фронт обновлял верхние
     карточки одинаково независимо от транспорта (WS/SSE)."""
     pool = app.state.engine_pool
-    by_engine = await pool.session_stats_all()
+    by_engine = await pool.session_stats_live()
     stats = pool.aggregate_session_stats(by_engine)
     await hub.publish("stats", {"stats": stats})
 

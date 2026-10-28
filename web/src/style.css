@@ -3282,6 +3282,15 @@ input.file-input::file-selector-button:hover {
 .wan-eng--off {
   opacity: 0.55;
 }
+
+/* web 1.64.5: движок не ответил вовремя - показаны последние известные данные (API `stale`). */
+.wan-eng--stale {
+  opacity: 0.72;
+}
+.wan-eng--stale .wan-eng__id::after {
+  content: " ·";
+  color: var(--warn);
+}
 .wan-eng--link {
   /* Строка-кнопка на /farm: та же геометрия, что у .wan-eng на /network.
      Только сброс кнопки — без своего padding и без `font: inherit`, который

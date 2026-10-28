@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 async def _stats_snapshot(app: Any) -> dict:
     pool = app.state.engine_pool
-    by_engine = await pool.session_stats_all()
+    by_engine = await pool.session_stats_live()
     return {"stats": pool.aggregate_session_stats(by_engine)}
 
 

@@ -9,7 +9,7 @@ router = APIRouter(tags=["session"])
 
 @router.get("/session/stats")
 async def get_session_stats(pool: EnginePoolDep):
-    by_engine = await pool.session_stats_all()
+    by_engine = await pool.session_stats_live()
     return pool.aggregate_session_stats(by_engine)
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -36,6 +37,25 @@ def engine_ttl_seconds() -> int:
         return 180
 
 
+def stats_deadline_seconds() -> float:
+    """Сколько ждать `session/stats` одного движка в «живых» путях (UI, SSE, WS).
+
+    Один медленный/недоступный движок (потеря SYN, висящий коннект) раньше держал весь
+    ответ: опрос шёл последовательно, а у клиента таймаут 30 с плюс ретраи коннекта."""
+    try:
+        return max(0.5, float(os.getenv("SEEDING_ENGINE_STATS_DEADLINE", "5")))
+    except ValueError:
+        return 5.0
+
+
+def stats_stale_max_seconds() -> float:
+    """Сколько секунд последний удачный ответ движка можно отдавать с пометкой `stale`."""
+    try:
+        return max(0.0, float(os.getenv("SEEDING_ENGINE_STATS_STALE_MAX", "120")))
+    except ValueError:
+        return 120.0
+
+
 def _merge_specs(static: list[EngineSpec], db_rows) -> list[EngineSpec]:
     """Слить статику и БД по id. Поля из БД переопределяют статику, но пустые/None из БД
     не затирают известные значения статики (важно для `media_path`)."""
@@ -59,6 +79,8 @@ class EnginePool:
         self._specs = list(self._static)
         self._by_id: dict[str, EngineClient] = {s.id: EngineClient(s.url) for s in self._specs}
         self._lock = asyncio.Lock()
+        # Последний удачный `session/stats` движка: (monotonic, данные) — для `stale`.
+        self._last_stats: dict[str, tuple[float, dict]] = {}
 
     async def refresh(self) -> None:
         """Перечитать реестр из БД и пересобрать клиентов под новый состав движков."""
@@ -173,14 +195,44 @@ class EnginePool:
                 out[spec.id] = False
         return out
 
-    async def session_stats_all(self) -> dict[str, dict]:
-        out: dict[str, dict] = {}
-        for spec in self._specs:
+    async def session_stats_all(
+        self, *, deadline: float | None = None, stale_ok: bool = False
+    ) -> dict[str, dict]:
+        """`session/stats` всех движков — параллельно, порядок ключей = порядок специй.
+
+        deadline — потолок ожидания одного движка (сек); None — как раньше, таймаут клиента.
+        stale_ok — если движок не ответил, отдать его последний удачный ответ (не старше
+        `SEEDING_ENGINE_STATS_STALE_MAX`) с `stale: true` и `stale_age` (сек) вместо
+        `{"error": true}`. Для UI; алерты и метрики зовут без него, чтобы видеть реальный down.
+        """
+        specs = list(self._specs)
+        clients = {s.id: self._by_id[s.id] for s in specs}
+
+        async def one(eid: str) -> dict:
             try:
-                out[spec.id] = await self._by_id[spec.id].session_stats()
-            except httpx.HTTPError:
-                out[spec.id] = {"error": True}
-        return out
+                call = clients[eid].session_stats()
+                data = await (asyncio.wait_for(call, deadline) if deadline else call)
+            except (httpx.HTTPError, asyncio.TimeoutError, TimeoutError):
+                return self._stale_or_error(eid) if stale_ok else {"error": True}
+            if isinstance(data, dict) and not data.get("error"):
+                self._last_stats[eid] = (time.monotonic(), data)
+            return data
+
+        results = await asyncio.gather(*(one(s.id) for s in specs))
+        return {s.id: r for s, r in zip(specs, results)}
+
+    def _stale_or_error(self, engine_id: str) -> dict:
+        last = self._last_stats.get(engine_id)
+        if last is not None:
+            age = time.monotonic() - last[0]
+            if age <= stats_stale_max_seconds():
+                return {**last[1], "stale": True, "stale_age": int(age)}
+        return {"error": True}
+
+    async def session_stats_live(self) -> dict[str, dict]:
+        """Для живых экранов (GET /session/stats, SSE, WS `stats`): короткий потолок на
+        движок и последний известный ответ с пометкой `stale`, если движок не успел."""
+        return await self.session_stats_all(deadline=stats_deadline_seconds(), stale_ok=True)
 
     async def set_session_limits_all(
         self, download_limit: int | None, upload_limit: int | None
@@ -209,15 +261,19 @@ class EnginePool:
             "leechers": 0,
         }
         engines_ok = 0
+        engines_stale = 0
         for stats in by_engine.values():
             if stats.get("error"):
                 continue
             engines_ok += 1
+            if stats.get("stale"):
+                engines_stale += 1
             for key in total:
                 total[key] += int(stats.get(key) or 0)
         return {
             **total,
             "engines_ok": engines_ok,
+            "engines_stale": engines_stale,
             "engines_total": len(by_engine),
             "by_engine": by_engine,
         }
