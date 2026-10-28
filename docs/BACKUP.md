@@ -18,10 +18,10 @@
 
 ## 2. Где и когда
 
-Cron на CT400, ежедневно в 04:30:
+Cron на CT400, ежедневно в 11:30 Томск (= 04:30 UTC; с 29.10.2026 TZ CT400 = Asia/Tomsk, до этого cron был `30 4` в UTC):
 
 ```
-30 4 * * * bash /opt/containerd/scripts/db-backup.sh >> /var/log/db-backup.log 2>&1
+30 11 * * * bash /opt/containerd/scripts/db-backup.sh >> /var/log/db-backup.log 2>&1
 ```
 
 Скрипт делает два шага:
