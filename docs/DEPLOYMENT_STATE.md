@@ -1064,6 +1064,15 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - Проверка: headless Chromium, 390px, touch — тап → подсказка у столбика, скролл → скрыта; десктоп 1440 hover работает.
 - Откат: `docker tag containerd-web:pre-1644 containerd-web:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build web`.
 
+## 7я42. api 1.26.16 / web 1.64.5 — «офлайн» после F5 на «Сети»/«Ферме» — 2026-10-28
+
+- Симптом: F5 на `/network` — все движки «офлайн», 0/7 и 0/3, через 10–15 с (после стабилизации NIC c* — 1–2 с) приходят данные.
+- Причина 1 (web): карточки рисовались сразу после `/network/links` с `stats = null`, а `null` трактовался как «офлайн».
+- Причина 2 (api): `session_stats_all` шёл по движкам последовательно; висящий коннект к c1 (192.168.1.172, потери SYN) — 30 с таймаут + ретрай — задерживал весь `/session/stats`, SSE и WS `stats`. Замер: c1 30.06 с, прочие 0.03–0.08 с.
+- Фикс: web — скелет по раскладке каналов до первого ответа статистики («Сеть» все стороны, «Ферма»), пометка `stale`; api — параллельный опрос, `session_stats_live()` с потолком `SEEDING_ENGINE_STATS_DEADLINE` (5 с) и последним известным ответом `stale` (до `SEEDING_ENGINE_STATS_STALE_MAX` = 120 с). Алерты/метрики/`/engines` — без `stale`.
+- CT400: пересобраны `api` и `web` (движки и сидирующие контейнеры не трогались). Бэкап образов: `containerd-web:pre-1645` (= 1.64.4), `containerd-api:pre-12616` (= 1.26.15).
+- Откат: `docker tag containerd-web:pre-1645 containerd-web:latest && docker tag containerd-api:pre-12616 containerd-api:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build api web`.
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.

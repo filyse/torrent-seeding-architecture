@@ -98,6 +98,9 @@ type TorrentOut = {
 // Скорости libtorrent отдаёт в БАЙТАХ/с (payload, без протокольного оверхеда).
 type EngineSessionStats = {
   error?: boolean;
+  /** API 1.26.16: движок не ответил вовремя, это его последний удачный ответ. */
+  stale?: boolean;
+  stale_age?: number;
   torrents?: number;
   torrents_active?: number;
   download_rate?: number;
@@ -122,6 +125,7 @@ type SessionStats = {
   total_downloaded: number;
   engines_ok?: number;
   engines_total?: number;
+  engines_stale?: number;
   // Разрез агрегата по движкам — бэкенд кладёт его в тот же ответ (см. aggregate_session_stats),
   // поэтому экран «Сеть» получает живые скорости из общего потока, без своего опроса движков.
   by_engine?: Record<string, EngineSessionStats>;
@@ -1037,8 +1041,8 @@ function sk(kind: string): HTMLElement {
   return el("span", { className: `sk sk--${kind}`, "aria-hidden": "true" });
 }
 
-function wanCardsSkeleton(): HTMLElement[] {
-  return [6, 3].map((rows) => {
+function wanCardsSkeleton(rowsPerCard: number[] = [6, 3]): HTMLElement[] {
+  return rowsPerCard.map((rows) => {
     const card = el("section", { className: "wan-card wan-card--sk", "aria-busy": "true" });
     card.append(
       el("div", { className: "wan-card__head" }, [sk("title"), sk("sub")]),
@@ -10235,6 +10239,17 @@ function renderUploadedCharts(
 }
 
 /** Строка движка внутри карточки канала: скорость или объём, доля внутри канала, пиры, активные. */
+/** Скелет карточек по реальной раскладке каналов: до первой статистики, а не «офлайн». */
+function wanLinksSkeleton(data: NetworkLinksOut): HTMLElement[] {
+  const rows = data.links.map((l) => Math.max(1, l.engines.length));
+  if (data.unassigned.length) rows.push(data.unassigned.length);
+  return wanCardsSkeleton(rows.length ? rows : [6, 3]);
+}
+
+function staleTitle(st: EngineSessionStats | undefined): string {
+  return `Движок не ответил вовремя (${st?.stale_age ?? 0} с назад были данные) - показаны последние известные`;
+}
+
 function wanEngineRow(
   id: string,
   st: EngineSessionStats | undefined,
@@ -10258,10 +10273,12 @@ function wanEngineRow(
       rateEl.append(el("span", { className: "wan-eng__files" }, [`файлы ${fmtRate(r.files)}`]));
     }
   }
+  const stale = !offline && Boolean(st?.stale);
   const row = el("div", {
-    className: `wan-eng${offline ? " wan-eng--off" : ""}`,
+    className: `wan-eng${offline ? " wan-eng--off" : ""}${stale ? " wan-eng--stale" : ""}`,
     "data-engine": id,
   });
+  if (stale) row.title = staleTitle(st);
   const barEl = el("span", { className: "wan-eng__bar" }, [
     meterRow(share, channelBarTone(wanId)),
   ]);
@@ -10489,12 +10506,27 @@ function mountNetworkShell(root: HTMLElement): void {
   const miniCache = new Map<string, MiniChartSlot>();
   let didFocusScroll = false;
   let cardsRevealed = Boolean(cachedLinks);
+  // До первого ответа /session/stats (или WS) движки не «офлайн», а «загрузка».
+  let statsSettled = Boolean(lastSessionStats);
 
   const paint = (stats: SessionStats | null) => {
     const now = parseRoute();
     if (now.view !== "network" || now.side !== side || links === null) return;
-    if (stats) lastSessionStats = stats;
-    host.replaceChildren(...renderWanCards(links, stats, side));
+    if (stats) {
+      lastSessionStats = stats;
+      statsSettled = true;
+    }
+    const eff = stats ?? lastSessionStats;
+    if (!eff && !statsSettled) {
+      if (host.dataset.sk !== "links") {
+        host.dataset.sk = "links";
+        host.replaceChildren(...wanLinksSkeleton(links));
+        revealKids(host);
+      }
+      return;
+    }
+    delete host.dataset.sk;
+    host.replaceChildren(...renderWanCards(links, eff, side));
     if (!cardsRevealed) {
       cardsRevealed = true;
       revealKids(host);
@@ -10778,6 +10810,10 @@ function mountNetworkShell(root: HTMLElement): void {
       if (parseRoute().view !== "network") return;
       const s = await loadSessionStats();
       if (s) paint(s);
+      else if (!statsSettled) {
+        statsSettled = true;
+        paint(null);
+      }
       if (parseRoute().view === "network" && !document.hidden) {
         networkPollTimer = setTimeout(() => void tick(), wsAvailable() ? 20000 : 3000);
       }
@@ -10795,15 +10831,20 @@ function mountNetworkShell(root: HTMLElement): void {
   })();
 }
 
-function farmEngineValue(id: string, side: FarmSide): { n: number; extra: number; extraLabel: string; online: boolean } {
+function farmEngineValue(
+  id: string,
+  side: FarmSide,
+): { n: number; extra: number; extraLabel: string; online: boolean; stale?: boolean } {
   const ses = lastSessionStats?.by_engine?.[id];
   const online = Boolean(ses && !ses.error);
+  const stale = online && Boolean(ses?.stale);
   if (side === "size") {
     return {
       n: lastEngineSizes?.[id] ?? 0,
       extra: online ? ses?.torrents ?? 0 : 0,
       extraLabel: "раздач",
       online,
+      stale,
     };
   }
   return {
@@ -10811,6 +10852,7 @@ function farmEngineValue(id: string, side: FarmSide): { n: number; extra: number
     extra: lastEngineSizes?.[id] ?? 0,
     extraLabel: "объём",
     online,
+    stale,
   };
 }
 
@@ -10819,10 +10861,11 @@ function farmEngineRow(id: string, side: FarmSide, total: number, wanId: string)
   const share = total > 0 ? (bits.n / total) * 100 : 0;
   const row = el("button", {
     type: "button",
-    className: `wan-eng wan-eng--link${bits.online ? "" : " wan-eng--off"}`,
+    className: `wan-eng wan-eng--link${bits.online ? "" : " wan-eng--off"}${bits.stale ? " wan-eng--stale" : ""}`,
     "data-engine": id,
     title: side === "size" ? "Список по объёму" : "Список раздач",
   });
+  if (bits.stale) row.title = staleTitle(lastSessionStats?.by_engine?.[id]);
   row.append(
     el("span", { className: "wan-eng__id" }, [id]),
     el("span", { className: "wan-eng__rate" }, [side === "size" ? fmtBytes(bits.n) : fmtInt(bits.n)]),
@@ -10938,9 +10981,19 @@ function mountFarmShell(root: HTMLElement): void {
 
   let links: NetworkLinksOut | null = cachedLinks;
   let cardsRevealed = Boolean(cachedLinks);
+  let statsSettled = Boolean(lastSessionStats);
   const paint = () => {
     const now = parseRoute();
     if (now.view !== "farm" || now.side !== side || links === null) return;
+    if (!lastSessionStats && !statsSettled) {
+      if (host.dataset.sk !== "links") {
+        host.dataset.sk = "links";
+        host.replaceChildren(...wanLinksSkeleton(links));
+        revealKids(host);
+      }
+      return;
+    }
+    delete host.dataset.sk;
     host.replaceChildren(...renderFarmCards(links, side));
     if (!cardsRevealed) {
       cardsRevealed = true;
@@ -10976,6 +11029,7 @@ function mountFarmShell(root: HTMLElement): void {
       if (parseRoute().view !== "farm") return;
       const s = await loadSessionStats();
       if (s) lastSessionStats = s;
+      statsSettled = true;
       paint();
       if (parseRoute().view === "farm" && !document.hidden) {
         networkPollTimer = setTimeout(() => void tick(), wsAvailable() ? 20000 : 3000);
@@ -10987,6 +11041,7 @@ function mountFarmShell(root: HTMLElement): void {
       const d = msg.data as { stats?: SessionStats } | undefined;
       if (d?.stats) {
         lastSessionStats = d.stats;
+        statsSettled = true;
         paint();
       }
     });

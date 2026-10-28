@@ -23,7 +23,7 @@ router = APIRouter()
 
 
 async def _build_snapshot(session_factory, pool) -> dict:
-    by_engine = await pool.session_stats_all()
+    by_engine = await pool.session_stats_live()
     stats = pool.aggregate_session_stats(by_engine)
     return {"stats": stats}
 
