@@ -34,13 +34,14 @@ def test_normalize_work_limits_clamps():
         {"migrate_per_engine": 99, "hash_per_engine": 0},
         defaults={"migrate_per_engine": 4, "hash_per_engine": 2},
     )
-    assert out == {"migrate_per_engine": 16, "hash_per_engine": 1}
+    assert out == {"migrate_per_engine": 16, "hash_per_engine": 1, "disk_per_engine": 4}
 
 
 def test_env_defaults(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("SEEDING_MIGRATE_PER_ENGINE", "3")
     monkeypatch.setenv("SEEDING_HASH_PER_ENGINE", "1")
-    assert env_defaults() == {"migrate_per_engine": 3, "hash_per_engine": 1}
+    monkeypatch.delenv("SEEDING_DISK_PER_ENGINE", raising=False)
+    assert env_defaults() == {"migrate_per_engine": 3, "hash_per_engine": 1, "disk_per_engine": 4}
 
 
 @pytest.mark.asyncio

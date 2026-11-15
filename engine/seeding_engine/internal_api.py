@@ -836,6 +836,54 @@ async def set_hash_limit(request: Request, body: HashLimitIn):
     return await fn(body.hash_per_engine)
 
 
+class DiskLimitIn(BaseModel):
+    disk_per_engine: int = Field(..., ge=1, le=8)
+
+
+class DiskSlotIn(BaseModel):
+    action: str
+    job_id: str = Field(..., min_length=1, max_length=80)
+    kind: str = "copy"
+    torrent_id: int | None = None
+    leased: bool = True
+
+
+@router.post("/session/disk-limit")
+async def set_disk_limit(request: Request, body: DiskLimitIn):
+    rt = get_runtime(request)
+    fn = getattr(rt, "set_disk_limit", None)
+    if fn is None:
+        raise HTTPException(status_code=404, detail="no disk queue")
+    return await fn(body.disk_per_engine)
+
+
+@router.post("/session/disk-slot")
+async def disk_slot(request: Request, body: DiskSlotIn):
+    """Слот общей дисковой очереди. SSD и старый движок отвечают 404 — слота нет."""
+    rt = get_runtime(request)
+    disk = getattr(rt, "_disk", None)
+    if disk is None:
+        raise HTTPException(status_code=404, detail="no disk queue")
+    action = body.action.strip().lower()
+    if action == "acquire":
+        state = await disk.acquire(
+            body.job_id,
+            band="user",
+            kind=body.kind or "copy",
+            torrent_id=body.torrent_id,
+            leased=body.leased,
+        )
+        return {"state": state}
+    if action == "renew":
+        return {"state": await disk.renew(body.job_id)}
+    if action == "release":
+        await disk.release(body.job_id)
+        return {"state": "released"}
+    if action == "poll":
+        return {"state": await disk.poll(body.job_id)}
+    raise HTTPException(status_code=400, detail="unknown disk-slot action")
+
+
 @router.post("/session/limits")
 async def set_session_limits(request: Request, body: SessionLimitsIn):
     rt = get_runtime(request)

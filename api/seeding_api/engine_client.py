@@ -467,6 +467,43 @@ class EngineClient:
         r.raise_for_status()
         return r.json()
 
+    async def set_disk_limit(self, disk_per_engine: int) -> dict | None:
+        r = await self._client.post(
+            "/internal/v1/session/disk-limit",
+            json={"disk_per_engine": int(disk_per_engine)},
+        )
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
+    async def disk_slot(
+        self,
+        action: str,
+        job_id: str,
+        *,
+        kind: str = "copy",
+        torrent_id: int | None = None,
+        leased: bool = True,
+    ) -> str | None:
+        """Состояние слота HDD. None — у движка нет дисковой очереди (SSD или старый образ)."""
+        payload: dict = {
+            "action": action,
+            "job_id": job_id,
+            "kind": kind,
+            "leased": leased,
+        }
+        if torrent_id is not None:
+            payload["torrent_id"] = int(torrent_id)
+        r = await self._client.post("/internal/v1/session/disk-slot", json=payload)
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        data = r.json()
+        if not isinstance(data, dict):
+            return ""
+        return str(data.get("state") or "")
+
     async def set_net_settings(
         self, dht: bool | None, pex: bool | None, lsd: bool | None
     ) -> dict | None:

@@ -272,11 +272,13 @@ class UnchokeSettingsOut(BaseModel):
 class WorkQueuesIn(BaseModel):
     migrate_per_engine: int | None = Field(default=None, ge=1, le=16)
     hash_per_engine: int | None = Field(default=None, ge=1, le=8)
+    disk_per_engine: int | None = Field(default=None, ge=1, le=8)
 
 
 class WorkQueuesOut(BaseModel):
     migrate_per_engine: int
     hash_per_engine: int
+    disk_per_engine: int = 4
     applied: int | None = None
     errors: int | None = None
 

@@ -62,3 +62,29 @@ async def transfer_slots(source: str, target: str, limit_of: Callable[[], Awaita
     finally:
         for key in reversed(acquired):
             await TRANSFER_SLOTS.release(key)
+
+
+@asynccontextmanager
+async def transfer_ends(
+    source: str | None,
+    target: str | None,
+    limit_of: Callable[[], Awaitable[int]],
+):
+    """Слоты только тех концов, которые остаются на очереди переноса (SSD или движок без дисковой)."""
+    keys: list[str] = []
+    if source:
+        keys.append(f"src:{source}")
+    if target and target != source:
+        keys.append(f"dst:{target}")
+    elif target and not source:
+        keys.append(f"dst:{target}")
+    keys = sorted(set(keys))
+    acquired: list[str] = []
+    try:
+        for key in keys:
+            await TRANSFER_SLOTS.acquire(key, limit_of)
+            acquired.append(key)
+        yield
+    finally:
+        for key in reversed(acquired):
+            await TRANSFER_SLOTS.release(key)

@@ -28,6 +28,7 @@ from seeding_engine.fastresume_io import (
     session_state_path,
     try_read_resume_params,
 )
+from seeding_engine.disk_queue import DiskQueue
 from seeding_engine.hash_queue import HashQueue
 from seeding_engine.seed_count import fetch_scrape
 from seeding_engine.storage_guard import assert_content_mounted, files_cover
@@ -871,6 +872,16 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         }
         self._unchoke = dict(env_unchoke_settings())
         self.disk_kind = storage_kind()
+        # HDD и unknown — одна очередь на диск. SSD оставляет раздельные перенос и хеш.
+        self._disk: DiskQueue | None = None
+        self._glued: set[int] = set()
+        self._assemble: dict[str, dict] = {}
+        if self.disk_kind != "ssd":
+            self._disk = DiskQueue(
+                _env_int("SEEDING_DISK_PER_ENGINE", 4),
+                admit_running=self._check_admit.running_count,
+            )
+            self._check_admit.set_limit(self._disk.limit)
         self._upload_gate = SessionUploadGate(apply=self._apply_session_upload)
         self._check_holds = CheckHoldTracker()
         # db_id -> (monotonic, сиды, личи). None в снимке, пока скрейпа не было.
@@ -2012,17 +2023,20 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         lt_state = _state_label(lt, st)
         # Пауза очереди проверки — не пауза пользователя. Иначе бейдж «Пауза»,
         # а после рестарта файл user-paused снял бы её как чужую.
-        if self._check_admit.is_waiting(db_id):
-            paused = False
-            lt_state = "queued_for_checking"
-        elif self._hash_queue.is_queued(db_id):
-            # recheck переноса снял раздачу с очереди проверки и ждёт слот хеша.
-            # Без этой подписи она выглядит просто на паузе, и перенос обрывается.
+        disk_wait = self._disk is not None and await self._disk.is_check_queued(db_id)
+        if self._check_admit.is_waiting(db_id) or self._hash_queue.is_queued(db_id) or disk_wait:
+            # Ждёт слот. Без этой подписи раздача выглядит просто на паузе,
+            # и перенос обрывается как неполная копия.
             paused = False
             lt_state = "queued_for_checking"
         elif self._check_admit.is_running(db_id) and not is_full_hash_check_state(lt_state):
             # Слот уже занят, а libtorrent часто успевает мигнуть в seeding.
             # Без этой подписи фильтр «Проверка» пустой, пока идёт очередь.
+            paused = False
+            lt_state = "checking_files"
+        if db_id in self._glued and not is_full_hash_check_state(lt_state):
+            # Слот переноса уже держит хеш этой копии. Пока он не дочитан,
+            # снимок не должен показать готовый сид.
             paused = False
             lt_state = "checking_files"
         if is_full_hash_check_state(lt_state):
@@ -2342,13 +2356,115 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             self._check_holds.note_recheck(self._upload_gate, self.disk_kind, db_id)
             await self._wait_hash_idle(db_id)
 
+        if self._disk is not None and await self._disk.holds_torrent(db_id):
+            # Хеш переноса сидит в уже занятом слоте копии и не встаёт за волной.
+            self._glued.add(db_id)
+
+            async def glued() -> None:
+                try:
+                    await job()
+                finally:
+                    self._glued.discard(db_id)
+
+            asyncio.create_task(glued())
+            return True
+        if self._disk is not None:
+            await self._disk.acquire(
+                f"check-{db_id}",
+                band="check",
+                kind="recheck",
+                torrent_id=db_id,
+                on_start=job,
+            )
+            return True
         await self._hash_queue.submit(db_id, job)
         return True
 
     async def set_hash_limit(self, limit: int) -> dict[str, int]:
+        if self._disk is not None:
+            # На HDD лимит проверок — это лимит диска, его задаёт set_disk_limit.
+            return {"hash_per_engine": max(1, min(8, int(limit)))}
         applied = await self._hash_queue.set_limit(limit)
         self._check_admit.set_limit(applied)
         return {"hash_per_engine": applied}
+
+    async def set_disk_limit(self, limit: int) -> dict[str, int]:
+        if self._disk is None:
+            return {"disk_per_engine": max(1, min(8, int(limit))), "applied": 0}
+        applied = await self._disk.set_limit(limit)
+        self._check_admit.set_limit(applied)
+        return {"disk_per_engine": applied, "applied": 1}
+
+    def assemble_state(self, upload_id: str) -> dict | None:
+        info = self._assemble.get(upload_id)
+        return dict(info) if info is not None else None
+
+    async def assemble_upload(self, storage, sess) -> str:
+        """Поставить финальную сборку в дисковую очередь. Чанки слот не занимали."""
+        prev = self._assemble.get(sess.id)
+        if prev is not None and prev.get("assemble") in {"queued", "done", "error"}:
+            return str(prev["assemble"])
+        if len(self._assemble) > 200:
+            for key in list(self._assemble)[:50]:
+                self._assemble.pop(key, None)
+        self._assemble[sess.id] = {
+            "assemble": "queued",
+            "path": "",
+            "size": sess.size,
+            "jti": sess.jti,
+        }
+
+        async def run() -> None:
+            if self._assemble.get(sess.id, {}).get("assemble") == "cancelled":
+                return
+            try:
+                path = await asyncio.to_thread(storage.complete, sess)
+            except Exception as exc:  # noqa: BLE001
+                if self._assemble.get(sess.id, {}).get("assemble") == "cancelled":
+                    return
+                self._assemble[sess.id] = {
+                    "assemble": "error",
+                    "path": "",
+                    "size": sess.size,
+                    "jti": sess.jti,
+                    "error": str(exc),
+                }
+                return
+            if self._assemble.get(sess.id, {}).get("assemble") == "cancelled":
+                return
+            self._assemble[sess.id] = {
+                "assemble": "done",
+                "path": str(path),
+                "size": sess.size,
+                "jti": sess.jti,
+            }
+
+        if self._disk is None:
+            await run()
+            return str(self._assemble.get(sess.id, {}).get("assemble") or "error")
+        await self._disk.acquire(
+            f"up-{sess.id}",
+            band="user",
+            kind="assemble",
+            on_start=run,
+            leased=False,
+        )
+        return str(self._assemble.get(sess.id, {}).get("assemble") or "queued")
+
+    async def cancel_assemble(self, upload_id: str) -> None:
+        info = self._assemble.get(upload_id)
+        jti = info.get("jti") if info else None
+        size = info.get("size") if info else 0
+        self._assemble[upload_id] = {
+            "assemble": "cancelled",
+            "path": "",
+            "size": size or 0,
+            "jti": jti,
+        }
+        if self._disk is None:
+            return
+        if await self._disk.poll(f"up-{upload_id}") == "queued":
+            await self._disk.release(f"up-{upload_id}")
 
     async def _check_admit_loop(self) -> None:
         try:
@@ -2372,9 +2488,15 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                 continue
             state = await self._hash_state(db_id)
             states[db_id] = "" if state is None else state
+        if self._disk is not None:
+            await self._disk.expire()
+            await self._disk.pump()
+            busy = self._disk.blocks_checks()
+        else:
+            busy = self._hash_queue.running_count()
         actions = self._check_admit.tick(
             states,
-            busy=self._hash_queue.running_count(),
+            busy=busy,
             now=time.monotonic(),
         )
         for db_id in actions.pause:

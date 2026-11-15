@@ -135,7 +135,7 @@ async def set_work_queues(
     pool: EnginePoolDep,
     _: Principal = Depends(require_admin),
 ):
-    """Очереди переноса и хеша. Перенос живёт в API, хеш рассылается на движки."""
+    """Очереди. Перенос живёт в API. Лимит хеша и лимит диска уходят на движки."""
     current = await load_work_limits(session)
     merged = {
         "migrate_per_engine": (
@@ -148,6 +148,11 @@ async def set_work_queues(
             if body.hash_per_engine is not None
             else current["hash_per_engine"]
         ),
+        "disk_per_engine": (
+            body.disk_per_engine
+            if body.disk_per_engine is not None
+            else current["disk_per_engine"]
+        ),
     }
     saved = await save_work_limits(session, merged)
     await session.commit()
@@ -156,7 +161,9 @@ async def set_work_queues(
     errors = 0
     for spec in pool.specs:
         try:
-            await pool.client_for(spec.id).set_hash_limit(saved["hash_per_engine"])
+            client = pool.client_for(spec.id)
+            await client.set_hash_limit(saved["hash_per_engine"])
+            await client.set_disk_limit(saved["disk_per_engine"])
             applied += 1
         except (KeyError, httpx.HTTPError):
             errors += 1

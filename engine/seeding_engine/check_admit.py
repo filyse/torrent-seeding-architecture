@@ -94,6 +94,10 @@ class CheckAdmit:
     def watch_ids(self) -> list[int]:
         return list(self._probing) + list(self._hashing)
 
+    def running_count(self) -> int:
+        """Короткий resume и полный проход, которые уже читают диск."""
+        return len(self._probing) + len(self._hashing)
+
     def counts(self) -> dict[str, int]:
         return {
             "held": len(self._held),
@@ -109,7 +113,7 @@ class CheckAdmit:
         busy: int = 0,
         now: float,
     ) -> AdmitActions:
-        """busy — слоты, которые уже занял явный recheck (HashQueue)."""
+        """busy — слоты вне этой очереди: явный recheck на SSD или диск HDD."""
         resume: list[int] = []
         pause: list[int] = []
         self._settle_probes(states, now, pause)

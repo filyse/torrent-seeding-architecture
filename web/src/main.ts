@@ -3496,6 +3496,7 @@ function mountUploadLimitsPanel(): HTMLElement {
 type WorkQueuesOut = {
   migrate_per_engine: number;
   hash_per_engine: number;
+  disk_per_engine?: number;
   applied?: number;
   errors?: number;
 };
@@ -3505,7 +3506,7 @@ function mountWorkQueuesPanel(): HTMLElement {
   panel.append(el("div", { className: "panel__head" }, ["Очереди переноса и проверки"]));
   const body = el("div", { className: "panel__body" });
   const hint = el("p", { className: "field__hint" }, [
-    "Перенос: сколько раздач один движок одновременно отдаёт и сколько один принимает. Проверка: сколько раздач на одном движке одновременно читают диск — после рестарта, по кнопке «Перепроверить» и в конце переноса. Остальные ждут и подписаны «Ждёт проверки». Менять может только admin.",
+    "SSD: перенос и проверка считаются отдельно. HDD: одна очередь на диск — перенос, сборка загрузки и проверка делят слоты. Перенос и сборка встают впереди ожидающих проверок, уже начатая проверка дочитывается. Менять может только admin.",
   ]);
   const migrateInput = el("input", {
     type: "number",
@@ -3514,6 +3515,12 @@ function mountWorkQueuesPanel(): HTMLElement {
     className: "input",
   }) as HTMLInputElement;
   const hashInput = el("input", {
+    type: "number",
+    min: "1",
+    max: "8",
+    className: "input",
+  }) as HTMLInputElement;
+  const diskInput = el("input", {
     type: "number",
     min: "1",
     max: "8",
@@ -3531,6 +3538,7 @@ function mountWorkQueuesPanel(): HTMLElement {
   const setAll = (s: WorkQueuesOut) => {
     migrateInput.value = String(s.migrate_per_engine);
     hashInput.value = String(s.hash_per_engine);
+    diskInput.value = String(s.disk_per_engine ?? 4);
   };
 
   saveBtn.addEventListener("click", async () => {
@@ -3542,10 +3550,11 @@ function mountWorkQueuesPanel(): HTMLElement {
         body: JSON.stringify({
           migrate_per_engine: clamp(migrateInput.value, 4, 1, 16),
           hash_per_engine: clamp(hashInput.value, 2, 1, 8),
+          disk_per_engine: clamp(diskInput.value, 4, 1, 8),
         }),
       });
       setAll(s);
-      result.textContent = `Переносов на движок: ${s.migrate_per_engine}, проверок: ${s.hash_per_engine}.`;
+      result.textContent = `SSD: переносов ${s.migrate_per_engine}, проверок ${s.hash_per_engine}. HDD: слотов диска ${s.disk_per_engine ?? 4}.`;
       showToast("Очереди сохранены");
     } catch (e) {
       result.textContent = e instanceof Error ? e.message : String(e);
@@ -3558,8 +3567,9 @@ function mountWorkQueuesPanel(): HTMLElement {
   body.append(
     hint,
     el("div", { className: "limits-form" }, [
-      el("label", { className: "limits-form__field" }, ["Переносов с движка и на движок (1–16)", migrateInput]),
-      el("label", { className: "limits-form__field" }, ["Проверок на движке (1–8)", hashInput]),
+      el("label", { className: "limits-form__field" }, ["SSD: переносов с движка и на движок (1–16)", migrateInput]),
+      el("label", { className: "limits-form__field" }, ["SSD: проверок на движке (1–8)", hashInput]),
+      el("label", { className: "limits-form__field" }, ["HDD: слотов диска (1–8)", diskInput]),
       saveBtn,
     ]),
     result,

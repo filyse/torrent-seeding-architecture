@@ -285,6 +285,7 @@ async def run_migration(
     source_url: str = "",
     progress_store: dict | None = None,
     resume: bool = False,
+    disk_hold: object | None = None,
 ) -> None:
     """Выполнить (или возобновить) перенос. При сбое частичная копия сохраняется для повтора."""
     source = pool.client_for(str(source_engine_id))
@@ -377,6 +378,9 @@ async def run_migration(
                 _on_progress,
             )
 
+        release_source = getattr(disk_hold, "release_source", None)
+        if release_source is not None:
+            await release_source()
         snap = await _wait_until_checked(target, torrent_id, _verify_timeout(), store)
         progress = float(snap.get("progress") or 0.0) if snap else 0.0
         if progress < 0.999:
@@ -518,8 +522,13 @@ async def _still_queued(session_factory, torrent_id: int) -> bool:
 
 
 async def _run_migration_when_slot(app, pool, **kwargs) -> None:
-    """Записать задачу как queued, ждать слот источника и приёмника, потом копировать."""
-    from seeding_api.work_queue import transfer_slots
+    """Записать задачу как queued, ждать слоты диска, потом копировать.
+
+    SSD занимает очередь переноса. HDD — общий слот диска. Статус в базе
+    остаётся «в очереди на перенос», пока слот не выдан.
+    """
+    from seeding_api.disk_gate import open_migration_slots
+    from seeding_api.work_queue import transfer_ends
 
     sf = app.state.session_factory
     source = str(kwargs["source_engine_id"])
@@ -531,11 +540,21 @@ async def _run_migration_when_slot(app, pool, **kwargs) -> None:
     async def limit_of() -> int:
         return await _migrate_limit(app)
 
-    async with transfer_slots(source, target, limit_of):
-        if not await _still_queued(sf, torrent_id):
-            log.info("migrate %s: cancelled while queued", torrent_id)
-            return
-        await run_migration(sf, pool, **kwargs)
+    async def still() -> bool:
+        return await _still_queued(sf, torrent_id)
+
+    opened = await open_migration_slots(pool, source, target, torrent_id, still)
+    if opened is None:
+        log.info("migrate %s: cancelled while queued", torrent_id)
+        return
+    try:
+        async with transfer_ends(opened.ssd_source, opened.ssd_target, limit_of):
+            if not await still():
+                log.info("migrate %s: cancelled while queued", torrent_id)
+                return
+            await run_migration(sf, pool, disk_hold=opened.hold, **kwargs)
+    finally:
+        await opened.hold.close()
 
 
 def launch_migration(

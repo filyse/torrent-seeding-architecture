@@ -6,6 +6,7 @@ import secrets
 from collections.abc import Callable
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from seeding_upload import __version__
@@ -36,6 +37,9 @@ class StatusOut(BaseModel):
     cancel_at: float | None = None
     dest_dir: str
     filename: str
+    assemble: str | None = None
+    path: str | None = None
+    error: str | None = None
 
 
 class CompleteOut(BaseModel):
@@ -113,13 +117,41 @@ def build_upload_router(
             filename=sess.filename,
         )
 
+    def _runtime(request: Request):
+        return getattr(request.app.state, "torrent_runtime", None)
+
+    def _assemble_info(request: Request, upload_id: str, jti: str) -> dict | None:
+        rt = _runtime(request)
+        read = getattr(rt, "assemble_state", None)
+        if read is None:
+            return None
+        info = read(upload_id)
+        if not info or info.get("jti") != jti:
+            return None
+        return info
+
     @router.get("/upload/v1/uploads/{upload_id}", response_model=StatusOut)
     async def upload_status(
         upload_id: str,
+        request: Request,
         authorization: str | None = Header(None),
         x_upload_ticket: str | None = Header(None, alias="X-Upload-Ticket"),
     ):
         claims = _claims(authorization, x_upload_ticket)
+        info = _assemble_info(request, upload_id, claims.jti)
+        if info and info.get("assemble") in {"done", "error"}:
+            return StatusOut(
+                id=upload_id,
+                chunk_size=0,
+                chunk_count=0,
+                size=int(info.get("size") or 0),
+                received=[],
+                dest_dir="",
+                filename="",
+                assemble=str(info.get("assemble") or ""),
+                path=info.get("path") or None,
+                error=info.get("error"),
+            )
         try:
             sess = storage.load(claims.engine_id, upload_id)
         except StorageError as exc:
@@ -135,6 +167,9 @@ def build_upload_router(
             cancel_at=sess.cancel_at,
             dest_dir=sess.dest_dir,
             filename=sess.filename,
+            assemble=(str(info["assemble"]) if info and info.get("assemble") else None),
+            path=(info.get("path") or None) if info else None,
+            error=info.get("error") if info else None,
         )
 
     @router.put("/upload/v1/uploads/{upload_id}/chunks/{index}")
@@ -162,6 +197,7 @@ def build_upload_router(
     @router.post("/upload/v1/uploads/{upload_id}/complete", response_model=CompleteOut)
     async def complete_upload(
         upload_id: str,
+        request: Request,
         authorization: str | None = Header(None),
         x_upload_ticket: str | None = Header(None, alias="X-Upload-Ticket"),
     ):
@@ -172,6 +208,18 @@ def build_upload_router(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if sess.jti != claims.jti:
             raise HTTPException(status_code=403, detail="ticket does not match upload")
+        rt = _runtime(request)
+        if rt is not None and getattr(rt, "_disk", None) is not None:
+            await rt.assemble_upload(storage, sess)
+            info = rt.assemble_state(sess.id) or {}
+            if info.get("assemble") == "done" and info.get("path"):
+                return CompleteOut(path=str(info["path"]), size=sess.size)
+            if info.get("assemble") == "error":
+                raise HTTPException(status_code=409, detail=str(info.get("error") or "assemble failed"))
+            return JSONResponse(
+                status_code=202,
+                content={"state": "queued", "path": "", "size": sess.size},
+            )
         try:
             path = storage.complete(sess)
         except StorageError as exc:
@@ -181,6 +229,7 @@ def build_upload_router(
     @router.delete("/upload/v1/uploads/{upload_id}")
     async def cancel_upload(
         upload_id: str,
+        request: Request,
         authorization: str | None = Header(None),
         x_upload_ticket: str | None = Header(None, alias="X-Upload-Ticket"),
     ):
@@ -191,6 +240,10 @@ def build_upload_router(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if sess.jti != claims.jti:
             raise HTTPException(status_code=403, detail="ticket does not match upload")
+        rt = _runtime(request)
+        cancel = getattr(rt, "cancel_assemble", None)
+        if cancel is not None:
+            await cancel(upload_id)
         storage.schedule_cancel(sess)
         return Response(status_code=204)
 

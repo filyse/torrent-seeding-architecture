@@ -346,7 +346,9 @@ async def register_engine(
         pass
     try:
         work = await load_work_limits(session)
-        await pool.client_for(row.id).set_hash_limit(work["hash_per_engine"])
+        client = pool.client_for(row.id)
+        await client.set_hash_limit(work["hash_per_engine"])
+        await client.set_disk_limit(work["disk_per_engine"])
     except (KeyError, httpx.HTTPError):
         pass
     return EngineOut(

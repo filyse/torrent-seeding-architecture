@@ -1,8 +1,7 @@
-"""Лимиты очередей переноса и хеша. Хранятся в app_settings (ключ work_queues).
+"""Лимиты очередей. Хранятся в app_settings (ключ work_queues).
 
-Перенос считает оркестратор: не больше N копий сразу с одного движка и на один.
-Хеш считает движок: не больше N проверок сразу на этом движке.
-Пока в БД пусто — дефолты из env.
+На SSD перенос и хеш считаются отдельно. На HDD один лимит диска
+на перенос, сборку загрузки и проверку. Пока в БД пусто — дефолты из env.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from seeding_db.repository import SettingsRepository
 WORK_KEY = "work_queues"
 MIGRATE_RANGE = (1, 16)
 HASH_RANGE = (1, 8)
+DISK_RANGE = (1, 8)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -31,6 +31,7 @@ def env_defaults() -> dict[str, int]:
     return {
         "migrate_per_engine": _env_int("SEEDING_MIGRATE_PER_ENGINE", 4),
         "hash_per_engine": _env_int("SEEDING_HASH_PER_ENGINE", 2),
+        "disk_per_engine": _env_int("SEEDING_DISK_PER_ENGINE", 4),
     }
 
 
@@ -56,6 +57,12 @@ def normalize_work_limits(data: dict, *, defaults: dict[str, int] | None = None)
             HASH_RANGE[0],
             HASH_RANGE[1],
             base["hash_per_engine"],
+        ),
+        "disk_per_engine": _clamp(
+            data.get("disk_per_engine", base.get("disk_per_engine", 4)),
+            DISK_RANGE[0],
+            DISK_RANGE[1],
+            int(base.get("disk_per_engine", 4)),
         ),
     }
 

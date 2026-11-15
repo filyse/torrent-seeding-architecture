@@ -30,7 +30,7 @@ export type QueuedUpload = {
   engineId: string;
   destDir: string;
   route: UploadRoute;
-  status: "queued" | "uploading" | "done" | "error" | "cancelled";
+  status: "queued" | "uploading" | "disk" | "done" | "error" | "cancelled";
   /** Отдельный флаг: status сужается TS после присвоения "uploading". */
   cancelled: boolean;
   progress: number;
@@ -226,6 +226,8 @@ function uploadStatusLabel(status: QueuedUpload["status"]): string {
       return "В очереди";
     case "uploading":
       return "Загрузка";
+    case "disk":
+      return "Ждёт диск";
     case "done":
       return "Готово";
     case "error":
@@ -241,6 +243,8 @@ function uploadStatusBadge(status: QueuedUpload["status"]): string {
       return "badge badge--queued";
     case "uploading":
       return "badge badge--downloading";
+    case "disk":
+      return "badge badge--queued";
     case "done":
       return "badge badge--seeding";
     case "error":
@@ -273,7 +277,7 @@ function renderQueue(): void {
     return;
   }
 
-  const active = queue.filter((q) => q.status === "queued" || q.status === "uploading").length;
+  const active = queue.filter((q) => q.status === "queued" || q.status === "uploading" || q.status === "disk").length;
   const done = queue.filter((q) => q.status === "done").length;
   const failed = queue.filter((q) => q.status === "error").length;
   const parts = [`${queue.length} ${queue.length === 1 ? "файл" : "файлов"}`];
@@ -337,7 +341,7 @@ function renderQueue(): void {
               : "progress__bar";
       const bar = d.el("div", { className: barClass }) as HTMLElement;
       bar.style.width = `${item.status === "queued" ? 0 : pct}%`;
-      if (item.status === "uploading") bar.classList.add("progress__bar--pulse");
+      if (item.status === "uploading" || item.status === "disk") bar.classList.add("progress__bar--pulse");
       barWrap.append(bar);
 
       const foot = d.el("div", { className: "upload-item__foot" });
@@ -355,7 +359,7 @@ function renderQueue(): void {
         metaParts.push(fmtUploadBytes(item.file.size), uploadStatusLabel(item.status), via);
       }
       foot.append(d.el("div", { className: "upload-item__meta" }, [metaParts.join(" · ")]));
-      if (item.status === "uploading" || item.status === "queued") {
+      if (item.status === "uploading" || item.status === "queued" || item.status === "disk") {
         const cancel = d.el(
           "button",
           { type: "button", className: "btn btn--ghost btn--sm upload-item__cancel" },
@@ -373,7 +377,7 @@ function renderQueue(): void {
     }
     block.append(files);
 
-    const still = items.some((i) => i.status === "queued" || i.status === "uploading");
+    const still = items.some((i) => i.status === "queued" || i.status === "uploading" || i.status === "disk");
     const anyDone = items.some((i) => i.status === "done");
     if (anyDone) {
       const actions = d.el("div", { className: "upload-group__actions" });
@@ -540,9 +544,32 @@ async function runUpload(item: QueuedUpload): Promise<void> {
         headers: { "X-Upload-Ticket": ticket.ticket },
       },
     );
-    if (!doneRes.ok) throw new Error(await doneRes.text());
-    const done = (await doneRes.json()) as { path: string };
-    item.finalPath = done.path;
+    let finalPath = "";
+    if (doneRes.status === 202) {
+      item.status = "disk";
+      renderQueue();
+      while (!item.cancelled) {
+        await new Promise((r) => setTimeout(r, 500));
+        if (item.cancelled) return;
+        const st = await fetch(
+          `${ticket.upload_base_url}/upload/v1/uploads/${created.id}`,
+          { headers: { "X-Upload-Ticket": ticket.ticket } },
+        );
+        if (!st.ok) throw new Error(await st.text());
+        const body = (await st.json()) as { assemble?: string; path?: string; error?: string };
+        if (body.assemble === "done") {
+          finalPath = body.path || "";
+          break;
+        }
+        if (body.assemble === "error") throw new Error(body.error || "сборка не удалась");
+      }
+      if (item.cancelled) return;
+    } else {
+      if (!doneRes.ok) throw new Error(await doneRes.text());
+      const done = (await doneRes.json()) as { path: string };
+      finalPath = done.path;
+    }
+    item.finalPath = finalPath;
     item.status = "done";
     item.progress = 1;
     item.speedBps = 0;
