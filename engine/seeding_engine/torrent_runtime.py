@@ -30,6 +30,7 @@ from seeding_engine.fastresume_io import (
 )
 from seeding_engine.hash_queue import HashQueue
 from seeding_engine.seed_count import fetch_scrape
+from seeding_engine.storage_guard import assert_content_mounted, files_cover
 from seeding_engine.store import RuntimeHandle, RuntimeStore
 from seeding_engine.sysinfo import storage_kind
 from seeding_engine.unchoke import (
@@ -775,6 +776,57 @@ def _state_label(lt, st) -> str:
     return str(s)
 
 
+def _listed_file_sizes(lt, handle) -> list[tuple[str, int]]:
+    """Пути и размеры файлов раздачи. Pad-файлы v2 пропускаем: их нет на диске."""
+    ti = handle.torrent_file() if callable(getattr(handle, "torrent_file", None)) else None
+    if ti is None:
+        return []
+    files = ti.files()
+    pad = 0
+    flags_t = getattr(lt, "file_flags_t", None)
+    if flags_t is not None:
+        pad = int(getattr(flags_t, "flag_pad_file", 0) or 0)
+    out: list[tuple[str, int]] = []
+    for i in range(int(files.num_files())):
+        size = int(files.file_size(i))
+        if pad and hasattr(files, "file_flags"):
+            try:
+                if int(files.file_flags(i)) & pad:
+                    continue
+            except Exception:  # noqa: BLE001
+                pass
+        if size <= 0:
+            continue
+        out.append((str(files.file_path(i)), size))
+    return out
+
+
+def _resume_conflicts_with_files(lt, handle, save_path: str) -> bool:
+    """fastresume говорит «качаем», а файлы на диске уже целые.
+
+    Так бывает, если движок стартовал до диска и записал resume по пустому
+    каталогу. Качать поверх нельзя.
+    """
+    try:
+        st = handle.status() if callable(getattr(handle, "status", None)) else handle.status
+    except Exception:  # noqa: BLE001
+        return False
+    label = _state_label(lt, st).strip().lower()
+    if label not in {"downloading", "downloading_metadata"}:
+        return False
+    try:
+        progress = float(getattr(st, "progress", 0) or 0)
+    except (TypeError, ValueError):
+        progress = 0.0
+    if progress >= 0.999:
+        return False
+    try:
+        listed = _listed_file_sizes(lt, handle)
+    except Exception:  # noqa: BLE001
+        return False
+    return files_cover(Path(save_path), listed)
+
+
 class LibtorrentTorrentRuntime(TorrentRuntime):
     backend_name = "libtorrent"
 
@@ -842,6 +894,9 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         return {"disk_kind": self.disk_kind, **self._upload_gate.stats()}
 
     async def start(self) -> None:
+        # Раньше ensure_engine_dirs: не создавать подкаталог на системном диске,
+        # если отдельный том ещё не примонтирован.
+        assert_content_mounted()
         lt = self._lt
         state_path = self._state_path
         ensure_engine_dirs()
@@ -1142,13 +1197,28 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             if not keep_paused:
                 # Не resume() сразу: иначе весь диск уходит в checking_files.
                 _params_set_paused(lt, params)
-            return ses.add_torrent(params), keep_paused
+            handle = ses.add_torrent(params)
+            # Пока на паузе: если resume врёт, а файлы целые — сбросить карту кусков
+            # до того, как очередь увидит «скачивание» и отпустит раздачу в рой.
+            recheck = _resume_conflicts_with_files(lt, handle, save_path)
+            if recheck:
+                try:
+                    handle.force_recheck()
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("restore force_recheck db_id=%s: %s", db_id, exc)
+            return handle, keep_paused, recheck
 
-        h, keep_paused = await asyncio.to_thread(_add)
+        h, keep_paused, recheck = await asyncio.to_thread(_add)
         if keep_paused and not pauses_ready:
             self._user_pauses.note_legacy(db_id)
         elif not keep_paused:
-            self._check_admit.hold(db_id)
+            self._check_admit.hold(db_id, recheck=recheck)
+        if recheck:
+            log.warning(
+                "db_id=%s fastresume говорит, что файлов нет, но они уже лежат целиком; "
+                "проверка хэша вместо скачивания",
+                db_id,
+            )
         log.info(
             "restored db_id=%s from fastresume %s%s",
             db_id,
@@ -2337,7 +2407,15 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         if h is None:
             self._check_admit.drop(db_id)
             return
-        await asyncio.to_thread(self._call_live, db_id, h, self._manual_resume)
+        def _resume_or_recheck(handle) -> None:
+            # Флаг жив, пока libtorrent ещё показывает downloading. Иначе один
+            # тик «скачивание» отпускает раздачу, и она качает поверх целых файлов.
+            if self._check_admit.wants_recheck(db_id):
+                self._recheck_live(handle)
+            else:
+                self._manual_resume(handle)
+
+        await asyncio.to_thread(self._call_live, db_id, h, _resume_or_recheck)
 
     async def _check_alert_loop(self) -> None:
         try:

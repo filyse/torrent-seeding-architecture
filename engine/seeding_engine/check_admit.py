@@ -7,6 +7,10 @@
 
 Пока слота нет, раздача стоит на паузе libtorrent. Это не пауза пользователя:
 в снимок она уходит как queued_for_checking.
+
+«Скачивание» после рестарта — не всегда докачка. hold(..., recheck=True) значит,
+что файлы на диске уже целые, а fastresume записан по пустому каталогу. Такую
+раздачу в рой не отпускаем: она встаёт в ту же очередь хэша.
 """
 
 from __future__ import annotations
@@ -40,6 +44,8 @@ class CheckAdmit:
         self._waiting: set[int] = set()
         self._known: set[int] = set()
         self._saw_full: set[int] = set()
+        # Раздачи, которые нельзя отпустить в downloading: файлы уже на диске.
+        self._recheck: set[int] = set()
 
     @property
     def limit(self) -> int:
@@ -49,19 +55,29 @@ class CheckAdmit:
         self._limit = max(1, int(limit))
         return self._limit
 
-    def hold(self, db_id: int) -> None:
-        """Раздача добавлена на паузе и ждёт классификации."""
+    def hold(self, db_id: int, *, recheck: bool = False) -> None:
+        """Раздача добавлена на паузе и ждёт классификации.
+
+        recheck: fastresume говорит «качаем», но файлы уже лежат целиком.
+        Очередь не отпускает такую раздачу в рой.
+        """
         if db_id in self._known:
             return
         self._known.add(db_id)
         self._held.append(db_id)
         self._waiting.add(db_id)
+        if recheck:
+            self._recheck.add(db_id)
+
+    def wants_recheck(self, db_id: int) -> bool:
+        return db_id in self._recheck
 
     def drop(self, db_id: int) -> None:
         """Убрать из очереди: пауза пользователя, удаление или явный recheck."""
         self._known.discard(db_id)
         self._waiting.discard(db_id)
         self._saw_full.discard(db_id)
+        self._recheck.discard(db_id)
         self._probing.pop(db_id, None)
         self._hashing.pop(db_id, None)
         self._held = [i for i in self._held if i != db_id]
@@ -140,6 +156,13 @@ class CheckAdmit:
                 continue
             label = st.strip().lower()
             if is_full_hash_check_state(label):
+                self._recheck.discard(db_id)
+                self._probing.pop(db_id, None)
+                self._queued.append(db_id)
+                self._waiting.add(db_id)
+                pause.append(db_id)
+                continue
+            if label in {"downloading", "downloading_metadata"} and db_id in self._recheck:
                 self._probing.pop(db_id, None)
                 self._queued.append(db_id)
                 self._waiting.add(db_id)
@@ -163,7 +186,10 @@ class CheckAdmit:
                 continue
             label = st.strip().lower()
             if is_full_hash_check_state(label):
+                self._recheck.discard(db_id)
                 self._saw_full.add(db_id)
+                continue
+            if label in {"downloading", "downloading_metadata"} and db_id in self._recheck:
                 continue
             if label in _TRANSIENT:
                 if db_id not in self._saw_full and now - started >= self._probe_timeout:
@@ -187,6 +213,7 @@ class CheckAdmit:
         self._known.discard(db_id)
         self._waiting.discard(db_id)
         self._saw_full.discard(db_id)
+        self._recheck.discard(db_id)
 
 
 class UserPauseStore:

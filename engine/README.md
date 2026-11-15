@@ -26,7 +26,8 @@ HTTP-сервис с **внутренним API** (`/internal/v1/*`), плuggabl
 - **`SEEDING_DATA_ROOT`** — корень данных на диске (логи/состояние; торренты привязываются к `save_path` из API).
 - **`SEEDING_LT_STATE_FILE`** — путь к файлу состояния сессии libtorrent (bencode): при старте загружается, при остановке перезаписывается.
 - **`SEEDING_FASTRESUME_DIR`** — каталог per-torrent fastresume (по умолчанию `{SEEDING_DATA_ROOT}/.fastresume`). Сохранение при pause/stop/add; загрузка при restore/add если файл `{db_id}.fastresume` есть.
-- **`ENGINE_STORAGE_SUBDIR`** — подкаталог на томе движка (`b1`…`b6`), создаётся entrypoint'ом.
+- **`ENGINE_STORAGE_SUBDIR`** — подкаталог на томе движка (`b1`…`b6`). При `SEEDING_STORAGE_REQUIRE_MOUNT=0` его создаёт entrypoint; при `1` каталог должен уже быть отдельным диском.
+- **`SEEDING_STORAGE_REQUIRE_MOUNT`** — `1` на сервере (дефолт compose): не стартовать, пока `/data/<ENGINE_STORAGE_SUBDIR>` не другой filesystem, чем `SEEDING_DATA_ROOT`. Иначе после обрыва питания движок видит пустой каталог и качает библиотеку на системный диск. `0` — только dev без своего тома. Спека: `docs/ENGINE-LAUNCH-CHECKLIST.md`, раздел G.
 - **`LT_LISTEN_PORT_LOW` / `LT_LISTEN_PORT_HIGH`** — диапазон портов BitTorrent для libtorrent (по умолчанию `6881`–`6889`).
 - **`LT_ENABLE_DHT`**, **`LT_ENABLE_LSD`**, **`LT_ENABLE_UPNP`**, **`LT_ENABLE_NATPMP`** — `0`/`false`/`no` отключает (по умолчанию включено, кроме явного `0`).
 - **`LT_DOWNLOAD_RATE_LIMIT_BPS`** / **`LT_UPLOAD_RATE_LIMIT_BPS`** — лимиты в байтах/с (пусто = не трогать дефолт libtorrent).
@@ -50,7 +51,7 @@ uvicorn seeding_engine.main:app --host 0.0.0.0 --port 8081
 
 ## Docker
 
-Образ ставит **libtorrent 2.1.2** колесом с релиза GitHub (на PyPI этой версии нет; пакет Debian `python3-libtorrent` — это 2.0.11, рядом его не ставить). По умолчанию **`SEEDING_ENGINE_BACKEND=libtorrent`**. `GET /health` отдаёт `libtorrent_version` рядом с версией движка. Entrypoint создаёт `/data/.state`, `/data/.fastresume`, `/data/.torrents` и `ENGINE_STORAGE_SUBDIR`.
+Образ ставит **libtorrent 2.1.2** колесом с релиза GitHub (на PyPI этой версии нет; пакет Debian `python3-libtorrent` — это 2.0.11, рядом его не ставить). По умолчанию **`SEEDING_ENGINE_BACKEND=libtorrent`**. `GET /health` отдаёт `libtorrent_version` рядом с версией движка. Entrypoint создаёт `/data/.state`, `/data/.fastresume`, `/data/.torrents`. Подкаталог `ENGINE_STORAGE_SUBDIR` создаётся только при `SEEDING_STORAGE_REQUIRE_MOUNT=0`; при `1` он должен уже быть отдельным диском.
 
 ## Внутренний API
 

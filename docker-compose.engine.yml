@@ -42,6 +42,8 @@ services:
       # Идентификатор и хранилище движка.
       SEEDING_ENGINE_ID: ${SEEDING_ENGINE_ID}
       ENGINE_STORAGE_SUBDIR: ${SEEDING_ENGINE_ID}
+      # 1: не стартовать, пока /data/<id> не отдельный диск. 0 — только dev без своего тома.
+      SEEDING_STORAGE_REQUIRE_MOUNT: ${SEEDING_STORAGE_REQUIRE_MOUNT:-1}
       LT_LISTEN_INTERFACES: "0.0.0.0:${SEEDING_ENGINE_LISTEN_PORT},[::]:${SEEDING_ENGINE_LISTEN_PORT}"
       SEEDING_ENGINE_LISTEN_PORT: ${SEEDING_ENGINE_LISTEN_PORT}
       # Саморегистрация в оркестраторе.

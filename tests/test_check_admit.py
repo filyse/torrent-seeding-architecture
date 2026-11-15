@@ -82,6 +82,31 @@ def test_running_slot_is_not_waiting():
     assert not admit.is_waiting(7)
 
 
+def test_full_files_are_not_released_into_download():
+    """fastresume врёт «качаем», файлы уже на диске — в рой не отпускаем."""
+    admit = CheckAdmit(1)
+    admit.hold(1, recheck=True)
+    admit.hold(2, recheck=True)
+    first = admit.tick({}, busy=0, now=0)
+    assert first.resume == [1]
+    parked = admit.tick({1: "downloading"}, busy=0, now=0.2)
+    assert parked.pause == [1]
+    assert parked.resume == [2]
+    assert admit.is_waiting(1)
+    assert admit.wants_recheck(1)
+
+
+def test_real_download_still_releases():
+    admit = CheckAdmit(1)
+    admit.hold(1)
+    admit.tick({}, busy=0, now=0)
+    released = admit.tick({1: "downloading"}, busy=0, now=0.2)
+    assert released.pause == []
+    assert released.resume == []
+    assert not admit.is_waiting(1)
+    assert not admit.wants_recheck(1)
+
+
 def test_user_pause_store_survives_seal(tmp_path: Path):
     path = tmp_path / "user-paused.json"
     fresh = UserPauseStore(path)
