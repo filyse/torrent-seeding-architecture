@@ -35,6 +35,15 @@
       (`docker-compose.a-host.yml`, `docker-compose.c-host.yml`), задаёт
       `SEEDING_STORAGE_REQUIRE_MOUNT: "1"` в своём `environment` сам. Иначе
       entrypoint считает настройку выключенной.
+- [ ] Контейнер движка запускается как `user: "1000:1000"`. Это тот же uid, что у
+      FTP на хосте (`rudub` / `rudub2` / `rudub3`). `docker-compose.engine.yml`
+      задаёт `user` сам. `docker-compose.a-host.yml` и `docker-compose.c-host.yml`
+      должны задать его на сервисе отдельно: они этот файл не подключают.
+      Иначе libtorrent создаёт файлы `root:root`, и FTP не может их удалить.
+      `chown` после импорта и upload остаётся подстраховкой, если процесс всё же
+      стартовал от root.
+- [ ] `/data/.state`, `/data/.fastresume` и `/data/.torrents` доступны на запись
+      uid 1000. Сам каталог `/data` может остаться у root.
 
 ## B. Запуск
 
@@ -47,6 +56,15 @@
   ```
 
 - [ ] Контейнер `Up ... (healthy)`: `docker ps | grep <ENG>`.
+- [ ] Процесс — uid 1000, новый файл в каталоге раздачи тоже:
+
+  ```bash
+  docker exec <ENG>-seeding id
+  # uid=1000 gid=1000
+  docker exec <ENG>-seeding sh -c 'touch /data/<ENG>/.uid-test && ls -l /data/<ENG>/.uid-test && rm /data/<ENG>/.uid-test'
+  # -rw-r--r-- 1 1000 1000
+  ```
+
 - [ ] В логах нет повторных рестартов/исключений: `docker logs <ENG>-seeding | tail`.
 
 ## C. Контрольная плоскость (оркестратор видит движок)

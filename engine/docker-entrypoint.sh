@@ -59,4 +59,15 @@ if [ "${SEEDING_ENGINE_TLS:-0}" = "1" ]; then
 	fi
 fi
 
+# Контент и fastresume должны принадлежать uid 1000 (FTP rudub/rudub2/rudub3).
+# Образ по умолчанию стартует от root; если compose уже задал user 1000, шаг пустой.
+if [ "$(id -u)" = "0" ]; then
+	for d in "$ROOT/.state" "$ROOT/.fastresume" "$ROOT/.torrents"; do
+		if [ -d "$d" ]; then
+			chown -R 1000:1000 "$d"
+		fi
+	done
+	exec setpriv --reuid=1000 --regid=1000 --clear-groups -- "$@"
+fi
+
 exec "$@"

@@ -1313,8 +1313,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
 
         try:
             await asyncio.to_thread(_copy)
-            # Контент скопирован от root — вернуть владельца как у источника (1000:1000),
-            # иначе по FTP к перенесённым файлам не будет доступа.
+            # Копия должна остаться 1000:1000 (uid FTP). Процесс и так uid 1000;
+            # chown нужен, если контейнер всё же стартовал от root.
             await asyncio.to_thread(self._chown_tree, dst)
             self._migrate_progress[db_id] = {"phase": "checking", "copied": total, "total": total}
             handle = await self.add_torrent(db_id, None, save_path, torrent_data=torrent_data)
@@ -1409,8 +1409,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
             finally:
                 await extract_task
 
-        # Распаковано от root — вернуть владельца как у источника (1000:1000), иначе по FTP
-        # (uid 1000) к перенесённым файлам не будет доступа.
+        # Распакованное дерево должно быть 1000:1000 (uid FTP). Процесс и так uid 1000;
+        # chown нужен, если контейнер всё же стартовал от root.
         for top in extracted_tops:
             await asyncio.to_thread(self._chown_tree, Path(save_path) / top)
 
@@ -1442,8 +1442,8 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
     @classmethod
     def _chown_tree(cls, root: Path) -> None:
         """Выставить владельца (uid:gid из _content_owner) на дерево контента после переноса.
-        Движок в контейнере работает от root, поэтому extractall/copy создают файлы root:root —
-        без этого по FTP (uid 1000) к ним нет доступа. Ошибки (не root / иная ФС) глушим."""
+        Штатно процесс уже uid 1000, и libtorrent создаёт файлы им. chown остаётся на случай
+        старта от root: иначе по FTP (uid 1000) к дереву нет доступа. Ошибки глушим."""
         uid, gid = cls._content_owner()
         if uid < 0 and gid < 0:
             return
@@ -1633,7 +1633,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         handle = await self.add_torrent(
             db_id, None, staged["save_path"], torrent_data=staged["torrent_data"]
         )
-        # Контент собран пофайлово от root — вернуть владельца (1000:1000) для доступа по FTP.
+        # Собранное дерево должно быть 1000:1000 (uid FTP), в том числе если процесс был root.
         try:
             name = await asyncio.to_thread(
                 self._torrent_name_from_data, self._lt, staged["torrent_data"]
@@ -1731,8 +1731,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
                     finally:
                         await loop.run_in_executor(None, fobj.close)
 
-        # Контент скачан напрямую у движка-источника от root — вернуть владельца (1000:1000),
-        # иначе по FTP (uid 1000) к перенесённой раздаче не будет доступа.
+        # Прямой перенос должен остаться 1000:1000 (uid FTP), в том числе если процесс был root.
         await asyncio.to_thread(self._chown_tree, base)
 
         self._migrate_progress[db_id] = {"phase": "checking", "copied": total, "total": total}

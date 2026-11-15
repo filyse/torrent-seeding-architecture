@@ -23,6 +23,8 @@ services:
       context: .
       dockerfile: engine/Dockerfile
     container_name: ${SEEDING_ENGINE_ID:-engine}-seeding
+    # Тот же uid, что у FTP. Новые файлы libtorrent сразу 1000:1000.
+    user: "1000:1000"
     restart: unless-stopped
     # Запас на graceful shutdown: сохранить fastresume/session.state по SIGTERM.
     stop_grace_period: 60s

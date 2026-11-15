@@ -199,7 +199,10 @@ curl -skS http://127.0.0.1:8090/b1/health
        context: .
        dockerfile: engine/Dockerfile
      image: seeding-engine-a:latest
+     user: "1000:1000"
    ```
+   `user` обязателен: a-host не подключает `docker-compose.engine.yml`, где он уже задан.
+   Без него libtorrent пишет файлы от root, и FTP (uid 1000) их не удаляет.
 2. В `x-engine-env` добавить (секрет — через `.env` рядом, не вписывать в yaml):
    ```yaml
    SEEDING_UPLOAD_TICKET_SECRET: ${SEEDING_UPLOAD_TICKET_SECRET:-}

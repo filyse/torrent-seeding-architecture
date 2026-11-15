@@ -9,6 +9,10 @@
 
 ---
 
+## compose / docs — 2026-11-16
+
+- **Права контента.** Движки a1–a3, b1–b6 и c1 запущены как `user: "1000:1000"`, образ не пересобирался. Новые файлы libtorrent и upload принадлежат uid 1000, как FTP на том же хосте. Раньше процесс был root, и обычная закачка оставляла `root:root`: FTP не мог удалить такой файл. Спека: `docs/ENGINE-LAUNCH-CHECKLIST.md` (разделы A и B). В репозитории то же `user` в `docker-compose.engine.yml`. Entrypoint при старте от root сам переходит на uid 1000; это попадёт в образ при следующей сборке.
+
 ## engine 1.6.20 — 2026-11-15
 
 - **Диск раздачи.** `SEEDING_STORAGE_REQUIRE_MOUNT=1` (дефолт `docker-compose.engine.yml`): entrypoint и `start()` не поднимают движок, пока `/data/<id>` не отдельный том. `fstab` с `nofail` больше не приводит к скачиванию библиотеки на системный диск, если контейнер стартовал раньше диска. `0` — только dev. Спека: `docs/ENGINE-LAUNCH-CHECKLIST.md`.

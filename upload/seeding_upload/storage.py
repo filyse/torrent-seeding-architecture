@@ -245,7 +245,7 @@ class UploadStorage:
 
     @classmethod
     def _apply_perms(cls, path: Path, mode: int) -> None:
-        """uid/gid 1000 + mode (файл 0644 / каталог 0755). Контейнер пишет от root."""
+        """uid/gid 1000 + mode (файл 0644 / каталог 0755). Процесс уже uid 1000; chown остаётся, если он root."""
         uid, gid = cls._content_owner()
         chown = getattr(os, "chown", None)
         if chown is not None and (uid >= 0 or gid >= 0):

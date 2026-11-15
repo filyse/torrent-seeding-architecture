@@ -82,6 +82,9 @@ UPLOAD_RELAY_UPSTREAMS={"a":"https://seedbox2.hw-s.ru/u/a","b":"https://seedbox2
 ```
 
 После `complete`: файл **`1000:1000` / `0644`**, новые каталоги **`1000:1000` / `0755`**.
+Движок запущен как `user: "1000:1000"` (`docs/ENGINE-LAUNCH-CHECKLIST.md`), поэтому
+обычная закачка libtorrent создаёт файлы с тем же владельцем. `chown` в upload
+и после импорта остаётся на случай старта процесса от root.
 
 ## Лимиты (admin)
 
