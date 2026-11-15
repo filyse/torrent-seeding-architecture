@@ -1080,6 +1080,34 @@ containerd-api:latest`, `docker tag containerd-web:pre-1559 containerd-web:lates
 - CT400: пересобраны `api` и `web` (движки и сидирующие контейнеры не трогались). Бэкап образов: `containerd-web:pre-1645` (= 1.64.4), `containerd-api:pre-12616` (= 1.26.15).
 - Откат: `docker tag containerd-web:pre-1645 containerd-web:latest && docker tag containerd-api:pre-12616 containerd-api:latest && scripts/deploy-ct400.sh up -d --no-deps --no-build api web`.
 
+## 7я43. engine 1.6.20 — не стартовать без диска раздачи — 2026-11-16
+
+Коммит `df95fbf`. CT400 (api/web) не пересобирался: правка только движка.
+
+Порядок: c1 (канарейка) → a1–a3 одним compose → b1, затем b2–b6. На хостах
+`git pull --ff-only origin main` (c1 с `201bb8e`, a и b с `35c5005`), без
+`git reset --hard`. Образы до сборки: `seeding-engine-c:pre-1620`,
+`seeding-engine-a:pre-1620`, `seeding-engine-engine:pre-1620`,
+`seeding-engine-b2-engine:pre-1620` … `seeding-engine-b6-engine:pre-1620`.
+
+Host-only compose (не в git): в `docker-compose.c-host.yml` и
+`docker-compose.a-host.yml` добавлен `SEEDING_STORAGE_REQUIRE_MOUNT: "1"`.
+b1–b6 берут дефолт `1` из `docker-compose.engine.yml`.
+
+Проверка после старта: все 10 контейнеров healthy, `RestartCount=0`, версия
+1.6.20, в окружении `SEEDING_STORAGE_REQUIRE_MOUNT=1`. `/data` и `/data/<id>` —
+разные устройства: c1 `nvme0n1p2` / `sda1`; a1–a3 `nvme2n1p2` / `nvme0n1p1`,
+`nvme1n1`, `sda1`; b1–b6 `nvme0n1p3` / `sdc2`, `sdb`, `sda`, `sdd`, `sde`, `sdf`.
+Строк `downloading` нет. Очередь после рестарта отпускала раздачи в seeding
+(`hashing=0`), не в докачку. c1 (304) и a1–a3 к концу выката целиком seeding.
+
+Откат одного движка: `docker tag <образ>:pre-1620 <образ>:latest` и тот же
+`up -d --no-deps --no-build`.
+
+FTP (`ftpd`) и WebDAV не пересоздавались: диски уже были смонтированы.
+Их гонка закрывается `scripts/require-mount.sh`; родитель — bind системного
+диска, не overlay-корень контейнера (см. ENGINE-LAUNCH-CHECKLIST, раздел G).
+
 ## 7. Откат
 
 - Код: `git reset --hard <старый-HEAD>` или `git apply predeploy.patch`.
