@@ -31,6 +31,8 @@ export type QueuedUpload = {
   destDir: string;
   route: UploadRoute;
   status: "queued" | "uploading" | "disk" | "done" | "error" | "cancelled";
+  /** Сборка на HDD: ждёт слот или уже пишет файл. */
+  diskPhase?: "queued" | "running";
   /** Отдельный флаг: status сужается TS после присвоения "uploading". */
   cancelled: boolean;
   progress: number;
@@ -220,14 +222,14 @@ function noteUploadBytes(item: QueuedUpload, doneBytes: number): void {
   item._speedBytes = doneBytes;
 }
 
-function uploadStatusLabel(status: QueuedUpload["status"]): string {
-  switch (status) {
+function uploadStatusLabel(item: QueuedUpload): string {
+  switch (item.status) {
     case "queued":
       return "В очереди";
     case "uploading":
       return "Загрузка";
     case "disk":
-      return "Ждёт диск";
+      return item.diskPhase === "running" ? "В работе · сборка" : "Очередь · сборка";
     case "done":
       return "Готово";
     case "error":
@@ -237,14 +239,14 @@ function uploadStatusLabel(status: QueuedUpload["status"]): string {
   }
 }
 
-function uploadStatusBadge(status: QueuedUpload["status"]): string {
-  switch (status) {
+function uploadStatusBadge(item: QueuedUpload): string {
+  switch (item.status) {
     case "queued":
       return "badge badge--queued";
     case "uploading":
       return "badge badge--downloading";
     case "disk":
-      return "badge badge--queued";
+      return item.diskPhase === "running" ? "badge badge--checking" : "badge badge--queued";
     case "done":
       return "badge badge--seeding";
     case "error":
@@ -318,8 +320,8 @@ function renderQueue(): void {
       const top = d.el("div", { className: "upload-item__top" });
       top.append(
         d.el("div", { className: "upload-item__name", title: item.file.name }, [item.file.name]),
-        d.el("span", { className: uploadStatusBadge(item.status) }, [
-          item.status === "uploading" || item.status === "done" ? `${pct}%` : uploadStatusLabel(item.status),
+        d.el("span", { className: uploadStatusBadge(item) }, [
+          item.status === "uploading" || item.status === "done" ? `${pct}%` : uploadStatusLabel(item),
         ]),
       );
 
@@ -348,7 +350,7 @@ function renderQueue(): void {
       const metaParts: string[] = [];
       const via = item.route === "relay" ? "через RU" : "напрямую";
       if (item.status === "done") {
-        metaParts.push(fmtUploadBytes(item.file.size), uploadStatusLabel(item.status), via);
+        metaParts.push(fmtUploadBytes(item.file.size), uploadStatusLabel(item), via);
       } else if (item.status === "uploading") {
         metaParts.push(`${fmtUploadBytes(sent)} / ${fmtUploadBytes(item.file.size)}`);
         metaParts.push(fmtUploadRate(item.speedBps));
@@ -356,7 +358,7 @@ function renderQueue(): void {
         if (eta) metaParts.push(eta);
         metaParts.push(via);
       } else {
-        metaParts.push(fmtUploadBytes(item.file.size), uploadStatusLabel(item.status), via);
+        metaParts.push(fmtUploadBytes(item.file.size), uploadStatusLabel(item), via);
       }
       foot.append(d.el("div", { className: "upload-item__meta" }, [metaParts.join(" · ")]));
       if (item.status === "uploading" || item.status === "queued" || item.status === "disk") {
@@ -546,7 +548,9 @@ async function runUpload(item: QueuedUpload): Promise<void> {
     );
     let finalPath = "";
     if (doneRes.status === 202) {
+      const accepted = (await doneRes.json()) as { state?: string };
       item.status = "disk";
+      item.diskPhase = accepted.state === "running" ? "running" : "queued";
       renderQueue();
       while (!item.cancelled) {
         await new Promise((r) => setTimeout(r, 500));
@@ -562,6 +566,11 @@ async function runUpload(item: QueuedUpload): Promise<void> {
           break;
         }
         if (body.assemble === "error") throw new Error(body.error || "сборка не удалась");
+        const phase = body.assemble === "running" ? "running" : "queued";
+        if (item.diskPhase !== phase) {
+          item.diskPhase = phase;
+          renderQueue();
+        }
       }
       if (item.cancelled) return;
     } else {

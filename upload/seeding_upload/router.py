@@ -218,7 +218,11 @@ def build_upload_router(
                 raise HTTPException(status_code=409, detail=str(info.get("error") or "assemble failed"))
             return JSONResponse(
                 status_code=202,
-                content={"state": "queued", "path": "", "size": sess.size},
+                content={
+                    "state": str(info.get("assemble") or "queued"),
+                    "path": "",
+                    "size": sess.size,
+                },
             )
         try:
             path = storage.complete(sess)

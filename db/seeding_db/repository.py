@@ -112,7 +112,14 @@ class TorrentRepository:
                     func.lower(TorrentRecord.info_hash).like(like),
                 )
             )
-        if status:
+        if status == "disk_queued":
+            # Одна очередь в фильтре: ждущая проверка и ждущий перенос.
+            conds.append(
+                TorrentRecord.status.in_(
+                    (TorrentStatus.check_queued.value, TorrentStatus.migrate_queued.value)
+                )
+            )
+        elif status:
             conds.append(TorrentRecord.status == status)
         if label:
             conds.append(TorrentRecord.label == label)

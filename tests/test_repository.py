@@ -118,6 +118,17 @@ async def test_incomplete_filter_skips_file_check(db_session: AsyncSession):
     assert only_total == 1
     assert [row.id for row in only] == [waiting.id]
 
+    moving = await repo.create(
+        display_name="move-wait",
+        save_path="/p",
+        magnet_uri="magnet:?xt=urn:btih:4444444444444444444444444444444444444444",
+        status=TorrentStatus.migrate_queued.value,
+    )
+    await db_session.commit()
+    queued, queued_total = await repo.list_page(status="disk_queued")
+    assert queued_total == 2
+    assert {row.id for row in queued} == {waiting.id, moving.id}
+
 
 @pytest.mark.asyncio
 async def test_repository_delete(db_session: AsyncSession):

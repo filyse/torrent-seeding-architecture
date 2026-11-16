@@ -216,3 +216,42 @@ async def test_cancel_while_waiting_drops_the_queued_disk_job():
     await stopper
     assert opened is None
     assert await disk.poll("m9-src") == "missing"
+
+
+@pytest.mark.asyncio
+async def test_assemble_is_queued_until_the_slot_then_running():
+    from types import SimpleNamespace
+
+    from seeding_engine.torrent_runtime import LibtorrentTorrentRuntime
+
+    rt = LibtorrentTorrentRuntime.__new__(LibtorrentTorrentRuntime)
+    rt._assemble = {}
+    rt._disk = DiskQueue(1)
+    gate = asyncio.Event()
+
+    async def hold() -> None:
+        await gate.wait()
+
+    assert await rt._disk.acquire("busy", band="user", kind="copy", on_start=hold) == "running"
+    sess = SimpleNamespace(id="up1", size=4, jti="jti")
+    seen: dict[str, str] = {}
+
+    class Storage:
+        def complete(self, _sess: object) -> str:
+            seen["mid"] = str(rt.assemble_state("up1")["assemble"])
+            return "/data/b1/file"
+
+    assert await rt.assemble_upload(Storage(), sess) == "queued"
+    assert rt.assemble_state("up1")["assemble"] == "queued"
+    gate.set()
+    for _ in range(50):
+        if rt.assemble_state("up1")["assemble"] == "done":
+            break
+        await asyncio.sleep(0.05)
+    assert seen["mid"] == "running"
+    assert rt.assemble_state("up1") == {
+        "assemble": "done",
+        "path": "/data/b1/file",
+        "size": 4,
+        "jti": "jti",
+    }

@@ -490,6 +490,21 @@ body.layout-wide #app {
   background: transparent;
 }
 
+.cselect-option.is-disabled.is-group {
+  opacity: 1;
+  margin-top: 0.35rem;
+  padding-bottom: 0.15rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cselect-option.is-nested {
+  padding-left: 1.15rem;
+}
+
 /* Открытый нативный select подсвечиваем как в фокусе. */
 .select.cselect-active,
 .list-filter__select.cselect-active {

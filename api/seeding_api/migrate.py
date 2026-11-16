@@ -489,7 +489,7 @@ _QUEUE_ORDER = asyncio.Lock()
 
 async def _persist_queued(session_factory, **kw) -> None:
     """Записать ждущий перенос в БД до ожидания слота: переживает рестарт API,
-    и UI видит «В очереди на перенос», а не «Перенос»."""
+    и UI видит «Очередь · перенос», а не «В работе · перенос»."""
     torrent_id = kw["torrent_id"]
     async with session_factory() as session:
         mrepo = MigrationRepository(session)

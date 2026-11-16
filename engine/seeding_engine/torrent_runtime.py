@@ -2402,7 +2402,7 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
     async def assemble_upload(self, storage, sess) -> str:
         """Поставить финальную сборку в дисковую очередь. Чанки слот не занимали."""
         prev = self._assemble.get(sess.id)
-        if prev is not None and prev.get("assemble") in {"queued", "done", "error"}:
+        if prev is not None and prev.get("assemble") in {"queued", "running", "done", "error"}:
             return str(prev["assemble"])
         if len(self._assemble) > 200:
             for key in list(self._assemble)[:50]:
@@ -2417,6 +2417,12 @@ class LibtorrentTorrentRuntime(TorrentRuntime):
         async def run() -> None:
             if self._assemble.get(sess.id, {}).get("assemble") == "cancelled":
                 return
+            self._assemble[sess.id] = {
+                "assemble": "running",
+                "path": "",
+                "size": sess.size,
+                "jti": sess.jti,
+            }
             try:
                 path = await asyncio.to_thread(storage.complete, sess)
             except Exception as exc:  # noqa: BLE001

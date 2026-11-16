@@ -640,7 +640,15 @@ function releaseSearchOverlay(): void {
     onSearchOverlayEsc = null;
   }
 }
-let listStatusFilter = lsGet("ui.status") ?? "";
+let listStatusFilter = ((): string => {
+  const v = lsGet("ui.status") ?? "";
+  // Старые два пункта очереди теперь один фильтр.
+  if (v === "check_queued" || v === "migrate_queued") {
+    lsSet("ui.status", "disk_queued");
+    return "disk_queued";
+  }
+  return v;
+})();
 let listLabelFilter = lsOrOpen("ui.label", "ui.openLabel");
 let listEngineFilter = lsOrOpen("ui.engine", "ui.openEngine");
 let listState: ListState = ((): ListState => {
@@ -1292,6 +1300,8 @@ function enhanceSelect(select: HTMLSelectElement): void {
       const item = el("div", { className: "cselect-option", role: "option" }, [opt.textContent ?? ""]);
       if (i === select.selectedIndex) item.classList.add("is-selected");
       if (opt.disabled) item.classList.add("is-disabled");
+      if (opt.dataset.group === "1") item.classList.add("is-group");
+      if (opt.dataset.nest === "1") item.classList.add("is-nested");
       bindItem(item, i);
       panel.append(item);
     });
@@ -1314,6 +1324,8 @@ function enhanceSelect(select: HTMLSelectElement): void {
       if (item.textContent !== text) item.textContent = text;
       item.classList.toggle("is-selected", i === select.selectedIndex);
       item.classList.toggle("is-disabled", opt.disabled);
+      item.classList.toggle("is-group", opt.dataset.group === "1");
+      item.classList.toggle("is-nested", opt.dataset.nest === "1");
     });
   };
   select.addEventListener("cselect-sync", syncOpen);
@@ -3820,18 +3832,18 @@ function statusLabel(status: string, ltState?: string | null): string {
   if (ltState === "downloading_metadata") return "Метаданные";
   const map: Record<string, string> = {
     downloading: "Загрузка",
-    checking: "Проверка",
-    check_queued: "Ждёт проверки",
+    checking: "В работе · проверка",
+    check_queued: "Очередь · проверка",
     seeding: "Раздача",
     paused: "Пауза",
     queued: "В очереди",
-    migrating: "Перенос",
-    migrate_queued: "В очереди на перенос",
+    migrating: "В работе · перенос",
+    migrate_queued: "Очередь · перенос",
     error: "Ошибка",
     engine_offline: "Движок недоступен",
     pending_pause: "Пауза…",
     pending_resume: "Запуск…",
-    pending_recheck: "Проверка…",
+    pending_recheck: "В работе · проверка…",
   };
   return map[status] ?? status;
 }
@@ -3839,7 +3851,6 @@ function statusLabel(status: string, ltState?: string | null): string {
 function displayStatusLabel(t: TorrentOut | TorrentDetailOut): string {
   const st = effectiveStatus(t);
   if (t.runtime?.lt_state === "downloading_metadata") return "Метаданные";
-  if (st === "check_queued") return "Ждёт проверки";
   return statusLabel(st, t.runtime?.lt_state);
 }
 
@@ -4454,7 +4465,7 @@ function buildMigrateProgress(data: TorrentDetailOut, onDone: () => void): HTMLE
     let text = MIGRATE_PHASE_LABELS[phase] ?? phase;
     if (phase === "queued") {
       // Ждёт слот: место в очереди и куда переносим, без транспорта и процентов.
-      text = "В очереди на перенос";
+      text = "Очередь · перенос";
       if (s.queue_position) text += ` · №${s.queue_position}`;
       if (s.target_engine_id) text += ` → ${s.target_engine_id}`;
     }
@@ -6225,9 +6236,10 @@ function mountListShell(root: HTMLElement): void {
   const SEARCH_STATUS: Record<string, string> = {
     seeding: "Раздача",
     downloading: "Загрузка",
-    checking: "Проверка",
-    check_queued: "Ждёт проверки",
-    migrate_queued: "В очереди на перенос",
+    checking: "В работе · проверка",
+    check_queued: "Очередь · проверка",
+    migrating: "В работе · перенос",
+    migrate_queued: "Очередь · перенос",
     paused: "Пауза",
   };
   const searchInput = el("input", {
@@ -6704,18 +6716,26 @@ function mountListShell(root: HTMLElement): void {
   syncSearchToggle();
 
   const statusSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
-  for (const [val, label] of [
-    ["", "Все статусы"],
-    ["seeding", "Раздача"],
-    ["downloading", "Загрузка"],
-    ["checking", "Проверка"],
-    ["check_queued", "Ждёт проверки"],
-    ["migrate_queued", "В очереди на перенос"],
-    ["paused", "Пауза"],
-  ]) {
-    const o = el("option", { value: val }, [label]) as HTMLOptionElement;
-    o.dataset.base = label;
-    if (val === listStatusFilter) o.selected = true;
+  const statusOpts: { val: string; label: string; group?: boolean; nest?: boolean }[] = [
+    { val: "", label: "Все статусы" },
+    { val: "seeding", label: "Раздача" },
+    { val: "downloading", label: "Загрузка" },
+    { val: "__work", label: "В работе", group: true },
+    { val: "checking", label: "Проверка", nest: true },
+    { val: "migrating", label: "Перенос", nest: true },
+    { val: "disk_queued", label: "Очередь", nest: true },
+    { val: "paused", label: "Пауза" },
+  ];
+  for (const item of statusOpts) {
+    const o = el("option", { value: item.val }, [item.label]) as HTMLOptionElement;
+    o.dataset.base = item.label;
+    if (item.group) {
+      o.disabled = true;
+      o.dataset.group = "1";
+      o.dataset.nocount = "1";
+    }
+    if (item.nest) o.dataset.nest = "1";
+    if (item.val === listStatusFilter) o.selected = true;
     statusSelect.append(o);
   }
   statusSelect.addEventListener("change", () => {
@@ -6855,6 +6875,10 @@ function mountListShell(root: HTMLElement): void {
   function applyCountsTo(sel: HTMLSelectElement, counts: Record<string, number>): void {
     for (const o of Array.from(sel.options)) {
       const base = o.dataset.base ?? o.textContent ?? "";
+      if (o.dataset.nocount === "1") {
+        o.textContent = base;
+        continue;
+      }
       const c = o.value === "" ? facets?.total : (counts[o.value] ?? 0);
       o.textContent = c == null ? base : base + fmtCount(c);
     }
@@ -6881,7 +6905,11 @@ function mountListShell(root: HTMLElement): void {
   }
   function applyFacetCounts(): void {
     if (!facets) return;
-    applyCountsTo(statusSelect, facets.statuses);
+    const statuses = {
+      ...facets.statuses,
+      disk_queued: (facets.statuses.check_queued ?? 0) + (facets.statuses.migrate_queued ?? 0),
+    };
+    applyCountsTo(statusSelect, statuses);
     applyCountsTo(stateSelect, facets.states);
     applyCountsSizeTo(labelSelect, facets.labels, facets.label_sizes ?? {});
     applyCountsSizeTo(engineSelect, facets.engines, facets.engine_sizes ?? {});
@@ -7343,8 +7371,8 @@ function mountListShell(root: HTMLElement): void {
     seeding: "Раздача",
     downloading: "Загрузка",
     checking: "Проверка",
-    check_queued: "Ждёт проверки",
-    migrate_queued: "В очереди на перенос",
+    migrating: "Перенос",
+    disk_queued: "Очередь",
     paused: "Пауза",
   };
   const STATE_LABELS: Record<string, string> = {
