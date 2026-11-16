@@ -5483,11 +5483,32 @@ body:has(.login-overlay) {
 
 .creator-progress {
   margin: 0.5rem 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  column-gap: 0.75rem;
+  row-gap: 0.25rem;
+  align-items: center;
   max-height: 10rem;
   overflow-y: auto;
+}
+
+/* Строки делят одни и те же колонки: путь, статус, кнопка.
+   Пустая кнопка у ещё идущей строки не сдвигает «Готово». */
+.creator-progress .creator-task {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  justify-content: initial;
+  column-gap: 0.75rem;
+}
+
+.creator-progress .creator-task__name {
+  min-width: 0;
+}
+
+.creator-progress .creator-task__btn {
+  justify-self: end;
 }
 
 .creator-task {
