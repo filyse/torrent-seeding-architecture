@@ -54,6 +54,27 @@ async def test_repository_list_for_engine_restore(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_list_page_sorts_by_engine(db_session: AsyncSession):
+    repo = TorrentRepository(db_session)
+    for name, engine, digest in (
+        ("on-c", "c1", "c" * 40),
+        ("on-b", "b2", "b" * 40),
+        ("on-a", "a1", "a" * 40),
+        ("on-a2", "a2", "d" * 40),
+    ):
+        await repo.create(
+            display_name=name,
+            save_path="/p",
+            magnet_uri=f"magnet:?xt=urn:btih:{digest}",
+            engine_id=engine,
+        )
+    await db_session.commit()
+    rows, total = await repo.list_page(sort="engine")
+    assert total == 4
+    assert [row.engine_id for row in rows] == ["a1", "a2", "b2", "c1"]
+
+
+@pytest.mark.asyncio
 async def test_list_page_and_facets_migrating_state(db_session: AsyncSession):
     repo = TorrentRepository(db_session)
     seeding = await repo.create(

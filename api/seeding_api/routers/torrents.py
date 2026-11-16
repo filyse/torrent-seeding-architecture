@@ -112,7 +112,7 @@ async def list_torrents(
         None,
         description="active|peers|idle|incomplete|error|migrating|migrate_queued|engine_offline",
     ),
-    sort: str = Query("name", description="name|added|up|down|peers|uploaded|ratio|size|progress"),
+    sort: str = Query("name", description="name|added|up|down|peers|uploaded|ratio|size|progress|engine"),
     limit: int = Query(50, ge=1, le=250),
     offset: int = Query(0, ge=0),
     live: bool = Query(

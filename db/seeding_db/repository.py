@@ -145,7 +145,7 @@ class TorrentRepository:
         """Страница раздач с фильтрами/сортировкой на стороне БД (масштабируется на 10k+).
 
         Фильтры: q (имя/метка/hash, подстрока), status, label, engine_id, state (по активности).
-        sort: added|name|up|down|peers|uploaded|ratio|size|progress.
+        sort: added|name|up|down|peers|uploaded|ratio|size|progress|engine.
         «Живые» поля (up/down/peers/progress/uploaded/size) — снимок из фонового воркера.
         Возвращает (rows, total_matched)."""
         conds = []
@@ -221,6 +221,9 @@ class TorrentRepository:
             page_stmt = page_stmt.order_by(TorrentRecord.size.desc(), tail)
         elif sort == "progress":
             page_stmt = page_stmt.order_by(TorrentRecord.progress.desc(), tail)
+        elif sort == "engine":
+            # a1, a2, a3, b1 … c1. Одинаковая ширина номера, поэтому текстовый порядок совпадает.
+            page_stmt = page_stmt.order_by(TorrentRecord.engine_id.asc(), tail)
         elif sort == "ratio":
             ratio = TorrentRecord.uploaded_total / func.nullif(TorrentRecord.size, 0)
             page_stmt = page_stmt.order_by(nullslast(ratio.desc()), tail)

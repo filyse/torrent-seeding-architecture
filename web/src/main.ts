@@ -600,6 +600,7 @@ const SORT_VALUES = [
   "ratio",
   "size",
   "progress",
+  "engine",
 ] as const;
 type ListSort = (typeof SORT_VALUES)[number];
 const STATE_VALUES = [
@@ -5027,7 +5028,7 @@ function tableColumns(): TableColumn[] {
     { key: "seeds", label: "Сиды", num: true, cell: (t) => fmtSeeds(t.runtime?.num_seeds) },
     { key: "peers", label: "Пиры", sort: "peers", num: true, cell: (t) => fmtSeeds(t.runtime?.num_leechers) },
     { key: "added", label: "Добавлен", sort: "added", cell: (t) => fmtAddedCell(t.created_at) },
-    { key: "engine", label: "Движок", cell: (t) => (t.engine_id && t.engine_id.trim() ? t.engine_id : "—") },
+    { key: "engine", label: "Движок", sort: "engine", cell: (t) => (t.engine_id && t.engine_id.trim() ? t.engine_id : "—") },
     { key: "label", label: "Метка", cell: (t) => (t.label && t.label.trim() ? t.label : "—") },
   ];
 }
@@ -5036,6 +5037,11 @@ function sortByHeader(sort: ListSort): void {
   if (listSort === sort) return;
   listSort = sort;
   lsSet("ui.sort", listSort);
+  const sel = document.querySelector<HTMLSelectElement>("select.sort-select");
+  if (sel && sel.value !== sort) {
+    sel.value = sort;
+    fitSelectToSelected(sel);
+  }
   listPage = 0;
   listReload?.();
 }
@@ -6857,6 +6863,7 @@ function mountListShell(root: HTMLElement): void {
     ["ratio", "Рейтинг"],
     ["size", "Размер"],
     ["progress", "Прогресс"],
+    ["engine", "Движок"],
   ]) {
     const o = el("option", { value: val }, [label]) as HTMLOptionElement;
     if (val === listSort) o.selected = true;
