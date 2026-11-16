@@ -8478,6 +8478,12 @@ async function downloadCreatedTorrent(task: CreatorTaskOut): Promise<void> {
   await downloadBlobAsFile(res, `${task.name || "torrent"}.torrent`);
 }
 
+/** Сообщение движка уже содержит «41%» — не дописывать те же скобки. */
+function creatorProgressLabel(message: string, progress: number): string {
+  if (message.includes(`${progress}%`)) return message;
+  return `${message} (${progress}%)`;
+}
+
 function openCreateTorrentDialog(
   onSeeded: () => void,
   preset?: { engineId: string; dirPath: string },
@@ -8657,7 +8663,7 @@ function openCreateTorrentDialog(
               const task = await fetchJson<CreatorTaskOut>(
                 `/creator/tasks/${created.engine_id}/${created.id}`,
               );
-              status.textContent = `${task.message} (${task.progress}%)`;
+              status.textContent = creatorProgressLabel(task.message, task.progress);
               if (TERMINAL_CREATE_STATUSES.has(task.status)) return task;
               await new Promise((r) => setTimeout(r, CREATE_POLL_MS));
             }
@@ -8809,7 +8815,7 @@ function openCreatorQueueDialog(onSeeded: () => void): void {
     if (t.status === "completed") return "✓ Готово";
     if (t.status === "failed") return `✗ ${t.message}`;
     if (t.status === "cancelled") return "Отменено";
-    return `${t.message} (${t.progress}%)`;
+    return creatorProgressLabel(t.message, t.progress);
   };
 
   const seedTask = async (t: CreatorTaskOut) => {
