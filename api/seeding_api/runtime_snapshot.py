@@ -14,7 +14,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
+
+from sqlalchemy.exc import IntegrityError
 
 from seeding_db.models import MIGRATION_STATUSES
 from seeding_db.repository import TorrentRepository
@@ -31,6 +34,48 @@ def snapshot_interval() -> int:
         return max(0, int(os.getenv("SEEDING_RUNTIME_SNAPSHOT_INTERVAL", "10")))
     except ValueError:
         return 10
+
+
+# Моложе этого возраста не забираем: добавление ещё пишет строку в каталог,
+# и снимок не должен вставить тот же id раньше коммита запроса.
+ADOPT_MIN_AGE_S = 15 * 60
+
+
+def _hash_key(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def adopt_candidates(rows, results: dict) -> list[tuple[str, int, dict]]:
+    """Раздачи на движке, которых нет в каталоге.
+
+    Тот же info-hash уже в каталоге (в том числе на другом движке) не заводим
+    второй раз. Из нескольких копий одного hash на движках берём меньший id.
+    """
+    known_ids = {r.id for r in rows}
+    seen_hashes = {_hash_key(r.info_hash) for r in rows if _hash_key(r.info_hash)}
+    now = time.time()
+    found: list[tuple[str, int, dict]] = []
+    for eid in sorted(results):
+        rt_map = results[eid]
+        if not rt_map:
+            continue
+        for db_id in sorted(rt_map):
+            if db_id in known_ids:
+                continue
+            handle = rt_map[db_id]
+            added = handle.get("added_time")
+            if not isinstance(added, (int, float)) or added <= 0:
+                continue
+            if now - float(added) < ADOPT_MIN_AGE_S:
+                continue
+            ih = _hash_key(handle.get("info_hash"))
+            if ih and ih in seen_hashes:
+                continue
+            if ih:
+                seen_hashes.add(ih)
+            known_ids.add(db_id)
+            found.append((eid, int(db_id), handle))
+    return found
 
 
 async def snapshot_once(pool, session_factory, hub=None) -> int:
@@ -147,13 +192,47 @@ async def snapshot_once(pool, session_factory, hub=None) -> int:
 
         await repo.bulk_update_runtime(updates)
         await repo.bulk_update_status(status_updates)
+        adopted = 0
+        for eid, db_id, handle in adopt_candidates(rows, results):
+            progress = float(handle.get("progress") or 0.0)
+            raw_seeds = handle.get("num_seeds") if "num_seeds" in handle else None
+            raw_leechers = handle.get("num_leechers") if "num_leechers" in handle else None
+            try:
+                async with session.begin_nested():
+                    await repo.adopt_missing(
+                        torrent_id=db_id,
+                        display_name=(str(handle.get("name") or "").strip() or f"#{db_id}"),
+                        save_path=str(handle.get("save_path") or ""),
+                        info_hash=_hash_key(handle.get("info_hash")) or None,
+                        magnet_uri=(str(handle.get("magnet_uri") or "").strip() or None),
+                        engine_id=eid,
+                        status=status_from_runtime(
+                            handle.get("runtime_status"), handle.get("lt_state"), progress
+                        ),
+                        size=int(handle.get("size") or 0),
+                        progress=progress,
+                        up_rate=int(handle.get("upload_rate") or 0),
+                        down_rate=int(handle.get("download_rate") or 0),
+                        peers=int(handle.get("peers") or 0),
+                        seeds=int(raw_seeds) if raw_seeds is not None else None,
+                        leechers=int(raw_leechers) if raw_leechers is not None else None,
+                        check_rate=int(handle.get("check_rate") or 0),
+                    )
+                adopted += 1
+            except IntegrityError:
+                continue
+        if adopted:
+            log.info(
+                "catalog adopt: restored %s torrent(s) present on an engine but missing from the database",
+                adopted,
+            )
         await session.commit()
 
         if hub is not None and ws_deltas:
             for tid, payload in ws_deltas.items():
                 await hub.publish(f"torrent:{tid}", payload)
 
-        return len(updates) + len(status_updates)
+        return len(updates) + len(status_updates) + adopted
 
 
 async def runtime_snapshot_loop(pool, session_factory, hub=None) -> None:

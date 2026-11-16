@@ -59,6 +59,52 @@ class TorrentRepository:
         await self._session.refresh(row)
         return row
 
+    async def adopt_missing(
+        self,
+        *,
+        torrent_id: int,
+        display_name: str,
+        save_path: str,
+        info_hash: str | None,
+        magnet_uri: str | None,
+        engine_id: str,
+        status: str,
+        size: int,
+        progress: float,
+        up_rate: int = 0,
+        down_rate: int = 0,
+        peers: int = 0,
+        seeds: int | None = None,
+        leechers: int | None = None,
+        check_rate: int = 0,
+    ) -> TorrentRecord:
+        """Вернуть в каталог раздачу, которая уже есть на движке под этим id.
+
+        id сохраняем: снимок ищет рантайм по нему. Пустая метка — у движка её нет.
+        """
+        row = TorrentRecord(
+            id=torrent_id,
+            display_name=display_name[:512],
+            save_path=save_path,
+            magnet_uri=magnet_uri,
+            info_hash=info_hash,
+            engine_id=engine_id,
+            label="",
+            status=status,
+            size=max(0, size),
+            progress=progress,
+            up_rate=up_rate,
+            down_rate=down_rate,
+            peers=peers,
+            seeds=seeds,
+            leechers=leechers,
+            check_rate=check_rate,
+            runtime_at=datetime.now(timezone.utc),
+        )
+        self._session.add(row)
+        await self._session.flush()
+        return row
+
     async def get_by_id(self, torrent_id: int) -> TorrentRecord | None:
         return await self._session.get(TorrentRecord, torrent_id)
 

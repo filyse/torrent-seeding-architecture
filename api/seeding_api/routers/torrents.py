@@ -193,9 +193,12 @@ async def list_torrents(
 
 
 @router.get("/facets", response_model=TorrentFacetsOut)
-async def torrents_facets(session: DbSession):
+async def torrents_facets(response: Response, session: DbSession):
     """Счётчики для подписи количества у вариантов фильтров (статус/метка/движок/состояние).
-    Считаются по БД (снимок рантайма пишет фоновый воркер), поэтому дёшево и масштабируемо."""
+    Считаются по каталогу. Снимок рантайма дописывает раздачи, которые уже есть на
+    движке, но строки в каталоге нет. Ответ не кэшируется: счётчики должны
+    меняться сразу после добавления."""
+    response.headers["Cache-Control"] = "no-store"
     return await TorrentRepository(session).facets(
         offline_engines=engine_health.offline_engines()
     )

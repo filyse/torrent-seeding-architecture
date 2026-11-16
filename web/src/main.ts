@@ -1222,6 +1222,21 @@ function refreshIconBtn(onClick: () => void): HTMLButtonElement {
 let closeActiveCselect: (() => void) | null = null;
 
 /** Ширина <select> по текущей подписи, а не по самому длинному option. */
+/** Chromium не перерисовывает закрытый select, если поменять только текст option. */
+function repaintSelectLabel(select: HTMLSelectElement): void {
+  const index = select.selectedIndex;
+  if (index < 0) return;
+  const opt = select.options[index];
+  if (!opt) return;
+  const text = opt.textContent ?? "";
+  opt.label = text;
+  const clone = opt.cloneNode(false) as HTMLOptionElement;
+  for (const attr of Array.from(opt.attributes)) clone.setAttribute(attr.name, attr.value);
+  clone.textContent = text;
+  opt.replaceWith(clone);
+  select.selectedIndex = index;
+}
+
 function fitSelectToSelected(select: HTMLSelectElement): void {
   if (!select.isConnected) return;
   const label = select.selectedOptions[0]?.textContent ?? "";
@@ -1981,7 +1996,7 @@ function traySummaryTick(kind: TrayKind): { n: number | null; fmt: TickFmt } {
     }
     return { n: ok, fmt: (v) => `${fmtInt(v)}/${total}` };
   }
-  if (kind === "torrents") return { n: stats ? stats.torrents : null, fmt: fmtInt };
+  if (kind === "torrents") return { n: lastCatalogTotal ?? (stats ? stats.torrents : null), fmt: fmtInt };
   if (kind === "size") return { n: stats?.total_size ?? lastTotalContentSize ?? null, fmt: fmtBytesTick };
   if (kind === "dl") return { n: (stats?.download_rate ?? 0) + fileUploadInboundTotal(), fmt: fmtRateTick };
   if (kind === "ul") return { n: stats?.upload_rate ?? 0, fmt: fmtRateTick };
@@ -2022,7 +2037,7 @@ function trayRowBits(kind: TrayKind, id: string): TrayBits {
     };
   }
   if (kind === "torrents") {
-    const n = ses && !ses.error ? ses.torrents : undefined;
+    const n = catalogTorrentCount(id, online, ses && !ses.error ? ses.torrents : undefined);
     const active = ses && !ses.error ? ses.torrents_active : undefined;
     return {
       n: n ?? null,
@@ -2036,7 +2051,7 @@ function trayRowBits(kind: TrayKind, id: string): TrayBits {
   }
   if (kind === "size") {
     const bytes = lastEngineSizes?.[id];
-    const n = ses && !ses.error ? ses.torrents : undefined;
+    const n = catalogTorrentCount(id, online, ses && !ses.error ? ses.torrents : undefined);
     return {
       n: bytes ?? null,
       fmt: fmtBytesTick,
@@ -2968,7 +2983,7 @@ function mountSessionBar(stats: SessionStats | null, changed?: Set<string>): HTM
   }
   const f = (k: string) => Boolean(changed?.has(k));
   bar.append(
-    statChip(`${stats.torrents}`, `Раздач · ${stats.torrents_active} актив.`, undefined, f("torrents"), {
+    statChip(`${lastCatalogTotal ?? stats.torrents}`, `Раздач · ${stats.torrents_active} актив.`, undefined, f("torrents"), {
       hint: "Показать раздачи по каналам и движкам",
       run: () => {
         setHashFarm();
@@ -5303,6 +5318,7 @@ function scheduleListPoll(
   const ms = pollOpts?.fast ? POLL_MS.active : pickListPollMs(items);
   if (ms <= 0 || parseRoute().view !== "list") return;
   listPollTimer = setTimeout(() => {
+    refreshListFacets?.();
     void loadTorrents(listEl, countEl, metaEl, {
       silent: true,
       scheduleNext: (next, nextOpts) => scheduleListPoll(listEl, countEl, metaEl, next, nextOpts),
@@ -5315,7 +5331,34 @@ function scheduleListPoll(
 // Последний известный общий объём раздач (из facets) и последние агрегаты сессии —
 // чтобы дорисовывать «Объём раздач» в живую панель, которая обновляется из потока.
 let lastTotalContentSize: number | null = null;
+let lastCatalogTotal: number | null = null;
+let lastCatalogEngines: Record<string, number> | null = null;
 let lastSessionStats: SessionStats | null = null;
+// Список подписывается сюда, чтобы счётчики фильтров шли вместе с верхней панелью.
+let refreshListFacets: ((force?: boolean) => void) | null = null;
+
+type CatalogFacets = {
+  total?: number;
+  total_size?: number | null;
+  engines?: Record<string, number>;
+  engine_sizes?: Record<string, number>;
+};
+
+function rememberCatalog(facets: CatalogFacets | null): void {
+  if (!facets) return;
+  if (typeof facets.total === "number") lastCatalogTotal = facets.total;
+  if (facets.engines) lastCatalogEngines = facets.engines;
+  if (facets.engine_sizes) lastEngineSizes = facets.engine_sizes;
+  if (facets.total_size != null) {
+    lastTotalContentSize = facets.total_size;
+    if (lastSessionStats) lastSessionStats.total_size = facets.total_size;
+  }
+}
+
+function catalogTorrentCount(id: string, online: boolean, live: number | undefined): number {
+  if (lastCatalogEngines) return lastCatalogEngines[id] ?? 0;
+  return online ? (live ?? 0) : 0;
+}
 
 function applySessionStats(sessionBarHost: HTMLElement, stats?: SessionStats | null): void {
   if (parseRoute().view !== "list") return;
@@ -5326,6 +5369,7 @@ function applySessionStats(sessionBarHost: HTMLElement, stats?: SessionStats | n
   lastSessionStats = stats;
   sessionBarHost.replaceChildren();
   fillAllTrays();
+  refreshListFacets?.();
 }
 
 function startListSse(sessionBarHost: HTMLElement, onFallback: () => void): void {
@@ -6202,7 +6246,7 @@ function mountListShell(root: HTMLElement): void {
   };
 
   const refresh = (opts?: { afterAdd?: boolean }) => {
-    void refreshFacets();
+    void refreshFacets(true);
     void loadTorrents(listHost, countEl, metaEl, {
       silent: lastListItems.length > 0 && !opts?.afterAdd,
       fastPoll: opts?.afterAdd,
@@ -6870,6 +6914,7 @@ function mountListShell(root: HTMLElement): void {
   };
   let facets: ListFacets | null = null;
   let lastFacetsAt = 0;
+  let facetsBusy = false;
   const fmtCount = (n: number) => ` (${n.toLocaleString("ru-RU")} шт)`;
   const fmtCountSize = (n: number, bytes: number) =>
     ` (${n.toLocaleString("ru-RU")} шт · ${fmtBytes(bytes)})`;
@@ -6883,6 +6928,7 @@ function mountListShell(root: HTMLElement): void {
       const c = o.value === "" ? facets?.total : (counts[o.value] ?? 0);
       o.textContent = c == null ? base : base + fmtCount(c);
     }
+    repaintSelectLabel(sel);
     sel.dispatchEvent(new Event("cselect-sync"));
   }
   // К счётчику добавляем суммарный объём раздач: «b5 (1 659 шт · 12.3 TB)».
@@ -6902,6 +6948,7 @@ function mountListShell(root: HTMLElement): void {
         o.textContent = c == null ? base : base + fmtCountSize(c, sizes[o.value] ?? 0);
       }
     }
+    repaintSelectLabel(sel);
     sel.dispatchEvent(new Event("cselect-sync"));
   }
   function applyFacetCounts(): void {
@@ -6917,29 +6964,28 @@ function mountListShell(root: HTMLElement): void {
   }
   async function refreshFacets(force = false): Promise<void> {
     const now = Date.now();
-    // Пока меню фильтра открыто, счётчики идут вместе с опросом списка.
-    // Закрытое меню не чаще раза в 5 с.
+    // Открытое меню обновляется чаще, закрытое — вместе с верхней панелью, но не чаще 5 с.
     const menuOpen = [statusSelect, labelSelect, stateSelect, engineSelect].some((s) =>
       s.classList.contains("cselect-active"),
     );
-    if (!force && now - lastFacetsAt < (menuOpen ? 0 : 5000)) return;
+    if (facetsBusy) return;
+    if (!force && now - lastFacetsAt < (menuOpen ? 2000 : 5000)) return;
     lastFacetsAt = now;
+    facetsBusy = true;
     try {
-      facets = await fetchJson<ListFacets>("/torrents/facets");
+      facets = await fetchJson<ListFacets>("/torrents/facets", { cache: "no-store" });
+      rememberCatalog(facets);
       reloadEngines();
-      // Прокидываем общий объём в живую панель сверху (перерисовываем сразу, не ждём поток).
-      lastTotalContentSize = facets.total_size;
-      lastEngineSizes = facets.engine_sizes ?? null;
-      if (lastSessionStats) {
-        lastSessionStats.total_size = facets.total_size;
-        applySessionStats(sessionBarHost, lastSessionStats);
-      } else {
-        fillAllTrays();
-      }
+      // Число раздач и объём сверху берём из того же каталога, что и фильтры.
+      if (lastSessionStats) applySessionStats(sessionBarHost, lastSessionStats);
+      else fillAllTrays();
     } catch {
       /* счётчики необязательны — молча игнорируем */
+    } finally {
+      facetsBusy = false;
     }
   }
+  refreshListFacets = (force = false) => void refreshFacets(force);
 
   // Единый сегментированный переключатель вида:
   // Плитка / Карточки / Мини таблица / Таблица.
@@ -10883,17 +10929,18 @@ function farmEngineValue(
   const ses = lastSessionStats?.by_engine?.[id];
   const online = Boolean(ses && !ses.error);
   const stale = online && Boolean(ses?.stale);
+  const count = catalogTorrentCount(id, online, ses?.torrents);
   if (side === "size") {
     return {
       n: lastEngineSizes?.[id] ?? 0,
-      extra: online ? ses?.torrents ?? 0 : 0,
+      extra: count,
       extraLabel: "раздач",
       online,
       stale,
     };
   }
   return {
-    n: online ? ses?.torrents ?? 0 : 0,
+    n: count,
     extra: lastEngineSizes?.[id] ?? 0,
     extraLabel: "объём",
     online,
@@ -10992,7 +11039,7 @@ function farmCard(
 function renderFarmCards(data: NetworkLinksOut, side: FarmSide): HTMLElement[] {
   const total = side === "size"
     ? lastTotalContentSize ?? Object.values(lastEngineSizes ?? {}).reduce((a, b) => a + b, 0)
-    : lastSessionStats?.torrents ?? 0;
+    : lastCatalogTotal ?? lastSessionStats?.torrents ?? 0;
   const cards = data.links.map((l) =>
     farmCard(l.name, [l.router, l.wan_ip].filter(Boolean).join(" · "), l.engines, side, total, l.id),
   );
@@ -11051,16 +11098,10 @@ function mountFarmShell(root: HTMLElement): void {
     try {
       const [data, facets] = await Promise.all([
         loadNetworkLinks(),
-        fetchJson<{ total_size?: number; engine_sizes?: Record<string, number> }>("/torrents/facets").catch(() => null),
+        fetchJson<CatalogFacets>("/torrents/facets", { cache: "no-store" }).catch(() => null),
       ]);
       links = data;
-      if (facets) {
-        lastEngineSizes = facets.engine_sizes ?? lastEngineSizes;
-        if (facets.total_size != null) {
-          lastTotalContentSize = facets.total_size;
-          if (lastSessionStats) lastSessionStats.total_size = facets.total_size;
-        }
-      }
+      if (facets) rememberCatalog(facets);
     } catch (e) {
       host.replaceChildren(
         el("p", { className: "wan-note" }, [e instanceof Error ? e.message : String(e)]),
@@ -11072,8 +11113,12 @@ function mountFarmShell(root: HTMLElement): void {
 
     const tick = async () => {
       if (parseRoute().view !== "farm") return;
-      const s = await loadSessionStats();
+      const [s, facets] = await Promise.all([
+        loadSessionStats(),
+        fetchJson<CatalogFacets>("/torrents/facets", { cache: "no-store" }).catch(() => null),
+      ]);
       if (s) lastSessionStats = s;
+      if (facets) rememberCatalog(facets);
       statsSettled = true;
       paint();
       if (parseRoute().view === "farm" && !document.hidden) {
@@ -11519,12 +11564,10 @@ function mountSettingsShell(root: HTMLElement): void {
   // иначе на вкладке «Информация» карточки «Объём раздач» не будет.
   void Promise.all([
     loadSessionStats(),
-    fetchJson<{ total_size?: number | null }>("/torrents/facets").catch(() => null),
+    fetchJson<CatalogFacets>("/torrents/facets", { cache: "no-store" }).catch(() => null),
   ]).then(([s, facets]) => {
-    if (s && facets?.total_size != null) {
-      s.total_size = facets.total_size;
-      lastTotalContentSize = facets.total_size;
-    }
+    if (facets) rememberCatalog(facets);
+    if (s && facets?.total_size != null) s.total_size = facets.total_size;
     statsHost.replaceChildren(mountSessionBar(s));
   });
 }
@@ -11539,6 +11582,7 @@ function ensurePageMesh(): void {
 }
 
 function render(): void {
+  refreshListFacets = null;
   releaseSearchOverlay();
   clearViewPolls();
   const root = document.getElementById("app");
