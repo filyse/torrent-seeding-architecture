@@ -6717,14 +6717,15 @@ function mountListShell(root: HTMLElement): void {
 
   const statusSelect = el("select", { className: "list-filter__select" }) as HTMLSelectElement;
   const statusOpts: { val: string; label: string; group?: boolean; nest?: boolean }[] = [
-    { val: "", label: "Все статусы" },
-    { val: "seeding", label: "Раздача" },
-    { val: "downloading", label: "Загрузка" },
+    { val: "__library", label: "Основные", group: true },
+    { val: "", label: "Все статусы", nest: true },
+    { val: "seeding", label: "Раздача", nest: true },
+    { val: "downloading", label: "Загрузка", nest: true },
+    { val: "paused", label: "Пауза", nest: true },
     { val: "__work", label: "В работе", group: true },
     { val: "checking", label: "Проверка", nest: true },
     { val: "migrating", label: "Перенос", nest: true },
     { val: "disk_queued", label: "Очередь", nest: true },
-    { val: "paused", label: "Пауза" },
   ];
   for (const item of statusOpts) {
     const o = el("option", { value: item.val }, [item.label]) as HTMLOptionElement;

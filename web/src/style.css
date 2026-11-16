@@ -499,6 +499,11 @@ body.layout-wide #app {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
+  cursor: default;
+}
+
+.cselect-option.is-group:first-child {
+  margin-top: 0;
 }
 
 .cselect-option.is-nested {
